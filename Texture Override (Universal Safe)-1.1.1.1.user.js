@@ -3,7 +3,7 @@
 // @match        https://terradrive.eu/*
 // @grant        none
 // @description  nothing
-// @version      1.1.2.2
+// @version      1.1.2.3
 // @downloadURL  https://toni857.github.io/terradrive/Texture%20Override%20(Universal%20Safe)-1.1.1.1.user.js
 // @updateURL    https://toni857.github.io/terradrive/Texture%20Override%20(Universal%20Safe)-1.1.1.1.user.js
 // ==/UserScript==
