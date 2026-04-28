@@ -2,11 +2,75 @@
 // @name         Texture Override (Universal Safe)
 // @match        https://terradrive.eu/*
 // @grant        none
+// @run-at       document-start
 // @description  nothing
-// @version      1.4.0
+// @version      2.0.0
 // @downloadURL  https://toni857.github.io/terradrive/Texture%20Override%20(Universal%20Safe)-1.1.1.1.user.js
 // @updateURL    https://toni857.github.io/terradrive/Texture%20Override%20(Universal%20Safe)-1.1.1.1.user.js
 // ==/UserScript==
+
+(function tmCollisionEarlyLoadGuard() {
+    "use strict";
+
+    const RELOAD_KEY = "__tmCollisionHookLateReloadAt";
+    const RELOAD_PARAM = "__tm_hook_reload";
+    const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
+
+    function isTargetBundleScript(script) {
+        const source = script && (script.src || script.getAttribute && script.getAttribute("src"));
+        if (!source)
+            return !1;
+        try {
+            const url = new URL(source, location.href);
+            return BUNDLE_FILE_RE.test(url.pathname) || BUNDLE_FILE_RE.test(url.href);
+        } catch (urlError) {
+            return BUNDLE_FILE_RE.test(String(source));
+        }
+    }
+
+    function clearRuntimeCaches() {
+        try {
+            if (globalThis.caches && "function" == typeof caches.keys)
+                caches.keys().then(keys => Promise.all(keys.map(key => caches.delete(key)))).catch((cacheError => console.warn("[TM Collision Hook] Cache-Clear fehlgeschlagen:", cacheError)));
+        } catch (cacheError) {}
+        try {
+            if (navigator.serviceWorker && "function" == typeof navigator.serviceWorker.getRegistrations)
+                navigator.serviceWorker.getRegistrations().then(registrations => Promise.all(registrations.map(registration => registration.unregister()))).catch((swError => console.warn("[TM Collision Hook] ServiceWorker-Clear fehlgeschlagen:", swError)));
+        } catch (swError) {}
+    }
+
+    function removeReloadParamFromAddressBar() {
+        try {
+            const url = new URL(location.href);
+            if (!url.searchParams.has(RELOAD_PARAM))
+                return;
+            url.searchParams.delete(RELOAD_PARAM);
+            history.replaceState(history.state, document.title, url.href);
+        } catch (urlError) {}
+    }
+
+    function reloadOnceIfLate() {
+        if (window.top !== window.self)
+            return;
+        const targetBundleAlreadyInDom = Array.from(document.scripts || []).some(isTargetBundleScript);
+        const lateStart = "loading" !== document.readyState || targetBundleAlreadyInDom;
+        if (!lateStart || globalThis.__tmCollisionHookRequire)
+            return;
+        const previousReloadAt = Number(sessionStorage.getItem(RELOAD_KEY)) || 0;
+        if (Date.now() - previousReloadAt < 15000)
+            return;
+        sessionStorage.setItem(RELOAD_KEY, String(Date.now()));
+        clearRuntimeCaches();
+        const url = new URL(location.href);
+        url.searchParams.set(RELOAD_PARAM, String(Date.now()));
+        console.warn("[TM Collision Hook] Userscript war zu spaet. Fuehre einmaligen Fruehstart-Reload aus.");
+        location.replace(url.href);
+    }
+
+    clearRuntimeCaches();
+    removeReloadParamFromAddressBar();
+    reloadOnceIfLate();
+})();
 
 (function() {
     "use strict";
@@ -88,11 +152,13 @@
             TREE_LIBRARY: 419,
             BIOM: 495,
             MISSION_MANAGER: 5769,
-            BUFFER_GEOMETRY_UTILS: 4754
+            GAME_MENU: 9479,
+            BUFFER_GEOMETRY_UTILS: 4754,
+            GEO: 1521
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "1.4.0",
+            version: "2.0.0",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -104,13 +170,13 @@
             THREE: null
         });
         const TOWN_SIGN_CONFIG = {
-            placeClusterDistance: 1250,
-            destinationClusterDistance: 900,
-            buildingSearchRadius: 420,
+            placeClusterDistance: 1150,
+            destinationClusterDistance: 800,
+            buildingSearchRadius: 520,
             minBuildingCount: 4,
-            maxPlaceRadius: 650,
-            minPlaceRadius: 150,
-            edgeEntryOffset: 6,
+            maxPlaceRadius: 900,
+            minPlaceRadius: 220,
+            edgeEntryOffset: 165,
             signSideOffset: 1.5,
             signDedupDistance: 9,
             signNearbyDedupDistance: 18
@@ -128,12 +194,36 @@
             debugSigns: [],
             signCount: 0,
             poleGeometry: null,
-            poleMaterial: null
+            poleMaterial: null,
+            placeCache: new Map,
+            placeRequestQueue: new Set,
+            placeFetchBackoffUntil: 0,
+            placeFetchWarnedAt: 0,
+            placeFetchFailures: 0
         });
+        townSignsState.placeCache = townSignsState.placeCache instanceof Map ? townSignsState.placeCache : new Map;
+        townSignsState.placeRequestQueue = townSignsState.placeRequestQueue instanceof Set ? townSignsState.placeRequestQueue : new Set;
+        townSignsState.placeFetchBackoffUntil = Number(townSignsState.placeFetchBackoffUntil) || 0;
+        townSignsState.placeFetchWarnedAt = Number(townSignsState.placeFetchWarnedAt) || 0;
+        townSignsState.placeFetchFailures = Number(townSignsState.placeFetchFailures) || 0;
         const BUILDING_CONFIG_URL = "https://toni857.github.io/terradrive/buildings.js";
+        const CUSTOM_BUILDING_TEXTURE_BASE = "https://toni857.github.io/my-textures/";
+        const CUSTOM_BUILDING_FALLBACK_TEXTURE_URL = CUSTOM_BUILDING_TEXTURE_BASE + "type1me.png";
         const CUSTOM_TASK_OPTIONS = [{
             value: "tmTownHop",
             label: "Town Hop"
+        }, {
+            value: "tmFindNearbyEasy",
+            label: "Find Place Easy"
+        }, {
+            value: "tmFindNearbyMedium",
+            label: "Find Place Medium"
+        }, {
+            value: "tmFindNearbyHard",
+            label: "Find Place Hard"
+        }, {
+            value: "tmPassengerFlight",
+            label: "Passenger Flight"
         }, {
             value: "tmResidentialDash",
             label: "Residential Dash"
@@ -147,12 +237,61 @@
             value: "tmRingRoadRun",
             label: "Ring Road Run"
         }];
+        const FEATURE_MENU_ITEMS = [{
+            feature: "survival",
+            label: "Survival + Shops"
+        }, {
+            feature: "police",
+            label: "Police"
+        }, {
+            feature: "vehicleDamage",
+            label: "Vehicle damage"
+        }, {
+            feature: "hardStart",
+            label: "Hard start"
+        }, {
+            feature: "overlays",
+            label: "Far-object culling"
+        }, {
+            feature: "aircraft",
+            label: "Aircraft + airports"
+        }, {
+            feature: "birds",
+            label: "Birds"
+        }, {
+            feature: "bees",
+            label: "Bees"
+        }, {
+            feature: "shops",
+            label: "Shops + Navi POIs"
+        }];
+        const NAV_PRESETS = [{
+            type: "fuel",
+            label: "Tankstelle"
+        }, {
+            type: "airport",
+            label: "Flughafen"
+        }, {
+            type: "supermarket",
+            label: "Supermarkt"
+        }, {
+            type: "autoshop",
+            label: "Autohaus"
+        }, {
+            type: "apiary",
+            label: "Imker"
+        }, {
+            type: "town",
+            label: "Ort"
+        }];
         const runtimeState = globalState.runtime || (globalState.runtime = {
             game: null,
             terrainModule: null,
             treeModule: null,
             biomModule: null,
             missionModule: null,
+            gameMenuModule: null,
+            geoModule: null,
             bufferGeometryUtils: null,
             buildingConfigPromise: null,
             buildingConfig: null,
@@ -162,10 +301,128 @@
             customMissionRegistry: new Map,
             missionPanelsPatched: new WeakSet,
             visualRefreshTimers: new WeakMap,
+            menuPatched: !1,
+            controlsPatched: !1,
+            lastRuntimeUpdateAt: 0,
+            overlayGroup: null,
+            overlayAttachedTo: null,
+            overlayItems: [],
+            overlayDispose: [],
+            overlayTick: 0,
+            poiCache: new Map,
+            poiRequestQueue: new Set,
+            airports: [],
+            activeAircraft: null,
+            aircraftControlState: null,
+            aircraftModels: [],
+            projectileModels: [],
+            policeCars: [],
+            policeState: null,
+            survivalState: null,
+            damagePanel: null,
+            gameMenu: null,
+            autopilot: null,
+            navPanel: null,
+            navVisible: !1,
+            navSearching: !1,
+            startMenuFeatureWatcherInstalled: !1,
+            playerMoney: 250,
+            input: {
+                slowLeft: !1,
+                slowRight: !1,
+                fastLeft: !1,
+                fastRight: !1,
+                fullBrake: !1,
+                fire: !1
+            },
             chunkCustomOverlayGroups: new WeakMap,
             buildingDebugEntries: [],
-            customBuildingEntriesByChunk: new WeakMap
+            customBuildingEntriesByChunk: new WeakMap,
+            customBuildingTextureCache: new Map
         });
+        const vehicleTuningState = globalThis.__tmVehicleTuningState || (globalThis.__tmVehicleTuningState = {
+            installed: !1,
+            visible: !1,
+            active: !1,
+            panel: null,
+            maxSpeedKmh: 999,
+            accelerationPerSecond: 50
+        });
+        const featureState = globalThis.__tmFeatureState || (globalThis.__tmFeatureState = {
+            survival: !1,
+            police: !1,
+            vehicleDamage: !1,
+            hardStart: !1,
+            overlays: !0,
+            birds: !0,
+            bees: !0,
+            aircraft: !0,
+            shops: !0
+        });
+        Object.assign(runtimeState, {
+            overlayItems: Array.isArray(runtimeState.overlayItems) ? runtimeState.overlayItems : [],
+            overlayDispose: Array.isArray(runtimeState.overlayDispose) ? runtimeState.overlayDispose : [],
+            poiCache: runtimeState.poiCache instanceof Map ? runtimeState.poiCache : new Map,
+            poiRequestQueue: runtimeState.poiRequestQueue instanceof Set ? runtimeState.poiRequestQueue : new Set,
+            airports: Array.isArray(runtimeState.airports) ? runtimeState.airports : [],
+            aircraftControlState: runtimeState.aircraftControlState || null,
+            aircraftModels: Array.isArray(runtimeState.aircraftModels) ? runtimeState.aircraftModels : [],
+            projectileModels: Array.isArray(runtimeState.projectileModels) ? runtimeState.projectileModels : [],
+            policeCars: Array.isArray(runtimeState.policeCars) ? runtimeState.policeCars : [],
+            damagePanel: runtimeState.damagePanel || null,
+            navPanel: runtimeState.navPanel || null,
+            navVisible: !!runtimeState.navVisible,
+            navSearching: !!runtimeState.navSearching,
+            startMenuFeatureWatcherInstalled: !!runtimeState.startMenuFeatureWatcherInstalled,
+            customBuildingTextureCache: runtimeState.customBuildingTextureCache instanceof Map ? runtimeState.customBuildingTextureCache : new Map,
+            autopilot: Object.assign({
+                enabled: !1,
+                pendingMapSelection: !1,
+                targetPosition: null,
+                targetRoadPosition: null,
+                targetSignature: "",
+                startSignature: "",
+                edge: null,
+                segmentIndex: 0,
+                segmentT: 0,
+                direction: 1,
+                snapped: !1,
+                linking: !1,
+                lastNoticeAt: 0,
+                lastLinkNoticeAt: 0
+            }, runtimeState.autopilot || {}),
+            playerMoney: Number.isFinite(Number(runtimeState.playerMoney)) ? Number(runtimeState.playerMoney) : 250,
+            input: runtimeState.input || {
+                slowLeft: !1,
+                slowRight: !1,
+                fastLeft: !1,
+                fastRight: !1,
+                fullBrake: !1,
+                fire: !1
+            }
+        });
+        runtimeState.input.slowLeft = !!runtimeState.input.slowLeft;
+        runtimeState.input.slowRight = !!runtimeState.input.slowRight;
+        runtimeState.input.fastLeft = !!runtimeState.input.fastLeft;
+        runtimeState.input.fastRight = !!runtimeState.input.fastRight;
+        runtimeState.input.fullBrake = !!runtimeState.input.fullBrake;
+        runtimeState.input.fire = !!runtimeState.input.fire;
+        runtimeState.autopilot.edge = null;
+        runtimeState.autopilot.targetPosition = runtimeState.autopilot.targetPosition && runtimeState.autopilot.targetPosition.clone ? runtimeState.autopilot.targetPosition.clone() : null;
+        runtimeState.autopilot.targetRoadPosition = runtimeState.autopilot.targetRoadPosition && runtimeState.autopilot.targetRoadPosition.clone ? runtimeState.autopilot.targetRoadPosition.clone() : null;
+        for (const [key, value] of Object.entries({
+            survival: !1,
+            police: !1,
+            vehicleDamage: !1,
+            hardStart: !1,
+            overlays: !0,
+            birds: !0,
+            bees: !0,
+            aircraft: !0,
+            shops: !0
+        }))
+            "boolean" == typeof featureState[key] || (featureState[key] = value);
+        vehicleTuningState.active = !!vehicleTuningState.active;
         const VISUAL_CONFIG = {
             roadColor: 0x5e5750,
             roadEdgeColor: 0x6d665f,
@@ -1196,9 +1453,11 @@
                 });
 
                 if (slowerIsPlayer) {
+                    applyVehicleDamage(32 + diff * 2.2, "high-speed collision");
                     stopPlayer(player);
                     slowAi(resolver, aiId, aiCar, IMPACT_TUNING.launch.slowerCarHitFasterSlowFactor, 35);
                 } else {
+                    applyVehicleDamage(10 + diff * .7, "hard hit");
                     stopAi(resolver, aiId, aiCar, 90, 5);
                     setPlayerSpeed(player, Math.max(1, playerSpeed * IMPACT_TUNING.launch.fasterCarSlowFactor));
                     if (typeof player.resetAcc === "function")
@@ -1217,6 +1476,7 @@
             }
 
             if ("rear_to_rear" === info.type) {
+                applyVehicleDamage(8 + diff * 1.7, "rear collision");
                 stopPlayer(player);
                 stopAi(resolver, aiId, aiCar, IMPACT_TUNING.lowDiff.rearRearStopFreeze, 5);
                 log("Heck-gegen-Heck erkannt: beide Autos werden gestoppt.");
@@ -1224,6 +1484,7 @@
             }
 
             if ("front_to_front" === info.type) {
+                applyVehicleDamage(18 + diff * 2.8, "front collision");
                 stopPlayer(player);
                 stopAi(resolver, aiId, aiCar, IMPACT_TUNING.lowDiff.bothStopFreeze, 5);
                 log("Front-gegen-Front erkannt: beide Fahrzeuge werden gestoppt.");
@@ -1231,6 +1492,7 @@
             }
 
             if ("player_rear_ends_ai" === info.type) {
+                applyVehicleDamage(7 + diff * 1.4, "rear-end impact");
                 const boost = clamp(IMPACT_TUNING.lowDiff.rearEndBoostBase + IMPACT_TUNING.lowDiff.rearEndBoostPerDiff * diff, IMPACT_TUNING.lowDiff.rearEndBoostBase, IMPACT_TUNING.lowDiff.rearEndBoostMax);
                 const newAiSpeed = Math.min(playerSpeed, aiSpeed + boost);
                 const pushed = startRearPushImpact(aiCar, {
@@ -1254,6 +1516,7 @@
             }
 
             if ("ai_rear_ends_player" === info.type) {
+                applyVehicleDamage(12 + diff * 2.1, "rear-ended");
                 const boost = clamp(IMPACT_TUNING.lowDiff.rearEndBoostBase + IMPACT_TUNING.lowDiff.rearEndBoostPerDiff * diff, IMPACT_TUNING.lowDiff.rearEndBoostBase, IMPACT_TUNING.lowDiff.rearEndBoostMax);
                 setPlayerSpeed(player, Math.min(aiSpeed, playerSpeed + boost));
                 slowAi(resolver, aiId, aiCar, IMPACT_TUNING.lowDiff.rearVehicleSlowFactor, 12);
@@ -1265,6 +1528,7 @@
 
             if ("player_hits_ai_side" === info.type || "ai_hits_player_side" === info.type) {
                 const struckIsPlayer = "player" === info.struck;
+                applyVehicleDamage(struckIsPlayer ? 14 + diff * 2.5 : 5 + diff * .9, struckIsPlayer ? "side impact" : "side swipe");
                 const struckVehicle = struckIsPlayer ? player : aiCar;
                 const struckLabel = struckIsPlayer ? "Spielerauto" : `AI#${aiId}`;
                 const started = startSidePushImpact(struckVehicle, {
@@ -1315,7 +1579,7 @@
             const text = normalizeTownLabel(value);
             if (!text)
                 return "";
-            const separators = [",", ";", " - ", " / ", " (", " ["];
+            const separators = [",", ";", "|", " - ", " / ", " (", " ["];
             let cutIndex = -1;
             for (const separator of separators) {
                 const index = text.indexOf(separator);
@@ -1334,7 +1598,7 @@
         }
 
         function splitTownDestinationLabels(value) {
-            return normalizeTownLabel(value).split(";").map(normalizeTownLabel).filter(Boolean);
+            return normalizeTownLabel(value).split(/[;|]/).map(normalizeTownLabel).filter(Boolean);
         }
 
         function toSafeArray(value) {
@@ -1445,10 +1709,81 @@
                 }
                 target.points.push(candidate.position.clone());
                 target.sources.push(candidate);
-                "train" === candidate.source ? target.strongCount += 1 : target.weakCount += 1;
+                "bus" === candidate.source ? target.weakCount += 1 : target.strongCount += 1;
                 target.center = averageTownVector3(target.points);
             }
             return clusters;
+        }
+
+        function isOsmPlaceFetchEnabled() {
+            return !!globalThis.__tmEnableOsmPlaceFetch;
+        }
+
+        function queueTownPlaceFetch(chunk) {
+            if (!chunk || !chunk.bbox || !runtimeState.geoModule)
+                return;
+            if (!isOsmPlaceFetchEnabled())
+                return;
+            const now = Date.now();
+            if (townSignsState.placeFetchBackoffUntil && now < townSignsState.placeFetchBackoffUntil)
+                return;
+            if (townSignsState.placeRequestQueue.size >= 1)
+                return;
+            const key = chunkPoiKey(chunk);
+            if (townSignsState.placeCache.has(key) || townSignsState.placeRequestQueue.has(key))
+                return;
+            townSignsState.placeRequestQueue.add(key);
+            const south = Math.min(Number(chunk.bbox[0]) || 0, Number(chunk.bbox[2]) || 0);
+            const north = Math.max(Number(chunk.bbox[0]) || 0, Number(chunk.bbox[2]) || 0);
+            const west = Math.min(Number(chunk.bbox[1]) || 0, Number(chunk.bbox[3]) || 0);
+            const east = Math.max(Number(chunk.bbox[1]) || 0, Number(chunk.bbox[3]) || 0);
+            const placeFilter = '["place"~"^(city|town|village|hamlet|suburb|quarter|neighbourhood|locality)$"]';
+            const query = `[out:json][timeout:8];(node${placeFilter}(${south},${west},${north},${east});way${placeFilter}(${south},${west},${north},${east});relation${placeFilter}(${south},${west},${north},${east}););out center tags;`;
+            fetch("https://overpass-api.de/api/interpreter", {
+                method: "POST",
+                body: query
+            }).then(response => {
+                if (!response.ok)
+                    throw new Error(`Overpass HTTP ${response.status}`);
+                return response.json();
+            }).then(data => {
+                townSignsState.placeFetchFailures = 0;
+                townSignsState.placeFetchBackoffUntil = 0;
+                const places = [];
+                for (const element of toSafeArray(data && data.elements)) {
+                    const tags = element.tags || {};
+                    const rawName = normalizeTownLabel(tags.name || tags["name:de"] || tags["name:en"]);
+                    if (!isLikelyTownLabel(rawName))
+                        continue;
+                    const lat = Number(element.lat || element.center && element.center.lat);
+                    const lon = Number(element.lon || element.center && element.center.lon);
+                    if (!Number.isFinite(lat) || !Number.isFinite(lon))
+                        continue;
+                    let position = null;
+                    try {
+                        position = runtimeState.geoModule.convertProjLocalCoords([lat, lon]);
+                    } catch (geoError) {}
+                    if (!position)
+                        continue;
+                    places.push({
+                        rawName,
+                        name: extractTownBaseLabel(rawName, "place"),
+                        source: "place",
+                        position
+                    });
+                }
+                townSignsState.placeCache.set(key, places);
+                places.length && queueTownRebuild("osm_place_fetch");
+            }).catch((placeError => {
+                townSignsState.placeCache.set(key, []);
+                const failedAt = Date.now();
+                townSignsState.placeFetchFailures = Math.min(8, (Number(townSignsState.placeFetchFailures) || 0) + 1);
+                townSignsState.placeFetchBackoffUntil = failedAt + Math.min(10 * 60 * 1000, 30 * 1000 * Math.pow(2, townSignsState.placeFetchFailures - 1));
+                if (failedAt - (Number(townSignsState.placeFetchWarnedAt) || 0) > 60 * 1000) {
+                    townSignsState.placeFetchWarnedAt = failedAt;
+                    warn("OSM-Ortsnamen momentan nicht erreichbar; externe Overpass-Abfragen pausieren kurz.", placeError);
+                }
+            })).finally((() => townSignsState.placeRequestQueue.delete(key)));
         }
 
         function collectTownWorldData() {
@@ -1459,11 +1794,21 @@
             const stopCandidates = [];
             const busCandidates = [];
             const destinationCandidates = [];
+            const placeCandidates = [];
             const roads = [];
 
             for (const chunk of chunks) {
                 if (!chunk)
                     continue;
+                queueTownPlaceFetch(chunk);
+                const cachedPlaces = townSignsState.placeCache.get(chunkPoiKey(chunk));
+                for (const place of toSafeArray(cachedPlaces))
+                    place && place.position && placeCandidates.push({
+                        rawName: place.rawName || place.name,
+                        source: "place",
+                        position: cloneVector3(place.position),
+                        name: place.name || extractTownBaseLabel(place.rawName, "place")
+                    });
 
                 for (const building of toSafeArray(chunk.buildings))
                     building && building.houseCenter && buildings.push(building);
@@ -1525,6 +1870,21 @@
                 }
             }
 
+            const destinationNameByArea = [];
+            for (const candidate of destinationCandidates) {
+                let existing = destinationNameByArea.find(entry => entry.name === candidate.name && townDistance2D(entry.position, candidate.position) < 450);
+                if (!existing) {
+                    existing = {
+                        name: candidate.name,
+                        position: candidate.position.clone(),
+                        count: 0
+                    };
+                    destinationNameByArea.push(existing);
+                }
+                existing.count += 1;
+                existing.position.lerp(candidate.position, 1 / existing.count);
+            }
+
             const stopBaseCounts = new Map;
             for (const candidate of stopCandidates) {
                 const base = extractTownBaseLabel(candidate.rawName, candidate.source);
@@ -1547,10 +1907,28 @@
                 name: chooseTownStopDisplayName(candidate, stopBaseCounts, destinationBaseCounts),
                 rawName: candidate.rawName
             })).filter(candidate => isLikelyTownLabel(candidate.name));
+            for (const place of placeCandidates)
+                if (place.position && isLikelyTownLabel(place.name))
+                    namedStops.push({
+                        source: "place",
+                        position: place.position,
+                        name: place.name,
+                        rawName: place.rawName || place.name
+                    });
+            for (const destination of destinationNameByArea) {
+                if (!isLikelyTownLabel(destination.name))
+                    continue;
+                namedStops.push({
+                    source: "destination",
+                    position: destination.position.clone(),
+                    name: destination.name,
+                    rawName: destination.name
+                });
+            }
             for (const candidate of busCandidates) {
                 const base = extractTownBaseLabel(candidate.rawName, "bus");
                 const hasDestinationSupport = (destinationBaseCounts.get(base) || 0) > 0;
-                const hasRepeatedTownSupport = (busBaseCounts.get(base) || 0) >= 3;
+                const hasRepeatedTownSupport = (busBaseCounts.get(base) || 0) >= 5;
                 if (!base || !isLikelyTownLabel(base) || !hasDestinationSupport && !hasRepeatedTownSupport)
                     continue;
                 namedStops.push({
@@ -1565,6 +1943,7 @@
                 buildings,
                 namedStops,
                 destinationCandidates,
+                placeCandidates,
                 roads
             };
         }
@@ -1670,11 +2049,13 @@
                 if (places.some(place => place.name === cluster.name && townDistance2D(place.center, cluster.center) <= Math.max(place.radius, 260)))
                     continue;
                 const buildingStats = computeTownBuildingStats(cluster.center, worldData.buildings);
-                if (cluster.points.length < 2 || buildingStats.count < 8)
+                if (cluster.points.length < 1 || buildingStats.count < 2 && cluster.points.length < 2)
                     continue;
                 const pointSpread = cluster.points.reduce((maxDistance, point) => Math.max(maxDistance, townDistance2D(point, cluster.center)), 0);
-                const center = cluster.center.clone().lerp(buildingStats.centroid, .4);
-                const radius = clamp(Math.max(165, pointSpread + 140, buildingStats.maxDistance + 90), TOWN_SIGN_CONFIG.minPlaceRadius, TOWN_SIGN_CONFIG.maxPlaceRadius);
+                const center = cluster.center.clone();
+                if (buildingStats.count > 0)
+                    center.lerp(buildingStats.centroid, .4);
+                const radius = clamp(Math.max(185, pointSpread + 160, buildingStats.maxDistance + 110, 90 + 35 * cluster.points.length), TOWN_SIGN_CONFIG.minPlaceRadius, TOWN_SIGN_CONFIG.maxPlaceRadius);
                 places.push({
                     name: cluster.name,
                     center,
@@ -1730,6 +2111,82 @@
             signs.push(candidate);
         }
 
+        function getTownSignCountForPlace(signs, placeName) {
+            return signs.reduce(((count, sign) => count + (sign.placeName === placeName ? 1 : 0)), 0);
+        }
+
+        function addTownRoadSignAt(signs, place, edge, anchor, direction) {
+            if (!anchor || !direction || direction.lengthSq() < 1e-6)
+                return !1;
+            const travelDirection = direction.clone();
+            travelDirection.y = 0;
+            if (travelDirection.lengthSq() < 1e-6)
+                return !1;
+            travelDirection.normalize();
+            const right = new globalState.THREE.Vector3(-travelDirection.z,0,travelDirection.x).normalize();
+            const position = anchor.clone().addScaledVector(right, getTownRoadLateralOffset(edge)).addScaledVector(travelDirection, -TOWN_SIGN_CONFIG.edgeEntryOffset);
+            const beforeCount = signs.length;
+            pushUniqueTownSign(signs, {
+                placeName: place.name,
+                position,
+                frontVec: travelDirection.clone().negate(),
+                place
+            });
+            return signs.length > beforeCount;
+        }
+
+        function collectClosestRoadApproaches(place, roads) {
+            const approaches = [];
+            const maxDistance = Math.max(place.radius + 260, 560);
+            for (const edge of roads) {
+                if (!isRoadEligibleForTownSigns(edge))
+                    continue;
+                const worldPoints = getEdgeWorldPoints(edge);
+                if (worldPoints.length < 2)
+                    continue;
+                for (let index = 0; index < worldPoints.length - 1; index++) {
+                    const start = worldPoints[index];
+                    const end = worldPoints[index + 1];
+                    const direction = end.clone().sub(start);
+                    direction.y = 0;
+                    if (direction.lengthSq() < 1e-6)
+                        continue;
+                    const segment = distancePointToSegment2D(place.center, start, end);
+                    if (segment.distance > maxDistance)
+                        continue;
+                    const anchor = start.clone().lerp(end, segment.progress);
+                    const outwardPenalty = Math.max(0, place.radius - townDistance2D(anchor, place.center)) * .35;
+                    approaches.push({
+                        edge,
+                        anchor,
+                        direction: direction.normalize(),
+                        score: segment.distance + outwardPenalty + Math.abs(segment.progress - .5) * 18
+                    });
+                }
+            }
+            approaches.sort(((a, b) => a.score - b.score));
+            return approaches;
+        }
+
+        function addFallbackTownSigns(signs, places, roads) {
+            for (const place of places) {
+                let count = getTownSignCountForPlace(signs, place.name);
+                if (count >= 2)
+                    continue;
+                const approaches = collectClosestRoadApproaches(place, roads);
+                for (const approach of approaches) {
+                    if (count >= 2)
+                        break;
+                    if (addTownRoadSignAt(signs, place, approach.edge, approach.anchor, approach.direction))
+                        count += 1;
+                    if (count >= 2)
+                        break;
+                    if (!approach.edge.oneway && Number(approach.edge.lanesBackward) !== 0 && addTownRoadSignAt(signs, place, approach.edge, approach.anchor, approach.direction.clone().negate()))
+                        count += 1;
+                }
+            }
+        }
+
         function computeTownSigns(places, roads) {
             const signs = [];
             for (const place of places)
@@ -1769,6 +2226,8 @@
                         }
                     }
                 }
+
+            addFallbackTownSigns(signs, places, roads);
 
             const filtered = [];
             for (const sign of signs) {
@@ -1832,14 +2291,12 @@
                 color: 0x1f4fbf
             });
             const frontMaterial = new THREE.MeshBasicMaterial({
-                map: texture
-            });
-            const backMaterial = new THREE.MeshBasicMaterial({
-                color: 0xf7f9ff
+                map: texture,
+                side: THREE.DoubleSide
             });
             const asset = {
                 geometry,
-                materials: [edgeMaterial, edgeMaterial, edgeMaterial, edgeMaterial, frontMaterial, backMaterial],
+                materials: [edgeMaterial, edgeMaterial, edgeMaterial, edgeMaterial, frontMaterial, frontMaterial],
                 poleOffset: Math.max(.55, plateWidth * .28)
             };
             townSignsState.signAssetCache.set(name, asset);
@@ -1860,7 +2317,7 @@
             ensureTownPoleAssets();
             const group = new THREE.Group;
             group.position.copy(signSpec.position);
-            group.position.y += .02;
+            group.position.y = getTerrainYWorld(group.position, group.position.y || 0) + .02;
             group.rotation.y = Math.atan2(signSpec.frontVec.x, signSpec.frontVec.z);
 
             const plate = new THREE.Mesh(asset.geometry, asset.materials);
@@ -1935,12 +2392,23 @@
                         z: Number(sign.position.z.toFixed(2))
                     }
                 }));
+                townSignsState.debugWorldData = {
+                    chunks: getLoadedChunks().length,
+                    buildings: worldData.buildings.length,
+                    namedStops: worldData.namedStops.length,
+                    destinationCandidates: worldData.destinationCandidates.length,
+                    placeCandidates: worldData.placeCandidates.length,
+                    placeCacheChunks: townSignsState.placeCache.size,
+                    placeRequests: townSignsState.placeRequestQueue.size,
+                    roads: worldData.roads.length
+                };
 
                 globalThis.__tmTownSignsDebug = {
                     game: townSignsState.game,
                     chunkManager: townSignsState.chunkManager,
                     places: townSignsState.debugPlaces,
                     signs: townSignsState.debugSigns,
+                    worldData: townSignsState.debugWorldData,
                     rebuild: rebuildTownSigns,
                     config: TOWN_SIGN_CONFIG
                 };
@@ -2075,6 +2543,23 @@
             return points;
         }
 
+        function chooseFindPlaceTarget(towns, playerPos, type) {
+            const ranges = {
+                tmFindNearbyEasy: [250, 1300],
+                tmFindNearbyMedium: [1200, 3200],
+                tmFindNearbyHard: [3000, 12000]
+            };
+            const [minDistance,maxDistance] = ranges[type] || ranges.tmFindNearbyEasy;
+            const scored = towns.map(target => Object.assign({}, target, {
+                distance: getDistance2D(playerPos, target.position)
+            })).filter(target => target.distance >= minDistance && target.distance <= maxDistance).sort(((a, b) => a.distance - b.distance));
+            if (scored.length)
+                return scored[Math.floor(seededUnit(playerPos.x + playerPos.z, scored.length) * scored.length)] || scored[0];
+            return towns.map(target => Object.assign({}, target, {
+                distance: getDistance2D(playerPos, target.position)
+            })).sort(((a, b) => "tmFindNearbyHard" === type ? b.distance - a.distance : a.distance - b.distance))[0];
+        }
+
         function buildCustomMissionStages(type, manager, player) {
             const playerPos = player && typeof player.getPosition === "function" ? player.getPosition().clone() : new globalState.THREE.Vector3;
             const towns = collectTownMissionTargets();
@@ -2082,6 +2567,44 @@
             const fuelStations = collectGasStationMissionTargets();
             const forests = collectForestMissionTargets();
             const mainRoads = collectMainRoadMissionTargets();
+            if (type && type.startsWith("tmFindNearby")) {
+                const target = chooseFindPlaceTarget(towns, playerPos, type);
+                return target ? [{
+                    label: target.label,
+                    position: target.position,
+                    radius: Math.max(65, target.radius),
+                    noMap: !0,
+                    markerColor: "#ffe26a",
+                    status: `Find ${target.label}`,
+                    description: `Map disabled. Navigate to ${target.label} without ESC/Shift map help.`
+                }] : [];
+            }
+            if ("tmPassengerFlight" === type) {
+                const airports = getAirportEntries().map((airport, index) => ({
+                    key: `airport_${index}`,
+                    label: `Airport ${index + 1}`,
+                    position: airport.center.clone(),
+                    radius: Math.max(90, airport.width + 60),
+                    airport
+                })).sort(((a, b) => getDistance2D(playerPos, a.position) - getDistance2D(playerPos, b.position)));
+                const start = airports[0];
+                const destination = airports.find(target => start && getDistance2D(start.position, target.position) > 1200);
+                return [start && {
+                    label: "Passenger pickup",
+                    position: start.position,
+                    radius: start.radius,
+                    markerColor: "#64d6ff",
+                    status: "Board passengers at the airport",
+                    description: "Use a passenger aircraft and depart from the runway."
+                }, destination && {
+                    label: "Passenger destination",
+                    position: destination.position,
+                    radius: destination.radius,
+                    markerColor: "#ffcb62",
+                    status: "Land at the destination airport",
+                    description: "Passenger jobs only count between airport runways."
+                }].filter(Boolean);
+            }
             if ("tmTownHop" === type) {
                 const chosen = chooseSpacedTargets(towns, Math.min(3, towns.length), 500, playerPos.x + playerPos.z);
                 return chosen.map(((target, index) => ({
@@ -2176,6 +2699,7 @@
             constructor(manager, type) {
                 this.missionManager = manager;
                 this.type = type;
+                this.__tmNoMapMission = !!(type && type.startsWith("tmFindNearby"));
                 this.markerIndex = -1;
                 this.stageIndex = 0;
                 this.stages = [];
@@ -2188,6 +2712,7 @@
 
             cancelMission() {
                 this.removeMarker();
+                this.__tmNoMapMission = !1;
                 this.missionManager.missionPanel.turnOffCompass();
                 this.missionManager.missionPanel.updateEntry1("");
                 this.missionManager.missionPanel.updateEntry2("");
@@ -2235,24 +2760,30 @@
                     return;
                 this.stageIndex = index;
                 this.removeMarker();
-                this.markerIndex = this.missionManager.addMarker(stage.markerColor || "#40ff90", stage.position, stage.label);
+                if (!stage.noMap)
+                    this.markerIndex = this.missionManager.addMarker(stage.markerColor || "#40ff90", stage.position, stage.label);
                 this.missionManager.missionPanel.showNavigation();
                 this.missionManager.missionPanel.updateStatus(stage.status || stage.label);
                 this.missionManager.missionPanel.updateMissionDescriptiopn(stage.description || stage.label);
+                stage.noMap && this.missionManager.missionPanel.turnOffCompass();
             }
 
             finish(currentTime, player) {
                 this.completed = !0;
+                this.__tmNoMapMission = !1;
                 this.removeMarker();
                 const elapsed = Math.max(0, (Number(currentTime) || 0) - this.startedAt);
                 const distance = Math.max(0, (Number(player && player.millage) || this.startDistance) - this.startDistance);
+                const reward = this.type && this.type.startsWith("tmFindNearby") ? 90 : "tmPassengerFlight" === this.type ? 260 : 120;
+                receivePlayerMoney(reward);
                 this.missionManager.missionPanel.updateStatus("Task complete");
-                this.missionManager.missionPanel.updateMissionDescriptiopn("Open the T menu for another custom route or stop this one.");
+                this.missionManager.missionPanel.updateMissionDescriptiopn(this.type && this.type.startsWith("tmFindNearby") ? "You found the selected place without map help." : "Open the T menu for another custom route or stop this one.");
                 this.missionManager.missionPanel.turnOffCompass();
                 this.missionManager.missionPanel.updateEntry1(`${this.stages.length}/${this.stages.length} checkpoints`);
-                this.missionManager.missionPanel.updateEntry2(`Time: ${formatMissionSeconds(elapsed)}`);
+                this.missionManager.missionPanel.updateEntry2(`Reward: +${reward} EUR`);
                 this.missionManager.missionPanel.updateEntry3(`Dist: ${(distance / 1e3).toFixed(1)} km`);
-                this.missionManager.missionPanel.updateEntry4("");
+                this.missionManager.missionPanel.updateEntry4(`Time: ${formatMissionSeconds(elapsed)}`);
+                syncFeatureMenu();
             }
 
             update(dtSeconds, currentTime, inputState, player) {
@@ -2265,10 +2796,13 @@
                 if (!stage)
                     return void this.finish(currentTime, player);
                 const playerPos = player.getPosition();
-                this.missionManager.missionPanel.updateCompass(playerPos, player.getHeadings(), stage.position);
+                if (stage.noMap)
+                    this.missionManager.missionPanel.turnOffCompass();
+                else
+                    this.missionManager.missionPanel.updateCompass(playerPos, player.getHeadings(), stage.position);
                 this.missionManager.missionPanel.updateEntry1(`${this.stageIndex + 1}/${this.stages.length} checkpoints`);
                 this.missionManager.missionPanel.updateEntry2(stage.label);
-                this.missionManager.missionPanel.updateEntry3(`ETA: ${Math.max(0, getDistance2D(playerPos, stage.position)).toFixed(0)} m`);
+                this.missionManager.missionPanel.updateEntry3(stage.noMap ? `Distance: ${Math.max(0, getDistance2D(playerPos, stage.position)).toFixed(0)} m` : `ETA: ${Math.max(0, getDistance2D(playerPos, stage.position)).toFixed(0)} m`);
                 this.missionManager.missionPanel.updateEntry4(`Time: ${formatMissionSeconds((Number(currentTime) || 0) - this.startedAt)}`);
                 if (getDistance2D(playerPos, stage.position) <= (Number(stage.radius) || 24))
                     if (this.stageIndex >= this.stages.length - 1)
@@ -2292,6 +2826,2420 @@
                 return originalCreateMission.apply(this, arguments);
             };
             missionManager.__tmCustomMissionPatched = !0;
+        }
+
+        function sanitizePositiveNumber(value, fallback, min, max) {
+            const parsed = Number(value);
+            if (!Number.isFinite(parsed))
+                return fallback;
+            return clamp(parsed, null != min ? min : 0, null != max ? max : parsed);
+        }
+
+        function getVehicleTuningMaxSpeedMs() {
+            return sanitizePositiveNumber(vehicleTuningState.maxSpeedKmh, 999, .1) / 3.6;
+        }
+
+        function getVehicleTuningAccelerationLimit() {
+            return sanitizePositiveNumber(vehicleTuningState.accelerationPerSecond, 50, .01);
+        }
+
+        function syncVehicleTuningPanel() {
+            const panel = vehicleTuningState.panel;
+            if (!panel)
+                return;
+            const maxSpeedInput = panel.querySelector('[data-role="maxSpeed"]');
+            const accelerationInput = panel.querySelector('[data-role="acceleration"]');
+            const status = panel.querySelector('[data-role="speedhackStatus"]');
+            maxSpeedInput && (maxSpeedInput.value = String(sanitizePositiveNumber(vehicleTuningState.maxSpeedKmh, 999, .1)));
+            accelerationInput && (accelerationInput.value = String(sanitizePositiveNumber(vehicleTuningState.accelerationPerSecond, 50, .01)));
+            status && (status.textContent = `Speedhack: ${vehicleTuningState.active ? "On" : "Off"}`);
+        }
+
+        function commitVehicleTuningPanel() {
+            const panel = vehicleTuningState.panel;
+            if (!panel)
+                return;
+            const maxSpeedInput = panel.querySelector('[data-role="maxSpeed"]');
+            const accelerationInput = panel.querySelector('[data-role="acceleration"]');
+            vehicleTuningState.maxSpeedKmh = sanitizePositiveNumber(maxSpeedInput && maxSpeedInput.value, vehicleTuningState.maxSpeedKmh, .1);
+            vehicleTuningState.accelerationPerSecond = sanitizePositiveNumber(accelerationInput && accelerationInput.value, vehicleTuningState.accelerationPerSecond, .01);
+            syncVehicleTuningPanel();
+        }
+
+        function ensureVehicleTuningPanel() {
+            if (vehicleTuningState.panel && vehicleTuningState.panel.isConnected)
+                return vehicleTuningState.panel;
+            if (!document.body)
+                return null;
+            const panel = document.createElement("div");
+            panel.id = "__tmVehicleTuningPanel";
+            panel.style.cssText = "position:fixed;top:72px;right:16px;z-index:999999;background:rgba(18,24,31,.92);color:#f1eee7;border:1px solid rgba(255,255,255,.16);border-radius:12px;box-shadow:0 14px 36px rgba(0,0,0,.32);padding:14px 14px 12px;width:264px;font:600 13px/1.35 Arial,Helvetica,sans-serif;backdrop-filter:blur(10px);display:none;";
+            panel.innerHTML = `
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                    <div style="font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#d8d0c4;">Vehicle Tuning</div>
+                    <button type="button" data-role="close" style="border:0;background:transparent;color:#d8d0c4;font:inherit;cursor:pointer;padding:0 2px;">x</button>
+                </div>
+                <div data-role="speedhackStatus" style="margin-bottom:10px;color:#8fd6ff;">Speedhack: Off</div>
+                <label style="display:block;margin-bottom:10px;">
+                    <div style="margin-bottom:4px;color:#d8d0c4;">Max speed (km/h)</div>
+                    <input data-role="maxSpeed" type="number" min="0.1" step="1" style="width:100%;box-sizing:border-box;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.08);color:#fff8eb;border-radius:9px;padding:9px 10px;font:inherit;outline:none;">
+                </label>
+                <label style="display:block;margin-bottom:12px;">
+                    <div style="margin-bottom:4px;color:#d8d0c4;">Acceleration (m/s²)</div>
+                    <input data-role="acceleration" type="number" min="0.01" step="0.5" style="width:100%;box-sizing:border-box;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.08);color:#fff8eb;border-radius:9px;padding:9px 10px;font:inherit;outline:none;">
+                </label>
+                <div style="display:flex;gap:8px;justify-content:flex-end;">
+                    <button type="button" data-role="reset" style="border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.08);color:#f1eee7;border-radius:9px;padding:8px 10px;font:inherit;cursor:pointer;">Reset</button>
+                    <button type="button" data-role="apply" style="border:1px solid rgba(255,255,255,.08);background:#d7e2f2;color:#12202d;border-radius:9px;padding:8px 12px;font:inherit;cursor:pointer;">Apply</button>
+                </div>
+            `;
+            panel.addEventListener("keydown", (event => event.stopPropagation()));
+            panel.querySelector('[data-role="close"]').addEventListener("click", (() => toggleVehicleTuningPanel(!1)));
+            panel.querySelector('[data-role="apply"]').addEventListener("click", commitVehicleTuningPanel);
+            panel.querySelector('[data-role="reset"]').addEventListener("click", (() => {
+                vehicleTuningState.maxSpeedKmh = 999;
+                vehicleTuningState.accelerationPerSecond = 50;
+                syncVehicleTuningPanel();
+            }));
+            for (const input of panel.querySelectorAll("input"))
+                input.addEventListener("change", commitVehicleTuningPanel);
+            document.body.appendChild(panel);
+            vehicleTuningState.panel = panel;
+            syncVehicleTuningPanel();
+            return panel;
+        }
+
+        function toggleVehicleTuningPanel(forceVisible) {
+            const panel = ensureVehicleTuningPanel();
+            if (!panel)
+                return;
+            vehicleTuningState.visible = null == forceVisible ? !vehicleTuningState.visible : !!forceVisible;
+            panel.style.display = vehicleTuningState.visible ? "block" : "none";
+            if (vehicleTuningState.visible) {
+                syncVehicleTuningPanel();
+                const firstInput = panel.querySelector("input");
+                firstInput && firstInput.focus();
+            }
+        }
+
+        function toggleSpeedhack(forceActive) {
+            vehicleTuningState.active = null == forceActive ? !vehicleTuningState.active : !!forceActive;
+            syncVehicleTuningPanel();
+            notifyRuntime(`Speedhack ${vehicleTuningState.active ? "an" : "aus"}`);
+        }
+
+        function ensureVehicleTuningHotkey() {
+            if (vehicleTuningState.installed)
+                return;
+            vehicleTuningState.installed = !0;
+            document.addEventListener("keydown", (event => {
+                if (event.defaultPrevented || event.repeat || event.altKey || event.ctrlKey || event.metaKey)
+                    return;
+                const target = event.target;
+                if (target && ("INPUT" === target.tagName || "TEXTAREA" === target.tagName || "SELECT" === target.tagName || target.isContentEditable))
+                    return;
+                if ("k" === String(event.key || "").toLowerCase()) {
+                    event.preventDefault();
+                    if (event.shiftKey)
+                        toggleVehicleTuningPanel();
+                    else
+                        toggleSpeedhack();
+                }
+            }
+            ));
+        }
+
+        function isTypingTarget(target) {
+            return !!target && ("INPUT" === target.tagName || "TEXTAREA" === target.tagName || "SELECT" === target.tagName || target.isContentEditable);
+        }
+
+        function isNoMapMissionActive() {
+            const mission = runtimeState.game && runtimeState.game.missionManager && runtimeState.game.missionManager.currentMission;
+            return !!(mission && mission.__tmNoMapMission && !mission.completed && !mission.failed);
+        }
+
+        function ensureRuntimeInputHandlers() {
+            if (runtimeState.controlsPatched)
+                return;
+            runtimeState.controlsPatched = !0;
+            document.addEventListener("keydown", (event => {
+                if (isTypingTarget(event.target))
+                    return;
+                const code = event.code || "";
+                if (isNoMapMissionActive() && ("Escape" === code || "ShiftLeft" === code || "ShiftRight" === code || "Shift" === event.key)) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    return;
+                }
+                if (event.repeat && "KeyE" !== code)
+                    return;
+                if ("KeyU" === code)
+                    runtimeState.input.slowLeft = !0;
+                else if ("KeyO" === code)
+                    runtimeState.input.slowRight = !0;
+                else if ("KeyJ" === code)
+                    runtimeState.input.fastLeft = !0;
+                else if ("KeyL" === code)
+                    runtimeState.input.fastRight = !0;
+                else if ("KeyP" === code) {
+                    runtimeState.autopilot && runtimeState.autopilot.enabled && stopAutopilot("manuelle Bremse", !0);
+                    runtimeState.input.fullBrake = !0;
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+                else if ("KeyE" === code) {
+                    runtimeState.input.fire = !0;
+                    interactRuntime();
+                } else if ("KeyM" === code) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    handleAutopilotMapHotkey();
+                } else if ("KeyN" === code) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    toggleNaviPanel();
+                } else if ("ControlLeft" === code || "ControlRight" === code) {
+                    if (tryToggleAircraft()) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                    }
+                }
+            }
+            ), !0);
+            document.addEventListener("keyup", (event => {
+                const code = event.code || "";
+                if ("KeyU" === code)
+                    runtimeState.input.slowLeft = !1;
+                else if ("KeyO" === code)
+                    runtimeState.input.slowRight = !1;
+                else if ("KeyJ" === code)
+                    runtimeState.input.fastLeft = !1;
+                else if ("KeyL" === code)
+                    runtimeState.input.fastRight = !1;
+                else if ("KeyP" === code)
+                    runtimeState.input.fullBrake = !1;
+                else if ("KeyE" === code)
+                    runtimeState.input.fire = !1;
+                if (!runtimeState.input.slowLeft && !runtimeState.input.slowRight && !runtimeState.input.fastLeft && !runtimeState.input.fastRight) {
+                    const car = runtimeState.game && runtimeState.game.controlManager && runtimeState.game.controlManager.controllableCar;
+                    car && typeof car.resetSteeringSlow === "function" && car.resetSteeringSlow();
+                }
+            }
+            ), !0);
+        }
+
+        function applyExtendedVehicleControls(car, dtSeconds) {
+            if (!car)
+                return;
+            const leftStrength = (runtimeState.input.slowLeft ? .45 : 0) + (runtimeState.input.fastLeft ? 1.8 : 0);
+            const rightStrength = (runtimeState.input.slowRight ? .45 : 0) + (runtimeState.input.fastRight ? 1.8 : 0);
+            const steer = Math.sign(leftStrength - rightStrength);
+            if (steer) {
+                car.delayMode = Math.max(.12, Math.min(2.2, Math.abs(leftStrength - rightStrength)));
+                if (typeof car.setSteeringTarget === "function")
+                    car.setSteeringTarget(steer);
+                else
+                    car.steeringTarget = steer * (car.mcs && car.mcs.maxSteeringAngle || .5);
+            }
+            if (runtimeState.input.fullBrake) {
+                if (typeof car.toBreak === "function")
+                    car.toBreak();
+                const dt = Math.max(1e-3, Number(dtSeconds) || 0);
+                const brakeDelta = 42 * dt;
+                if (car.speed > 0)
+                    car.speed = Math.max(0, car.speed - brakeDelta);
+                else if (car.speed < 0)
+                    car.speed = Math.min(0, car.speed + brakeDelta);
+            }
+        }
+
+        function applyVehicleTuning(car, dtSeconds, previousSpeed) {
+            if (!car || !vehicleTuningState.active)
+                return;
+            const dt = Math.max(1e-3, Number(dtSeconds) || 0);
+            const maxSpeedMs = getVehicleTuningMaxSpeedMs();
+            const accelerationLimit = getVehicleTuningAccelerationLimit();
+            const rawSpeed = Number(car.speed) || 0;
+            if (car.speeding > 0 && previousSpeed >= -1)
+                car.speed = Math.min(maxSpeedMs, Math.max(rawSpeed, previousSpeed + accelerationLimit * dt * Math.max(.2, Number(car.speeding) || 0)));
+            if (car.speed > maxSpeedMs)
+                car.speed = maxSpeedMs;
+            if (car.speed < -maxSpeedMs / 3)
+                car.speed = -maxSpeedMs / 3;
+            const forwardDelta = car.speed - previousSpeed;
+            const maxForwardDelta = accelerationLimit * dt;
+            if (forwardDelta > maxForwardDelta)
+                car.speed = previousSpeed + maxForwardDelta;
+            if (car.cruiseControlOn)
+                car.cruiseControlTargetSpeed = Math.min(car.cruiseControlTargetSpeed, maxSpeedMs);
+            car.acc = clamp((car.speed - previousSpeed) / dt, -2 * accelerationLimit, accelerationLimit);
+        }
+
+        function getAutopilotState() {
+            if (!runtimeState.autopilot)
+                runtimeState.autopilot = {};
+            return runtimeState.autopilot;
+        }
+
+        function isGameMenuVisible() {
+            const menu = document.getElementById("game_menu");
+            if (!menu)
+                return !1;
+            const style = window.getComputedStyle ? window.getComputedStyle(menu) : menu.style;
+            return "none" !== style.display && "hidden" !== style.visibility && 0 !== menu.getClientRects().length;
+        }
+
+        function dispatchGameKey(key, code) {
+            const event = new KeyboardEvent("keydown", {
+                key,
+                code,
+                bubbles: !0,
+                cancelable: !0
+            });
+            document.dispatchEvent(event);
+        }
+
+        function openGameMapForAutopilot() {
+            if (!isGameMenuVisible()) {
+                const menu = runtimeState.gameMenu;
+                if (menu && "function" == typeof menu.toggleMenu)
+                    menu.toggleMenu();
+                else
+                    dispatchGameKey("Escape", "Escape");
+            }
+            setTimeout((() => {
+                const menu = runtimeState.gameMenu;
+                menu && menu.map && "function" == typeof menu.map.invalidateSize && menu.map.invalidateSize();
+                const mapContainer = document.getElementById("big_menu_map_con");
+                mapContainer && mapContainer.dispatchEvent(new Event("resize"));
+            }
+            ), 120);
+        }
+
+        function getMapTargetSignature() {
+            const navPoint = runtimeState.game && runtimeState.game.realMap && runtimeState.game.realMap.navPoint;
+            if (!navPoint)
+                return "";
+            const lat = Number(navPoint.lat);
+            const lng = Number(navPoint.lng);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng))
+                return "";
+            return `${lat.toFixed(6)},${lng.toFixed(6)}`;
+        }
+
+        function getMapTargetWorldPosition() {
+            const realMap = runtimeState.game && runtimeState.game.realMap;
+            if (!realMap || "function" != typeof realMap.getNavPoint)
+                return null;
+            try {
+                const target = realMap.getNavPoint();
+                return target ? cloneVector3(target) : null;
+            } catch (mapError) {
+                warn("Automatik-Ziel konnte nicht aus der Map gelesen werden:", mapError);
+                return null;
+            }
+        }
+
+        function resetAutopilotRoadState(state) {
+            state.edge = null;
+            state.segmentIndex = 0;
+            state.segmentT = 0;
+            state.direction = 1;
+            state.snapped = !1;
+            state.linking = !1;
+        }
+
+        function stopAutopilot(reason, shouldNotify=!0) {
+            const state = getAutopilotState();
+            if (!state.enabled && !state.pendingMapSelection)
+                return;
+            state.enabled = !1;
+            state.pendingMapSelection = !1;
+            resetAutopilotRoadState(state);
+            const car = getPlayerCar();
+            car && setPlayerSpeed(car, 0);
+            shouldNotify && notifyRuntime(`Automatik aus: ${reason || "gestoppt"}`);
+            syncAutopilotDebug();
+        }
+
+        function findTargetRoadPosition(position) {
+            const match = findNearestRoadSegment(position, 1800);
+            return match && match.point ? match.point.clone() : cloneVector3(position);
+        }
+
+        function startAutopilotToMapTarget(source) {
+            const target = getMapTargetWorldPosition();
+            const signature = getMapTargetSignature();
+            if (!target || !signature)
+                return !1;
+            const state = getAutopilotState();
+            state.enabled = !0;
+            state.pendingMapSelection = !1;
+            state.targetPosition = target;
+            state.targetRoadPosition = findTargetRoadPosition(target);
+            state.targetSignature = signature;
+            resetAutopilotRoadState(state);
+            state.lastNoticeAt = performance.now();
+            notifyRuntime(`Automatik aktiv: Ziel gesetzt (${source || "map"}).`);
+            syncAutopilotDebug();
+            return !0;
+        }
+
+        function startAutopilotToWorldPosition(position, label, source) {
+            if (!position)
+                return !1;
+            const target = cloneVector3(position);
+            if (!target)
+                return !1;
+            const state = getAutopilotState();
+            state.enabled = !0;
+            state.pendingMapSelection = !1;
+            state.targetPosition = target;
+            state.targetRoadPosition = findTargetRoadPosition(target);
+            state.targetSignature = `${source || "navi"}:${target.x.toFixed(1)},${target.z.toFixed(1)}`;
+            resetAutopilotRoadState(state);
+            state.lastNoticeAt = performance.now();
+            notifyRuntime(`Navi aktiv: ${label || "Ziel gesetzt"}.`);
+            syncAutopilotDebug();
+            return !0;
+        }
+
+        function collectPoiNaviTargets(type) {
+            const targets = [];
+            const seen = new Set;
+            const addTarget = (poi, key) => {
+                if (!poi || !poi.position || type && poi.type !== type)
+                    return;
+                const marker = key || `${poi.type}:${Math.round(poi.position.x)}:${Math.round(poi.position.z)}`;
+                if (seen.has(marker))
+                    return;
+                seen.add(marker);
+                targets.push({
+                    key: marker,
+                    label: poi.name || type || "POI",
+                    position: poi.position
+                });
+            };
+            for (const item of runtimeState.overlayItems)
+                item.kind === "poi" && addTarget(item.data || item, item.key);
+            for (const [chunkKey, pois] of runtimeState.poiCache)
+                for (let index = 0; index < toSafeArray(pois).length; index++)
+                    addTarget(pois[index], `${chunkKey}:${index}`);
+            return targets;
+        }
+
+        function collectNaviTargets(type) {
+            if ("fuel" === type)
+                return collectGasStationMissionTargets();
+            if ("airport" === type)
+                return getAirportEntries().map((airport, index) => ({
+                    key: `airport_${index}`,
+                    label: `Airport ${index + 1}`,
+                    position: airport.center,
+                    airport
+                }));
+            if ("supermarket" === type || "autoshop" === type || "apiary" === type)
+                return collectPoiNaviTargets(type);
+            if ("town" === type)
+                return collectTownMissionTargets();
+            return [];
+        }
+
+        function chooseNearestNaviTarget(targets) {
+            const playerPos = getControlPosition() || getPlayerPosition();
+            if (!playerPos)
+                return null;
+            return targets.filter(target => target && target.position).map(target => Object.assign({}, target, {
+                distance: getDistance2D(playerPos, target.position)
+            })).sort(((a, b) => a.distance - b.distance))[0] || null;
+        }
+
+        function startNaviPreset(type) {
+            if ("airport" !== type && "town" !== type)
+                for (const chunk of getLoadedChunks())
+                    queuePoiFetch(chunk);
+            const target = chooseNearestNaviTarget(collectNaviTargets(type));
+            if (!target) {
+                notifyRuntime("Navi: kein passendes Ziel in geladenen Daten gefunden.", "error");
+                return !1;
+            }
+            return startAutopilotToWorldPosition(target.position, target.label || type, `preset:${type}`);
+        }
+
+        function setNaviPanelStatus(message, kind) {
+            const panel = runtimeState.navPanel;
+            const status = panel && panel.querySelector('[data-role="status"]');
+            if (!status)
+                return;
+            status.textContent = message || "";
+            status.style.color = "error" === kind ? "#ff9f9f" : "#9fd7ff";
+        }
+
+        function searchNaviAddress(query) {
+            const text = normalizeTownLabel(query);
+            if (!text)
+                return setNaviPanelStatus("Bitte Adresse eingeben.", "error");
+            if (!runtimeState.geoModule || "function" != typeof runtimeState.geoModule.convertProjLocalCoords) {
+                setNaviPanelStatus("Navi wartet auf Geo-Modul.", "error");
+                return;
+            }
+            runtimeState.navSearching = !0;
+            setNaviPanelStatus("Suche Adresse...");
+            const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=1&q=${encodeURIComponent(text)}`;
+            fetch(url, {
+                headers: {
+                    Accept: "application/json"
+                }
+            }).then(response => response.json()).then(results => {
+                const result = Array.isArray(results) ? results[0] : null;
+                if (!result)
+                    throw new Error("Adresse nicht gefunden");
+                const lat = Number(result.lat);
+                const lon = Number(result.lon);
+                if (!Number.isFinite(lat) || !Number.isFinite(lon))
+                    throw new Error("Adresse ohne Koordinaten");
+                const position = runtimeState.geoModule.convertProjLocalCoords([lat, lon]);
+                if (!position)
+                    throw new Error("Koordinaten konnten nicht ins Spiel umgerechnet werden");
+                position.y = getTerrainYWorld(position, 0);
+                const label = normalizeTownLabel(result.display_name).slice(0, 72) || text;
+                startAutopilotToWorldPosition(position, label, "address");
+                setNaviPanelStatus(`Ziel gesetzt: ${label}`);
+            }).catch(searchError => {
+                setNaviPanelStatus(`Adresse nicht gefunden: ${searchError.message || searchError}`, "error");
+                notifyRuntime("Navi: Adresse nicht gefunden.", "error");
+            }).finally((() => {
+                runtimeState.navSearching = !1;
+            }));
+        }
+
+        function ensureNaviPanel() {
+            if (runtimeState.navPanel && runtimeState.navPanel.isConnected)
+                return runtimeState.navPanel;
+            if (!document.body)
+                return null;
+            const panel = document.createElement("div");
+            panel.id = "__tmNaviPanel";
+            panel.style.cssText = "position:fixed;left:16px;bottom:16px;z-index:999999;width:min(360px,calc(100vw - 32px));box-sizing:border-box;background:rgba(17,24,31,.94);color:#f5f1e8;border:1px solid rgba(255,255,255,.16);border-radius:10px;box-shadow:0 16px 42px rgba(0,0,0,.35);padding:12px;font:600 13px/1.35 Arial,Helvetica,sans-serif;display:none;backdrop-filter:blur(10px);";
+            panel.innerHTML = `
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;">
+                    <div style="letter-spacing:.04em;text-transform:uppercase;color:#d8d0c4;">Navi</div>
+                    <button type="button" data-role="close" style="border:0;background:transparent;color:#d8d0c4;font:inherit;cursor:pointer;padding:0 2px;">x</button>
+                </div>
+                <div data-role="presets" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:10px;">
+                    ${NAV_PRESETS.map(preset => `<button type="button" data-preset="${preset.type}" style="border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.08);color:#f5f1e8;border-radius:8px;padding:7px 6px;font:inherit;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${preset.label}</button>`).join("")}
+                </div>
+                <form data-role="addressForm" style="display:flex;gap:6px;margin-bottom:8px;">
+                    <input data-role="address" type="search" placeholder="3970 Lauterbach 20" style="flex:1;min-width:0;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.08);color:#fff8eb;border-radius:8px;padding:8px 9px;font:inherit;outline:none;">
+                    <button type="submit" style="border:1px solid rgba(255,255,255,.12);background:#d7e2f2;color:#12202d;border-radius:8px;padding:8px 10px;font:inherit;cursor:pointer;">Suchen</button>
+                </form>
+                <div data-role="status" style="min-height:18px;color:#9fd7ff;font-size:12px;"></div>
+            `;
+            panel.addEventListener("keydown", (event => event.stopPropagation()));
+            panel.addEventListener("keyup", (event => event.stopPropagation()));
+            panel.querySelector('[data-role="close"]').addEventListener("click", (() => toggleNaviPanel(!1)));
+            panel.querySelector('[data-role="addressForm"]').addEventListener("submit", (event => {
+                event.preventDefault();
+                const input = panel.querySelector('[data-role="address"]');
+                searchNaviAddress(input && input.value);
+            }));
+            for (const button of panel.querySelectorAll("button[data-preset]"))
+                button.addEventListener("click", (() => startNaviPreset(button.dataset.preset)));
+            document.body.appendChild(panel);
+            runtimeState.navPanel = panel;
+            return panel;
+        }
+
+        function toggleNaviPanel(forceVisible) {
+            const panel = ensureNaviPanel();
+            if (!panel)
+                return;
+            runtimeState.navVisible = null == forceVisible ? !runtimeState.navVisible : !!forceVisible;
+            panel.style.display = runtimeState.navVisible ? "block" : "none";
+            if (runtimeState.navVisible) {
+                setNaviPanelStatus("");
+                const input = panel.querySelector('[data-role="address"]');
+                input && input.focus();
+            }
+        }
+
+        function handleAutopilotMapHotkey() {
+            const state = getAutopilotState();
+            if (isNoMapMissionActive()) {
+                notifyRuntime("Automatik kann diese Aufgabe nicht starten: Map ist fuer diese Mission gesperrt.", "error");
+                return;
+            }
+            if (runtimeState.activeAircraft) {
+                notifyRuntime("Automatik ist nur im Auto aktiv, nicht im Flugzeug.", "error");
+                return;
+            }
+            state.pendingMapSelection = !0;
+            state.startSignature = getMapTargetSignature();
+            state.lastNoticeAt = performance.now();
+            openGameMapForAutopilot();
+            notifyRuntime("Automatik: Ziel auf der Map anklicken, dann mit ESC/Back ins Spiel.");
+            syncAutopilotDebug();
+        }
+
+        function updateAutopilotMapSelection() {
+            const state = getAutopilotState();
+            const signature = getMapTargetSignature();
+            if (state.enabled && !signature) {
+                stopAutopilot("Map-Ziel entfernt", !0);
+                return;
+            }
+            if (!state.pendingMapSelection)
+                return;
+            if (signature && signature !== state.targetSignature && (!isGameMenuVisible() || signature !== state.startSignature))
+                startAutopilotToMapTarget("map");
+            else if (!isGameMenuVisible() && signature)
+                startAutopilotToMapTarget("bestehendes Map-Ziel");
+        }
+
+        function syncAutopilotDebug() {
+            const state = getAutopilotState();
+            const debug = {
+                enabled: !!state.enabled,
+                pendingMapSelection: !!state.pendingMapSelection,
+                target: state.targetPosition ? {
+                    x: Number(state.targetPosition.x.toFixed(2)),
+                    y: Number(state.targetPosition.y.toFixed(2)),
+                    z: Number(state.targetPosition.z.toFixed(2))
+                } : null,
+                targetRoad: state.targetRoadPosition ? {
+                    x: Number(state.targetRoadPosition.x.toFixed(2)),
+                    y: Number(state.targetRoadPosition.y.toFixed(2)),
+                    z: Number(state.targetRoadPosition.z.toFixed(2))
+                } : null,
+                road: state.edge ? {
+                    type: state.edge.type,
+                    oneway: !!state.edge.oneway,
+                    segmentIndex: state.segmentIndex,
+                    segmentT: Number((state.segmentT || 0).toFixed(3)),
+                    direction: state.direction
+                } : null,
+                start: startAutopilotToMapTarget,
+                stop: stopAutopilot,
+                rebuildTarget: () => startAutopilotToMapTarget("debug")
+            };
+            globalThis.__tmAutopilotDebug = debug;
+            globalThis.__tmCollisionHookDebug && (globalThis.__tmCollisionHookDebug.autopilot = debug);
+        }
+
+        function isRoadEligibleForAutopilot(edge) {
+            if (!edge || !edge.points || edge.points.length < 2)
+                return !1;
+            const roadModule = townSignsState.roadModule;
+            if (!roadModule)
+                return !0;
+            if (edge.type === roadModule.ROAD_TYPE_VIRTUAL || edge.type === roadModule.ROAD_TYPE_RACETRACK)
+                return !1;
+            return (Number(edge.lanesForward) || 0) > 0 || (Number(edge.lanesBackward) || 0) > 0 || !!edge.oneway;
+        }
+
+        function canDriveEdgeDirection(edge, direction) {
+            if (!edge)
+                return !1;
+            return direction > 0 ? (Number(edge.lanesForward) || 0) > 0 || !!edge.oneway : !edge.oneway && (Number(edge.lanesBackward) || 0) > 0;
+        }
+
+        function getEdgeWorldPoints(edge) {
+            const center = edge && edge.chunk && edge.chunk.centerVec;
+            if (!edge || !edge.points || !center)
+                return [];
+            return edge.points.map(point => point.clone().add(center));
+        }
+
+        function getRoadSegmentMatch(edge, index, position) {
+            const points = getEdgeWorldPoints(edge);
+            const start = points[index];
+            const end = points[index + 1];
+            if (!start || !end)
+                return null;
+            const segment = distancePointToSegment2D(position, start, end);
+            const point = start.clone().lerp(end, segment.progress);
+            const direction = end.clone().sub(start);
+            direction.y = 0;
+            if (direction.lengthSq() < 1e-6)
+                return null;
+            direction.normalize();
+            return {
+                edge,
+                segmentIndex: index,
+                progress: segment.progress,
+                point,
+                direction,
+                distance: segment.distance
+            };
+        }
+
+        function findNearestRoadSegment(position, maxDistance=1 / 0) {
+            if (!position || !globalState.THREE)
+                return null;
+            let best = null;
+            for (const chunk of getLoadedChunks())
+                for (const edge of toSafeArray(chunk.newRoadGraph && chunk.newRoadGraph.edges)) {
+                    if (!isRoadEligibleForAutopilot(edge))
+                        continue;
+                    const points = getEdgeWorldPoints(edge);
+                    for (let index = 0; index < points.length - 1; index++) {
+                        const match = getRoadSegmentMatch(edge, index, position);
+                        if (!match || match.distance > maxDistance)
+                            continue;
+                        if (!best || match.distance < best.distance)
+                            best = match;
+                    }
+                }
+            return best;
+        }
+
+        function chooseAutopilotDirection(match, target) {
+            if (!match || !target)
+                return 1;
+            const points = getEdgeWorldPoints(match.edge);
+            if (points.length < 2)
+                return 1;
+            const forwardDistance = getDistance2D(points[points.length - 1], target);
+            const backwardDistance = getDistance2D(points[0], target);
+            if (forwardDistance <= backwardDistance && canDriveEdgeDirection(match.edge, 1))
+                return 1;
+            if (canDriveEdgeDirection(match.edge, -1))
+                return -1;
+            return 1;
+        }
+
+        function setAutopilotRoadMatch(state, match) {
+            if (!state || !match)
+                return !1;
+            state.edge = match.edge;
+            state.segmentIndex = match.segmentIndex;
+            state.segmentT = clamp(match.progress, 0, 1);
+            state.direction = chooseAutopilotDirection(match, state.targetRoadPosition || state.targetPosition);
+            state.snapped = !0;
+            state.linking = !1;
+            return !0;
+        }
+
+        function collectAutopilotOutgoingRoads(node, previousEdge) {
+            const candidates = [];
+            const visitNode = roadNode => {
+                if (!roadNode)
+                    return;
+                for (const edge of toSafeArray(roadNode.edges)) {
+                    if (!isRoadEligibleForAutopilot(edge) || edge === previousEdge)
+                        continue;
+                    if (edge.u === roadNode && canDriveEdgeDirection(edge, 1))
+                        candidates.push({
+                            edge,
+                            direction: 1
+                        });
+                    if (edge.v === roadNode && canDriveEdgeDirection(edge, -1))
+                        candidates.push({
+                            edge,
+                            direction: -1
+                        });
+                }
+            };
+            visitNode(node);
+            for (const pairedNode of toSafeArray(node && node.pairNodes))
+                visitNode(pairedNode);
+            for (const connectedNode of toSafeArray(node && node.connectNodes))
+                visitNode(connectedNode);
+            return candidates;
+        }
+
+        function getEdgeStartPointForDirection(edge, direction) {
+            const points = getEdgeWorldPoints(edge);
+            return direction > 0 ? points[0] : points[points.length - 1];
+        }
+
+        function getEdgeEndPointForDirection(edge, direction) {
+            const points = getEdgeWorldPoints(edge);
+            return direction > 0 ? points[points.length - 1] : points[0];
+        }
+
+        function getEdgeInitialVector(edge, direction) {
+            const points = getEdgeWorldPoints(edge);
+            if (points.length < 2)
+                return null;
+            const startIndex = direction > 0 ? 0 : points.length - 1;
+            const nextIndex = direction > 0 ? 1 : points.length - 2;
+            const vector = points[nextIndex].clone().sub(points[startIndex]);
+            vector.y = 0;
+            return vector.lengthSq() > 1e-6 ? vector.normalize() : null;
+        }
+
+        function chooseNextAutopilotRoad(edge, direction, targetPosition, currentForward) {
+            const node = direction > 0 ? edge && edge.v : edge && edge.u;
+            const candidates = collectAutopilotOutgoingRoads(node, edge);
+            if (!candidates.length && edge && canDriveEdgeDirection(edge, -direction))
+                candidates.push({
+                    edge,
+                    direction: -direction
+                });
+            let best = null;
+            for (const candidate of candidates) {
+                const start = getEdgeStartPointForDirection(candidate.edge, candidate.direction);
+                const end = getEdgeEndPointForDirection(candidate.edge, candidate.direction);
+                const vector = getEdgeInitialVector(candidate.edge, candidate.direction);
+                if (!start || !end || !vector)
+                    continue;
+                const targetVector = targetPosition.clone().sub(start);
+                targetVector.y = 0;
+                targetVector.lengthSq() > 1e-6 && targetVector.normalize();
+                const headingPenalty = currentForward && currentForward.lengthSq() > 1e-6 ? (1 - clamp(vector.dot(currentForward), -1, 1)) * 55 : 0;
+                const targetPenalty = targetVector.lengthSq() > 1e-6 ? (1 - clamp(vector.dot(targetVector), -1, 1)) * 85 : 0;
+                const roadPenalty = candidate.edge.type === (townSignsState.roadModule && townSignsState.roadModule.ROAD_TYPE_DRIVEWAY) ? 45 : 0;
+                const score = getDistance2D(end, targetPosition) + .18 * getDistance2D(start, targetPosition) + headingPenalty + targetPenalty + roadPenalty;
+                if (!best || score < best.score)
+                    best = Object.assign({
+                        score
+                    }, candidate);
+            }
+            return best;
+        }
+
+        function getAutopilotCurrentPoint(state) {
+            const points = getEdgeWorldPoints(state.edge);
+            const index = clamp(Math.round(Number(state.segmentIndex) || 0), 0, Math.max(0, points.length - 2));
+            const start = points[index];
+            const end = points[index + 1];
+            if (!start || !end)
+                return null;
+            return start.clone().lerp(end, clamp(Number(state.segmentT) || 0, 0, 1));
+        }
+
+        function advanceAutopilotAlongRoad(state, distance) {
+            if (!state.edge || !state.targetPosition)
+                return null;
+            let remaining = Math.max(0, Number(distance) || 0);
+            let position = getAutopilotCurrentPoint(state);
+            let travelVector = null;
+            const target = state.targetRoadPosition || state.targetPosition;
+            for (let guard = 0; guard < 96 && remaining >= 0; guard++) {
+                const points = getEdgeWorldPoints(state.edge);
+                if (points.length < 2)
+                    return null;
+                state.segmentIndex = clamp(Math.round(Number(state.segmentIndex) || 0), 0, points.length - 2);
+                state.segmentT = clamp(Number(state.segmentT) || 0, 0, 1);
+                const start = points[state.segmentIndex];
+                const end = points[state.segmentIndex + 1];
+                const segmentVector = end.clone().sub(start);
+                segmentVector.y = 0;
+                const segmentLength = segmentVector.length();
+                if (segmentLength < 1e-6) {
+                    state.segmentIndex += state.direction > 0 ? 1 : -1;
+                    state.segmentT = state.direction > 0 ? 0 : 1;
+                    continue;
+                }
+                const forward = segmentVector.clone().normalize().multiplyScalar(state.direction > 0 ? 1 : -1);
+                const available = state.direction > 0 ? segmentLength * (1 - state.segmentT) : segmentLength * state.segmentT;
+                if (remaining <= available || guard === 95) {
+                    const deltaT = remaining / segmentLength * (state.direction > 0 ? 1 : -1);
+                    state.segmentT = clamp(state.segmentT + deltaT, 0, 1);
+                    position = start.clone().lerp(end, state.segmentT);
+                    travelVector = forward;
+                    break;
+                }
+                remaining -= available;
+                position = state.direction > 0 ? end.clone() : start.clone();
+                travelVector = forward;
+                if (state.direction > 0 && state.segmentIndex < points.length - 2) {
+                    state.segmentIndex += 1;
+                    state.segmentT = 0;
+                    continue;
+                }
+                if (state.direction < 0 && state.segmentIndex > 0) {
+                    state.segmentIndex -= 1;
+                    state.segmentT = 1;
+                    continue;
+                }
+                const next = chooseNextAutopilotRoad(state.edge, state.direction, target, travelVector);
+                if (!next)
+                    break;
+                state.edge = next.edge;
+                state.direction = next.direction;
+                const nextPoints = getEdgeWorldPoints(state.edge);
+                state.segmentIndex = state.direction > 0 ? 0 : Math.max(0, nextPoints.length - 2);
+                state.segmentT = state.direction > 0 ? 0 : 1;
+            }
+            return position && travelVector ? {
+                position,
+                direction: travelVector
+            } : null;
+        }
+
+        function moveCarTowardAutopilotRoad(car, match, speed, dt) {
+            if (!car || !match || !match.point)
+                return !1;
+            const current = car.getPosition();
+            const toRoad = match.point.clone().sub(current);
+            toRoad.y = 0;
+            const distance = toRoad.length();
+            if (distance <= 7)
+                return !1;
+            toRoad.normalize();
+            const step = Math.min(distance, Math.max(8, speed) * dt);
+            const nextPosition = current.clone().addScaledVector(toRoad, step);
+            nextPosition.y = getTerrainYWorld(nextPosition, current.y);
+            car.cameraGroup.position.copy(nextPosition);
+            car.cameraGroup.rotation.set(0, getYawFromVector(toRoad), 0);
+            car.group && (car.group.rotation.z = 0);
+            car.speed = Math.max(0, speed);
+            car.acc = 0;
+            return !0;
+        }
+
+        function applyAutopilotPose(car, pose, speed) {
+            if (!car || !pose || !pose.position || !pose.direction)
+                return;
+            const position = pose.position.clone();
+            position.y = getTerrainYWorld(position, position.y || 0) + .04;
+            car.cameraGroup.position.copy(position);
+            car.cameraGroup.rotation.set(0, getYawFromVector(pose.direction), 0);
+            car.group && (car.group.rotation.z = 0);
+            car.speed = Math.max(0, Number(speed) || 0);
+            car.speeding = 1;
+            car.breaking = 0;
+            car.acc = getVehicleTuningAccelerationLimit();
+            car.crashed = !1;
+        }
+
+        function getAutopilotCruiseSpeedMs(car) {
+            const candidates = [car && car.maxSpeed, car && car.mcs && car.mcs.maxSpeed, car && car.mcs && car.mcs.maxForwardSpeed, car && car.mcs && car.mcs.maxVelocity].map(Number).filter(value => Number.isFinite(value) && value > 4);
+            if (candidates.length)
+                return clamp(Math.max(...candidates), 12, 45);
+            return 32;
+        }
+
+        function applyAutopilotToCar(car, dtSeconds) {
+            const state = getAutopilotState();
+            if (!state.enabled || !car || !state.targetPosition || runtimeState.activeAircraft || car.__tmImpactState)
+                return !1;
+            const dt = clamp(Number(dtSeconds) || .016, 1 / 240, .08);
+            const speed = Math.max(8, vehicleTuningState.active ? getVehicleTuningMaxSpeedMs() : getAutopilotCruiseSpeedMs(car));
+            const carPosition = car.getPosition();
+            const stopTarget = state.targetRoadPosition || state.targetPosition;
+            if (getDistance2D(carPosition, state.targetPosition) <= 28 || stopTarget && getDistance2D(carPosition, stopTarget) <= 14) {
+                stopAutopilot("Ziel erreicht", !0);
+                return !0;
+            }
+            if (!state.edge || !state.snapped) {
+                const match = findNearestRoadSegment(carPosition, 1 / 0);
+                if (!match) {
+                    const now = performance.now();
+                    if (now - (state.lastNoticeAt || 0) > 2500) {
+                        state.lastNoticeAt = now;
+                        notifyRuntime("Automatik sucht eine geladene Strasse...", "error");
+                    }
+                    return !1;
+                }
+                if (match.distance > 7) {
+                    state.linking = !0;
+                    const now = performance.now();
+                    if (now - (state.lastLinkNoticeAt || 0) > 2500) {
+                        state.lastLinkNoticeAt = now;
+                        notifyRuntime("Automatik linkt zur naechsten Strasse.");
+                    }
+                    return moveCarTowardAutopilotRoad(car, match, speed, dt);
+                }
+                setAutopilotRoadMatch(state, match);
+            }
+            const pose = advanceAutopilotAlongRoad(state, speed * dt);
+            if (!pose) {
+                resetAutopilotRoadState(state);
+                return !1;
+            }
+            applyAutopilotPose(car, pose, speed);
+            syncAutopilotDebug();
+            return !0;
+        }
+
+        function getControlManager() {
+            return runtimeState.game && runtimeState.game.controlManager || null;
+        }
+
+        function getPlayerCar() {
+            const manager = getControlManager();
+            return manager && manager.controllableCar || null;
+        }
+
+        function getControlPosition() {
+            const manager = getControlManager();
+            try {
+                if (manager && "function" == typeof manager.getPosition)
+                    return manager.getPosition();
+            } catch (positionError) {}
+            if (manager && !manager.inCar && manager.controlableHuman && "function" == typeof manager.controlableHuman.getPosition)
+                return manager.controlableHuman.getPosition();
+            const car = getPlayerCar();
+            return car && typeof car.getPosition === "function" ? car.getPosition() : null;
+        }
+
+        function getPlayerPosition() {
+            const car = getPlayerCar();
+            return car && typeof car.getPosition === "function" ? car.getPosition() : getControlPosition();
+        }
+
+        function setPlayerCarHidden(hidden) {
+            const car = getPlayerCar();
+            if (!car)
+                return;
+            for (const object of [car.group, car.trailer && car.trailer.group])
+                object && (object.visible = !hidden);
+        }
+
+        function notifyRuntime(message, kind) {
+            const manager = runtimeState.game && runtimeState.game.snackBarManager;
+            try {
+                if (manager && "error" === kind && typeof manager.createErrorSnacbkar === "function")
+                    return manager.createErrorSnacbkar(message);
+                if (manager && typeof manager.createInfoSnacbkar === "function")
+                    return manager.createInfoSnacbkar(message);
+            } catch (notifyError) {}
+            log(message);
+        }
+
+        function getGameWallet() {
+            const wallet = runtimeState.game && runtimeState.game.wallet;
+            return wallet && "object" == typeof wallet ? wallet : null;
+        }
+
+        function getPlayerMoney() {
+            const wallet = getGameWallet();
+            return wallet && Number.isFinite(Number(wallet.amount)) ? Number(wallet.amount) : Number(runtimeState.playerMoney) || 0;
+        }
+
+        function setPlayerMoney(value) {
+            const nextValue = Number(value) || 0;
+            const wallet = getGameWallet();
+            runtimeState.playerMoney = nextValue;
+            if (wallet) {
+                wallet.amount = nextValue;
+                typeof wallet.updateValue === "function" && wallet.updateValue();
+            }
+            syncFeatureMenu();
+        }
+
+        function receivePlayerMoney(amount) {
+            const value = Math.max(0, Number(amount) || 0);
+            if (!value)
+                return;
+            const wallet = getGameWallet();
+            if (wallet && typeof wallet.receive === "function")
+                wallet.receive(value),
+                runtimeState.playerMoney = Number(wallet.amount) || getPlayerMoney();
+            else
+                runtimeState.playerMoney += value,
+                notifyRuntime(`+${value.toFixed(0)} EUR`);
+            syncFeatureMenu();
+        }
+
+        function payPlayerMoney(amount) {
+            const value = Math.max(0, Number(amount) || 0);
+            if (!value)
+                return;
+            const wallet = getGameWallet();
+            if (wallet && typeof wallet.pay === "function")
+                wallet.pay(value),
+                runtimeState.playerMoney = Number(wallet.amount) || getPlayerMoney();
+            else
+                runtimeState.playerMoney -= value,
+                notifyRuntime(`-${value.toFixed(0)} EUR`, "error");
+            syncFeatureMenu();
+        }
+
+        function setFeature(name, value) {
+            featureState[name] = !!value;
+            if ("hardStart" === name && featureState.hardStart) {
+                featureState.survival = !0;
+                featureState.police = !0;
+                featureState.vehicleDamage = !0;
+                setPlayerMoney(0);
+                runtimeState.hardStartLocked = !0;
+            }
+            syncFeatureMenu();
+        }
+
+        function syncFeatureMenu() {
+            for (const panel of document.querySelectorAll("#__tmFeatureMenuSection,#__tmFeatureStartMenuSection"))
+                for (const input of panel.querySelectorAll("input[data-feature]"))
+                    input.checked = !!featureState[input.dataset.feature];
+        }
+
+        function createFeatureMenuPanel(id, title) {
+            let panel = document.getElementById(id);
+            if (panel)
+                return panel;
+            panel = document.createElement("div");
+            panel.id = id;
+            panel.style.cssText = "box-sizing:border-box;width:min(760px,calc(100% - 24px));margin:12px auto 0;padding:10px 12px;border-top:1px solid rgba(255,255,255,.16);border-bottom:1px solid rgba(255,255,255,.08);color:inherit;font:600 12px/1.35 Arial,Helvetica,sans-serif;text-align:left;";
+            panel.innerHTML = `
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;">
+                    <div style="letter-spacing:.04em;text-transform:uppercase;opacity:.82;">${title}</div>
+                    <button type="button" data-role="openNavi" style="border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.08);color:inherit;border-radius:8px;padding:5px 8px;font:inherit;cursor:pointer;">Navi</button>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:6px 12px;">
+                    ${FEATURE_MENU_ITEMS.map(item => `<label style="display:flex;gap:6px;align-items:center;"><input type="checkbox" data-feature="${item.feature}"> ${item.label}</label>`).join("")}
+                </div>
+            `;
+            panel.addEventListener("change", (event => {
+                const input = event.target;
+                input && input.dataset && input.dataset.feature && setFeature(input.dataset.feature, input.checked);
+            }));
+            const naviButton = panel.querySelector('[data-role="openNavi"]');
+            naviButton && naviButton.addEventListener("click", (event => {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleNaviPanel(!0);
+            }));
+            return panel;
+        }
+
+        function getElementLabelText(element) {
+            return normalizeTownLabel((element && (element.textContent || element.value || element.getAttribute && element.getAttribute("aria-label"))) || "");
+        }
+
+        function findStartMenuTarget() {
+            const excludedSelector = "#game_menu,#content_menu,#__tmFeatureMenuSection,#__tmFeatureStartMenuSection";
+            const buttons = Array.from(document.querySelectorAll('button,a,[role="button"],input[type="button"],input[type="submit"]'));
+            const openMapButton = buttons.find(element => !element.closest(excludedSelector) && /\b(open\s*map|open\s*world|start|play)\b/i.test(getElementLabelText(element)));
+            if (openMapButton)
+                return openMapButton.closest(".main-buttons,.buttons,.start-menu,.startMenu,.menu,.modal,.dialog,.card,section,main") || openMapButton.parentElement;
+            return document.getElementById("start_menu") || document.getElementById("startMenu") || document.querySelector(".start-menu,.startMenu");
+        }
+
+        function ensureStartFeatureMenu() {
+            if (!document.body)
+                return;
+            const target = findStartMenuTarget();
+            if (!target)
+                return;
+            const panel = createFeatureMenuPanel("__tmFeatureStartMenuSection", "TM Gameplay vor Start");
+            if (target.matches && target.matches(".main-buttons,.buttons") && target.parentNode) {
+                if (panel.previousElementSibling !== target)
+                    target.insertAdjacentElement("afterend", panel);
+            } else if (panel.parentNode !== target)
+                target.appendChild(panel);
+            runtimeState.startFeaturePanel = panel;
+            syncFeatureMenu();
+        }
+
+        function ensureStartMenuFeatureWatcher() {
+            if (runtimeState.startMenuFeatureWatcherInstalled) {
+                ensureStartFeatureMenu();
+                return;
+            }
+            runtimeState.startMenuFeatureWatcherInstalled = !0;
+            const refresh = () => ensureStartFeatureMenu();
+            refresh();
+            document.addEventListener("DOMContentLoaded", refresh);
+            setInterval(refresh, 1200);
+            if (document.documentElement) {
+                const observer = new MutationObserver(refresh);
+                observer.observe(document.documentElement, {
+                    childList: !0,
+                    subtree: !0
+                });
+                runtimeState.startMenuFeatureObserver = observer;
+            }
+        }
+
+        function ensureFeatureMenu(game) {
+            ensureStartFeatureMenu();
+            const oldFloatingPanel = document.getElementById("__tmFeaturePanel");
+            oldFloatingPanel && oldFloatingPanel.remove();
+            const target = document.getElementById("content_menu") || document.getElementById("game_menu");
+            if (!target)
+                return;
+            const panel = createFeatureMenuPanel("__tmFeatureMenuSection", "TM Gameplay");
+            const mainButtons = target.querySelector(".main-buttons");
+            if (mainButtons && mainButtons.parentNode)
+                mainButtons.insertAdjacentElement("afterend", panel);
+            else if (panel.parentNode !== target)
+                target.appendChild(panel);
+            runtimeState.featurePanel = panel;
+            syncFeatureMenu();
+        }
+
+        function ensureRuntimeOverlayGroup() {
+            const scene = townSignsState.scene || runtimeState.game && runtimeState.game.scene;
+            if (!scene || !globalState.THREE)
+                return null;
+            if (!runtimeState.overlayGroup) {
+                runtimeState.overlayGroup = new globalState.THREE.Group;
+                runtimeState.overlayGroup.name = "__tmRuntimeGameplayOverlay";
+            }
+            if (runtimeState.overlayAttachedTo !== scene) {
+                runtimeState.overlayAttachedTo && runtimeState.overlayAttachedTo.remove(runtimeState.overlayGroup);
+                scene.add(runtimeState.overlayGroup);
+                runtimeState.overlayAttachedTo = scene;
+            }
+            return runtimeState.overlayGroup;
+        }
+
+        function getTerrainYWorld(position, fallback=0) {
+            const game = runtimeState.game;
+            if (!game || !game.chunkManager || !position)
+                return fallback;
+            try {
+                const chunk = game.chunkManager.getCurrentChunk ? game.chunkManager.getCurrentChunk(position) : null;
+                if (chunk && typeof chunk.getTerrainYLoc === "function") {
+                    const localX = position.x - (chunk.cx || 0);
+                    const localZ = position.z - (chunk.cz || 0);
+                    const y = chunk.getTerrainYLoc(localX, localZ);
+                    if (Number.isFinite(y) && y > -999)
+                        return y;
+                }
+            } catch (terrainError) {}
+            return fallback;
+        }
+
+        function createBox(size, color, position) {
+            const THREE = globalState.THREE;
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(size[0], size[1], size[2]), new THREE.MeshLambertMaterial({
+                color
+            }));
+            position && mesh.position.set(position[0], position[1], position[2]);
+            return mesh;
+        }
+
+        function createEllipsoid(size, color, position, material) {
+            const THREE = globalState.THREE;
+            const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 12), material || new THREE.MeshLambertMaterial({
+                color
+            }));
+            mesh.scale.set(size[0] / 2, size[1] / 2, size[2] / 2);
+            position && mesh.position.set(position[0], position[1], position[2]);
+            return mesh;
+        }
+
+        function disposeObject3D(object) {
+            if (!object)
+                return;
+            object.traverse && object.traverse((node => {
+                if (!node || !node.isMesh)
+                    return;
+                node.geometry && typeof node.geometry.dispose === "function" && node.geometry.dispose();
+                if (Array.isArray(node.material))
+                    for (const material of node.material)
+                        material && typeof material.dispose === "function" && material.dispose();
+                else
+                    node.material && typeof node.material.dispose === "function" && node.material.dispose();
+            }
+            ));
+        }
+
+        function enhanceVehicleAppearance(vehicle) {
+            if (!vehicle || !vehicle.group)
+                return;
+            const oldOverlays = vehicle.group.children.filter(child => child && "__tmRoundedVehicleDetails" === child.name);
+            for (const overlay of oldOverlays) {
+                vehicle.group.remove(overlay);
+                disposeObject3D(overlay);
+            }
+            vehicle.__tmAppearanceEnhanced = !1;
+        }
+
+        function isInTownArea(position) {
+            if (!position)
+                return !1;
+            return toSafeArray(townSignsState.debugPlaces).some(place => {
+                const center = new globalState.THREE.Vector3(Number(place.center && place.center.x) || 0, 0, Number(place.center && place.center.z) || 0);
+                return getDistance2D(position, center) <= Math.max(Number(place.radius) || 0, 180) + 80;
+            });
+        }
+
+        function applyTrafficEnvironmentPolicy(resolver, aiId, aiCar) {
+            if (!resolver || !aiCar || !townSignsState.roadModule)
+                return;
+            const road = resolver.carPaths && resolver.carPaths[aiId] && resolver.carPaths[aiId].pathSegments && resolver.carPaths[aiId].pathSegments[0] && resolver.carPaths[aiId].pathSegments[0].road;
+            const rm = townSignsState.roadModule;
+            let maxKmh = 70;
+            if (road) {
+                if (road.type === rm.ROAD_TYPE_MOTORWAY || road.type === rm.ROAD_TYPE_MOTORWAY_NO_HARD_SHOULDER || road.type === rm.ROAD_TYPE_MOTORWAY_OPEN)
+                    maxKmh = 115;
+                else if (road.type === rm.ROAD_TYPE_TRUNK || road.type === rm.ROAD_TYPE_PRIMARY)
+                    maxKmh = 85;
+                else if (road.type === rm.ROAD_TYPE_SECONDARY)
+                    maxKmh = 70;
+                else if (road.type === rm.ROAD_TYPE_TERTIARY)
+                    maxKmh = 55;
+                else if (road.type === rm.ROAD_TYPE_RESIDENTIAL || road.type === rm.ROAD_TYPE_SERVICE)
+                    maxKmh = 34;
+            }
+            if (isInTownArea(aiCar.getPosition && aiCar.getPosition()))
+                maxKmh = Math.min(maxKmh, 48);
+            const maxSpeed = maxKmh / 3.6;
+            resolver.targetSpeeds[aiId] = Math.min(Number(resolver.targetSpeeds[aiId]) || maxSpeed, maxSpeed);
+            resolver.speeds[aiId] = Math.min(Number(resolver.speeds[aiId]) || maxSpeed, maxSpeed + 2);
+        }
+
+        function createPoliceVisual() {
+            const THREE = globalState.THREE;
+            const group = new THREE.Group;
+            group.name = "__tmPoliceCar";
+            const lightRed = new THREE.MeshBasicMaterial({
+                color: 0xff2030
+            });
+            const lightBlue = new THREE.MeshBasicMaterial({
+                color: 0x2f77ff
+            });
+            const glass = new THREE.MeshLambertMaterial({
+                color: 0x83b8d8
+            });
+            group.add(createEllipsoid([5.7, 1.05, 2.2], 0x183b78, [0, .88, 0]));
+            group.add(createEllipsoid([2.65, .92, 1.7], 0xf2f2ef, [-.25, 1.48, 0]));
+            group.add(createEllipsoid([1.65, .5, 1.74], 0x17305e, [1.72, 1.12, 0]));
+            group.add(createEllipsoid([1.3, .45, 1.62], 0x244f99, [-2.08, 1.08, 0]));
+            group.add(createBox([.08, .42, 1.38], 0xffffff, [.15, 1.47, 0]));
+            group.add(createBox([.08, .42, 1.38], 0xffffff, [-1.08, 1.47, 0]));
+            const windshield = createBox([.12, .52, 1.42], 0x83b8d8, [1.12, 1.56, 0]);
+            windshield.material = glass;
+            group.add(windshield);
+            const rearWindow = createBox([.12, .48, 1.36], 0x83b8d8, [-1.48, 1.54, 0]);
+            rearWindow.material = glass;
+            group.add(rearWindow);
+            const lightbar = new THREE.Group;
+            lightbar.name = "__tmPoliceLightbar";
+            const red = createBox([.64, .2, .42], 0xff2030, [-.32, 1.96, -.24]);
+            red.material = lightRed;
+            const blue = createBox([.64, .2, .42], 0x2f77ff, [-.32, 1.96, .24]);
+            blue.material = lightBlue;
+            const center = createBox([.68, .12, .18], 0xf4f4f4, [-.32, 1.94, 0]);
+            lightbar.add(red, blue, center);
+            group.add(lightbar);
+            const headLeft = createBox([.08, .22, .46], 0xfff2a8, [2.74, .86, -.55]);
+            const headRight = createBox([.08, .22, .46], 0xfff2a8, [2.74, .86, .55]);
+            headLeft.material = new THREE.MeshBasicMaterial({
+                color: 0xfff2a8
+            });
+            headRight.material = headLeft.material;
+            group.add(headLeft, headRight);
+            const tailLeft = createBox([.08, .2, .42], 0xb60e1b, [-2.76, .86, -.55]);
+            const tailRight = createBox([.08, .2, .42], 0xb60e1b, [-2.76, .86, .55]);
+            tailLeft.material = new THREE.MeshBasicMaterial({
+                color: 0xb60e1b
+            });
+            tailRight.material = tailLeft.material;
+            group.add(tailLeft, tailRight);
+            const wheels = [];
+            for (const x of [-1.55, 1.55])
+                for (const z of [-1.1, 1.1]) {
+                    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(.38, .38, .28, 16), new THREE.MeshLambertMaterial({
+                        color: 0x111111
+                    }));
+                    wheel.rotation.x = Math.PI / 2;
+                    wheel.position.set(x, .38, z);
+                    group.add(wheel);
+                    wheels.push(wheel);
+                }
+            group.userData.wheels = wheels;
+            group.userData.wheelRadius = .38;
+            group.userData.lightRed = red;
+            group.userData.lightBlue = blue;
+            return group;
+        }
+
+        function spawnPoliceCar(playerPos, index) {
+            const overlay = ensureRuntimeOverlayGroup();
+            if (!overlay || !playerPos)
+                return null;
+            const car = createPoliceVisual();
+            const angle = (index * 2.17 + performance.now() * .001) % (Math.PI * 2);
+            const distance = 70 + 22 * index;
+            car.position.set(playerPos.x + Math.cos(angle) * distance, getTerrainYWorld(playerPos, 0), playerPos.z + Math.sin(angle) * distance);
+            overlay.add(car);
+            const state = {
+                group: car,
+                speed: 13 + 2.5 * index,
+                index
+            };
+            runtimeState.policeCars.push(state);
+            return state;
+        }
+
+        function startPoliceChase(reason, count=1, duration=60) {
+            if (!featureState.police)
+                return;
+            const playerPos = getPlayerPosition();
+            if (!playerPos)
+                return;
+            runtimeState.policeState = {
+                startedAt: performance.now() / 1e3,
+                lastTouchAt: performance.now() / 1e3,
+                reinforcementAt: performance.now() / 1e3 + duration,
+                reason,
+                escapedOnce: runtimeState.policeState && runtimeState.policeState.escapedOnce || !1,
+                duration
+            };
+            for (let index = runtimeState.policeCars.length; index < count; index++)
+                spawnPoliceCar(playerPos, index);
+            notifyRuntime(`Police chase started: ${reason}`);
+        }
+
+        function clearPoliceCars() {
+            for (const car of runtimeState.policeCars)
+                car.group && car.group.parent && car.group.parent.remove(car.group);
+            runtimeState.policeCars = [];
+        }
+
+        function updatePolice(dtSeconds) {
+            const player = getPlayerCar();
+            const playerPos = player && player.getPosition && player.getPosition();
+            if (!featureState.police || !player || !playerPos) {
+                clearPoliceCars();
+                runtimeState.policeState = null;
+                return;
+            }
+            const playerSpeedKmh = speedAbs(player.speed) * 3.6;
+            const inTown = isInTownArea(playerPos);
+            if (!runtimeState.policeState && inTown && playerSpeedKmh > 60) {
+                if (runtimeState.__tmEscapedPoliceOnce)
+                    return resetPlayerWorld("Repeated speeding in town after escaping police");
+                startPoliceChase("speeding in town", 1, 60);
+            }
+            const state = runtimeState.policeState;
+            if (!state)
+                return;
+            if (!runtimeState.policeCars.length)
+                spawnPoliceCar(playerPos, 0);
+            const now = performance.now() / 1e3;
+            for (const car of runtimeState.policeCars) {
+                const group = car.group;
+                if (!group)
+                    continue;
+                const dir = playerPos.clone().sub(group.position);
+                dir.y = 0;
+                const distance = dir.length();
+                if (distance > 1e-3) {
+                    dir.normalize();
+                    const step = Math.min(distance, car.speed * dtSeconds);
+                    group.position.addScaledVector(dir, step);
+                    group.position.y = getTerrainYWorld(group.position, group.position.y);
+                    group.rotation.y = getYawFromVector(dir);
+                    const radius = Number(group.userData.wheelRadius) || .38;
+                    for (const wheel of toSafeArray(group.userData.wheels))
+                        wheel.rotation.z -= step / radius;
+                }
+                const flash = Math.floor(now * 9 + car.index) % 2;
+                group.userData.lightRed && (group.userData.lightRed.visible = 0 === flash);
+                group.userData.lightBlue && (group.userData.lightBlue.visible = 1 === flash);
+                if (distance < 4.2) {
+                    applyVehicleDamage(24, "police hit");
+                    payPlayerMoney(100);
+                    state.lastTouchAt = now;
+                    notifyRuntime("Police hit you: -100 EUR", "error");
+                    clearPoliceCars();
+                    runtimeState.policeState = null;
+                    syncFeatureMenu();
+                    return;
+                }
+            }
+            if (now >= state.reinforcementAt) {
+                if (runtimeState.policeCars.length < 5) {
+                    spawnPoliceCar(playerPos, runtimeState.policeCars.length);
+                    state.reinforcementAt = now + state.duration;
+                    notifyRuntime("Police reinforcement arrived");
+                } else {
+                    runtimeState.__tmEscapedPoliceOnce = !0;
+                    notifyRuntime("You escaped the police.");
+                    clearPoliceCars();
+                    runtimeState.policeState = null;
+                }
+            }
+        }
+
+        function ensureVehicleDamagePanel() {
+            if (runtimeState.damagePanel && runtimeState.damagePanel.isConnected)
+                return runtimeState.damagePanel;
+            if (!document.body)
+                return null;
+            const panel = document.createElement("div");
+            panel.id = "__tmVehicleDamagePanel";
+            panel.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:999998;width:230px;box-sizing:border-box;background:rgba(19,23,28,.9);color:#f5f1e8;border:1px solid rgba(255,255,255,.16);border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.28);padding:10px 11px;font:700 12px/1.35 Arial,Helvetica,sans-serif;display:none;backdrop-filter:blur(10px);";
+            panel.innerHTML = `
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;">
+                    <span>Vehicle damage</span>
+                    <span data-role="value">0%</span>
+                </div>
+                <div style="height:8px;background:rgba(255,255,255,.14);border-radius:99px;overflow:hidden;">
+                    <div data-role="bar" style="height:100%;width:0%;background:#45d17a;border-radius:99px;"></div>
+                </div>
+                <div data-role="state" style="margin-top:6px;color:#9fd7ff;font-weight:600;">OK</div>
+            `;
+            document.body.appendChild(panel);
+            runtimeState.damagePanel = panel;
+            return panel;
+        }
+
+        function syncVehicleDamageDisplay(car=getPlayerCar()) {
+            const panel = ensureVehicleDamagePanel();
+            if (!panel)
+                return;
+            const damage = clamp(Number(car && car.__tmDamage) || 0, 0, 120);
+            const visible = !!featureState.vehicleDamage || damage > 0;
+            panel.style.display = visible ? "block" : "none";
+            const percent = Math.min(120, Math.round(damage));
+            const ratio = clamp(damage / 100, 0, 1);
+            const value = panel.querySelector('[data-role="value"]');
+            const bar = panel.querySelector('[data-role="bar"]');
+            const state = panel.querySelector('[data-role="state"]');
+            value && (value.textContent = `${percent}%`);
+            if (bar) {
+                bar.style.width = `${Math.min(100, percent)}%`;
+                bar.style.background = ratio < .35 ? "#45d17a" : ratio < .7 ? "#f4c542" : "#e64b4b";
+            }
+            if (state) {
+                state.textContent = car && car.__tmBrokenDown ? "BROKEN" : ratio < .35 ? "OK" : ratio < .7 ? "Damaged" : "Critical";
+                state.style.color = ratio < .35 ? "#9fd7ff" : ratio < .7 ? "#ffd96a" : "#ff9f9f";
+            }
+        }
+
+        function ensureVehicleDamageVisuals(car) {
+            if (!car || !car.cameraGroup || !globalState.THREE)
+                return null;
+            if (car.__tmDamageVisuals && car.__tmDamageVisuals.parent)
+                return car.__tmDamageVisuals;
+            const THREE = globalState.THREE;
+            const group = new THREE.Group;
+            group.name = "__tmVehicleDamageVisuals";
+            const scorchMaterial = new THREE.MeshBasicMaterial({
+                color: 0x181818,
+                transparent: !0,
+                opacity: .78
+            });
+            const smokeMaterial = new THREE.MeshLambertMaterial({
+                color: 0x5f6468,
+                transparent: !0,
+                opacity: .38
+            });
+            const sparkMaterial = new THREE.MeshBasicMaterial({
+                color: 0xffa331
+            });
+            const dents = [
+                createEllipsoid([1.1, .08, .52], 0x181818, [2.05, 1.08, -.35], scorchMaterial),
+                createEllipsoid([.85, .07, .42], 0x181818, [1.25, 1.12, .62], scorchMaterial),
+                createEllipsoid([.72, .06, .38], 0x181818, [-1.55, 1.04, -.72], scorchMaterial)
+            ];
+            for (const dent of dents)
+                group.add(dent);
+            const smoke = new THREE.Group;
+            smoke.name = "__tmDamageSmoke";
+            for (let index = 0; index < 7; index++) {
+                const puff = createEllipsoid([.34 + .05 * index, .25 + .05 * index, .34 + .05 * index], 0x5f6468, [1.35 + .12 * index, 1.42 + .22 * index, -.25 + Math.sin(index) * .24], smokeMaterial.clone());
+                smoke.add(puff);
+            }
+            group.add(smoke);
+            const sparks = new THREE.Group;
+            sparks.name = "__tmDamageSparks";
+            for (let index = 0; index < 8; index++)
+                sparks.add(createEllipsoid([.08, .08, .08], 0xffa331, [1.65, 1.22, -.35], sparkMaterial));
+            group.add(sparks);
+            group.userData.dents = dents;
+            group.userData.smoke = smoke;
+            group.userData.sparks = sparks;
+            car.cameraGroup.add(group);
+            car.__tmDamageVisuals = group;
+            return group;
+        }
+
+        function updateVehicleDamageVisuals(dtSeconds) {
+            const car = getPlayerCar();
+            syncVehicleDamageDisplay(car);
+            if (!car)
+                return;
+            const group = ensureVehicleDamageVisuals(car);
+            if (!group)
+                return;
+            const damage = clamp(Number(car.__tmDamage) || 0, 0, 120);
+            const ratio = clamp(damage / 100, 0, 1);
+            group.visible = !!featureState.vehicleDamage && ratio > .03 && !runtimeState.activeAircraft;
+            if (!group.visible)
+                return;
+            const time = performance.now() / 1000;
+            const dents = toSafeArray(group.userData.dents);
+            for (let index = 0; index < dents.length; index++)
+                dents[index].visible = ratio > .12 + index * .18;
+            const smoke = group.userData.smoke;
+            if (smoke) {
+                smoke.visible = ratio > .35;
+                for (let index = 0; index < smoke.children.length; index++) {
+                    const puff = smoke.children[index];
+                    const wave = (time * (.8 + ratio) + index * .37) % 1;
+                    puff.position.y = 1.35 + index * .18 + wave * .55;
+                    puff.position.x = 1.15 + Math.sin(time * 2 + index) * .18 + index * .08;
+                    puff.position.z = -.2 + Math.cos(time * 1.7 + index) * .22;
+                    puff.scale.setScalar(.25 + ratio * .45 + wave * .18);
+                    puff.material && (puff.material.opacity = clamp(.16 + ratio * .35 - wave * .12, .08, .55));
+                }
+            }
+            const sparks = group.userData.sparks;
+            if (sparks) {
+                sparks.visible = ratio > .78;
+                for (let index = 0; index < sparks.children.length; index++) {
+                    const spark = sparks.children[index];
+                    const wave = (time * 8 + index * .41) % 1;
+                    spark.position.set(1.75 + wave * .85, 1.12 + Math.sin(wave * Math.PI) * .55, -.35 + Math.cos(index * 2.3) * wave * .5);
+                    spark.visible = wave < .72;
+                }
+            }
+        }
+
+        function applyVehicleDamage(amount, reason) {
+            if (!featureState.vehicleDamage)
+                return;
+            const car = getPlayerCar();
+            if (!car)
+                return;
+            car.__tmDamage = Math.min(120, (Number(car.__tmDamage) || 0) + Math.max(0, amount));
+            syncVehicleDamageDisplay(car);
+            if (car.__tmDamage >= 100 && !car.__tmBrokenDown) {
+                car.__tmBrokenDown = !0;
+                car.engineRunning = !1;
+                setPlayerSpeed(car, 0);
+                notifyRuntime(`Car broken (${reason}). Press E near it to tow for 180 EUR or steal a replacement.`, "error");
+            }
+        }
+
+        function resetPlayerWorld(reason) {
+            const car = getPlayerCar();
+            notifyRuntime(`${reason}. Reset.`, "error");
+            setPlayerMoney(0);
+            runtimeState.survivalState = null;
+            clearPoliceCars();
+            runtimeState.policeState = null;
+            if (car) {
+                if (typeof car.reset === "function")
+                    car.reset();
+                car.__tmDamage = 0;
+                car.__tmBrokenDown = !1;
+                car.engineRunning = !0;
+                syncVehicleDamageDisplay(car);
+            }
+            syncFeatureMenu();
+        }
+
+        function ensureSurvivalState() {
+            if (!runtimeState.survivalState)
+                runtimeState.survivalState = {
+                    hunger: featureState.hardStart ? 35 : 100,
+                    thirst: featureState.hardStart ? 35 : 100,
+                    lastBuyAt: 0
+                };
+            return runtimeState.survivalState;
+        }
+
+        function updateSurvival(dtSeconds) {
+            if (!featureState.survival)
+                return;
+            const state = ensureSurvivalState();
+            state.hunger -= dtSeconds * .18;
+            state.thirst -= dtSeconds * .28;
+            if (state.hunger <= 0 || state.thirst <= 0)
+                resetPlayerWorld("You starved or dehydrated");
+        }
+
+        function chunkPoiKey(chunk) {
+            return `${Math.round(Number(chunk && chunk.cx) || 0)}:${Math.round(Number(chunk && chunk.cz) || 0)}`;
+        }
+
+        function queuePoiFetch(chunk) {
+            if (!chunk || !chunk.bbox || !runtimeState.geoModule)
+                return;
+            const key = chunkPoiKey(chunk);
+            if (runtimeState.poiCache.has(key) || runtimeState.poiRequestQueue.has(key))
+                return;
+            runtimeState.poiRequestQueue.add(key);
+            const south = Math.min(Number(chunk.bbox[0]) || 0, Number(chunk.bbox[2]) || 0);
+            const north = Math.max(Number(chunk.bbox[0]) || 0, Number(chunk.bbox[2]) || 0);
+            const west = Math.min(Number(chunk.bbox[1]) || 0, Number(chunk.bbox[3]) || 0);
+            const east = Math.max(Number(chunk.bbox[1]) || 0, Number(chunk.bbox[3]) || 0);
+            const query = `[out:json][timeout:8];(node["shop"="supermarket"](${south},${west},${north},${east});way["shop"="supermarket"](${south},${west},${north},${east});node["shop"="car"](${south},${west},${north},${east});way["shop"="car"](${south},${west},${north},${east});node["craft"="beekeeper"](${south},${west},${north},${east});node["man_made"="apiary"](${south},${west},${north},${east}););out center tags;`;
+            fetch("https://overpass-api.de/api/interpreter", {
+                method: "POST",
+                body: query
+            }).then(response => response.json()).then(data => {
+                const pois = [];
+                for (const element of toSafeArray(data && data.elements)) {
+                    const lat = Number(element.lat || element.center && element.center.lat);
+                    const lon = Number(element.lon || element.center && element.center.lon);
+                    if (!Number.isFinite(lat) || !Number.isFinite(lon))
+                        continue;
+                    let position = null;
+                    try {
+                        position = runtimeState.geoModule.convertProjLocalCoords([lat, lon]);
+                    } catch (geoError) {}
+                    if (!position)
+                        continue;
+                    const tags = element.tags || {};
+                    const type = "supermarket" === tags.shop ? "supermarket" : "car" === tags.shop ? "autoshop" : "apiary";
+                    position.y = getTerrainYWorld(position, 0);
+                    pois.push({
+                        type,
+                        name: normalizeTownLabel(tags.name) || ("autoshop" === type ? "Auto shop" : "supermarket" === type ? "Supermarket" : "Apiary"),
+                        position
+                    });
+                }
+                runtimeState.poiCache.set(key, pois);
+            }).catch((poiError => {
+                runtimeState.poiCache.set(key, []);
+                warn("POI fetch failed:", poiError);
+            })).finally((() => runtimeState.poiRequestQueue.delete(key)));
+        }
+
+        function createPoiObject(poi) {
+            const THREE = globalState.THREE;
+            const group = new THREE.Group;
+            group.name = `__tmPoi:${poi.type}`;
+            const color = "supermarket" === poi.type ? 0x34a853 : "autoshop" === poi.type ? 0x3d77d4 : 0xffc928;
+            group.add(createBox([7, 3.2, 5], color, [0, 1.6, 0]));
+            group.add(createBox([5.8, .45, 4.2], 0xf4f4f4, [0, 3.45, 0]));
+            if ("apiary" === poi.type) {
+                for (let i = 0; i < 4; i++)
+                    group.add(createBox([.8, .55, .7], 0xf0d060, [-1.5 + i, .35, 2.5]));
+            }
+            group.position.copy(poi.position);
+            return group;
+        }
+
+        function rebuildPoiOverlays() {
+            const overlay = ensureRuntimeOverlayGroup();
+            if (!overlay || !featureState.shops)
+                return;
+            for (const chunk of getLoadedChunks())
+                queuePoiFetch(chunk);
+            const existing = new Set(runtimeState.overlayItems.filter(item => item.kind === "poi").map(item => item.key));
+            for (const [chunkKey, pois] of runtimeState.poiCache)
+                for (let index = 0; index < pois.length; index++) {
+                    const key = `${chunkKey}:${index}`;
+                    if (existing.has(key))
+                        continue;
+                    const object = createPoiObject(pois[index]);
+                    overlay.add(object);
+                    runtimeState.overlayItems.push({
+                        kind: "poi",
+                        key,
+                        type: pois[index].type,
+                        group: object,
+                        position: pois[index].position,
+                        data: pois[index]
+                    });
+                }
+        }
+
+        function getNearestPoi(type, maxDistance=28) {
+            const playerPos = getPlayerPosition();
+            if (!playerPos)
+                return null;
+            let best = null;
+            let bestDistance = maxDistance;
+            for (const item of runtimeState.overlayItems) {
+                if (item.kind !== "poi" || type && item.type !== type)
+                    continue;
+                const distance = getDistance2D(playerPos, item.position);
+                if (distance < bestDistance) {
+                    best = item;
+                    bestDistance = distance;
+                }
+            }
+            return best;
+        }
+
+        function buyFoodAndDrink() {
+            const survival = ensureSurvivalState();
+            if (getPlayerMoney() < 25)
+                return notifyRuntime("Not enough money for food and drink.", "error");
+            payPlayerMoney(25);
+            survival.hunger = Math.min(100, survival.hunger + 70);
+            survival.thirst = Math.min(100, survival.thirst + 80);
+            survival.lastBuyAt = performance.now();
+            notifyRuntime("Bought food and drink: -25 EUR");
+            syncFeatureMenu();
+        }
+
+        function interactRuntime() {
+            const now = performance.now();
+            if (runtimeState.lastInteractionAt && now - runtimeState.lastInteractionAt < 450)
+                return;
+            runtimeState.lastInteractionAt = now;
+            const car = getPlayerCar();
+            if (featureState.survival && getNearestPoi("supermarket", 35))
+                return buyFoodAndDrink();
+            if (featureState.hardStart && runtimeState.hardStartLocked && getNearestPoi("autoshop", 45)) {
+                if (getPlayerMoney() < 500) {
+                    runtimeState.hardStartLocked = !1;
+                    car && (car.engineRunning = !0);
+                    startPoliceChase("stolen starter car", 10, 180);
+                    notifyRuntime("No money: you stole a starter car. Police response incoming.", "error");
+                    return;
+                }
+                payPlayerMoney(500);
+                runtimeState.hardStartLocked = !1;
+                car && (car.engineRunning = !0);
+                notifyRuntime("Starter car bought.");
+                return syncFeatureMenu();
+            }
+            if (car && car.__tmBrokenDown) {
+                if (getPlayerMoney() >= 180) {
+                    payPlayerMoney(180);
+                    car.__tmDamage = 0;
+                    car.__tmBrokenDown = !1;
+                    car.engineRunning = !0;
+                    syncVehicleDamageDisplay(car);
+                    notifyRuntime("Tow truck repaired your car: -180 EUR");
+                    return syncFeatureMenu();
+                }
+                car.__tmDamage = 0;
+                car.__tmBrokenDown = !1;
+                car.engineRunning = !0;
+                syncVehicleDamageDisplay(car);
+                startPoliceChase("stolen replacement car", 10, 180);
+                notifyRuntime("You stole a replacement car. Police response incoming.", "error");
+            }
+        }
+
+        function suppressRunwayBuildings(chunk) {
+            if (!chunk || chunk.__tmRunwayBuildingsSuppressed || !chunk.aerowayGraph || !Array.isArray(chunk.buildings))
+                return;
+            const runways = toSafeArray(chunk.aerowayGraph.edges).filter(edge => edge && typeof edge.getLength === "function" && edge.getLength() >= 330);
+            if (!runways.length)
+                return;
+            chunk.__tmRunwayBuildingsSuppressed = !0;
+            chunk.buildings = chunk.buildings.filter(building => {
+                const center = building && building.houseCenterLocal;
+                if (!center)
+                    return !0;
+                for (const runway of runways) {
+                    const points = runway.points || [];
+                    for (let index = 0; index < points.length - 1; index++) {
+                        const a = points[index];
+                        const b = points[index + 1];
+                        const ax = a.x;
+                        const az = a.z;
+                        const bx = b.x;
+                        const bz = b.z;
+                        const dx = bx - ax;
+                        const dz = bz - az;
+                        const lenSq = dx * dx + dz * dz || 1;
+                        const t = clamp(((center.x - ax) * dx + (center.z - az) * dz) / lenSq, 0, 1);
+                        const px = ax + dx * t;
+                        const pz = az + dz * t;
+                        if (Math.hypot(center.x - px, center.z - pz) < Math.max(45, Number(runway.width) / 2 + 35))
+                            return !1;
+                    }
+                }
+                return !0;
+            });
+        }
+
+        function getAirportEntries() {
+            const airports = [];
+            for (const chunk of getLoadedChunks()) {
+                if (!chunk || !chunk.aerowayGraph || !chunk.centerVec)
+                    continue;
+                const edges = toSafeArray(chunk.aerowayGraph.edges);
+                for (let index = 0; index < edges.length; index++) {
+                    const edge = edges[index];
+                    if (!edge || typeof edge.getLength !== "function" || edge.getLength() < 330)
+                        continue;
+                    const points = edge.points.map(point => point.clone().add(chunk.centerVec));
+                    const start = points[0];
+                    const end = points[points.length - 1];
+                    const direction = end.clone().sub(start);
+                    direction.y = 0;
+                    if (direction.lengthSq() < 1e-6)
+                        continue;
+                    direction.normalize();
+                    const center = start.clone().lerp(end, .5);
+                    airports.push({
+                        key: `${chunkPoiKey(chunk)}:runway:${index}`,
+                        chunk,
+                        edge,
+                        points,
+                        center,
+                        direction,
+                        side: new globalState.THREE.Vector3(-direction.z,0,direction.x),
+                        length: edge.getLength(),
+                        width: Number(edge.width) || 30
+                    });
+                }
+            }
+            runtimeState.airports = airports;
+            return airports;
+        }
+
+        function createAircraftModel(type) {
+            const THREE = globalState.THREE;
+            const group = new THREE.Group;
+            group.name = `__tmAircraft:${type}`;
+            const white = new THREE.MeshLambertMaterial({
+                color: "helicopter" === type ? 0xe7efe7 : 0xf0f4fa
+            });
+            const dark = new THREE.MeshLambertMaterial({
+                color: 0x1f2833
+            });
+            const glass = new THREE.MeshLambertMaterial({
+                color: 0x89c2dc
+            });
+            const accentColor = "helicopter" === type ? 0x2c855c : "jet" === type ? 0xd84545 : "passenger" === type ? 0x2e6fc6 : 0xf0b73f;
+            const accent = new THREE.MeshLambertMaterial({
+                color: accentColor
+            });
+            const lightRed = new THREE.MeshBasicMaterial({
+                color: 0xff2935
+            });
+            const lightGreen = new THREE.MeshBasicMaterial({
+                color: 0x2ff072
+            });
+            const lightWhite = new THREE.MeshBasicMaterial({
+                color: 0xffffff
+            });
+            const length = "passenger" === type ? 86 : "jet" === type ? 24 : "helicopter" === type ? 15 : 18;
+            const bodyRadius = "passenger" === type ? 3.6 : "jet" === type ? 1.4 : "helicopter" === type ? 1.1 : 1.25;
+            const fuselage = new THREE.Mesh(new THREE.CylinderGeometry(bodyRadius, bodyRadius * .75, length, 18), white);
+            fuselage.rotation.z = Math.PI / 2;
+            group.add(fuselage);
+            const nose = new THREE.Mesh(new THREE.ConeGeometry(bodyRadius, bodyRadius * 2.2, 18), white);
+            nose.rotation.z = -Math.PI / 2;
+            nose.position.x = length / 2 + bodyRadius;
+            group.add(nose);
+            const tail = new THREE.Mesh(new THREE.ConeGeometry(bodyRadius * .75, bodyRadius * 1.8, 18), accent);
+            tail.rotation.z = Math.PI / 2;
+            tail.position.x = -length / 2 - bodyRadius * .6;
+            group.add(tail);
+            const cockpit = createBox([bodyRadius * 2.2, bodyRadius * .62, bodyRadius * 1.25], 0x89c2dc, [length * .34, bodyRadius * .35, 0]);
+            cockpit.material = glass;
+            group.add(cockpit);
+            const stripe = createBox([length * .78, bodyRadius * .18, bodyRadius * 2.05], accentColor, [-length * .04, -bodyRadius * .18, 0]);
+            group.add(stripe);
+            const rotors = [];
+            const wheels = [];
+            const lights = [];
+            if ("helicopter" === type) {
+                const mainRotor = new THREE.Group;
+                mainRotor.name = "__tmRotorMain";
+                mainRotor.add(createBox([9.8, .16, .28], 0x202326, [0, 0, 0]));
+                mainRotor.add(createBox([.28, .16, 9.8], 0x202326, [0, 0, 0]));
+                mainRotor.position.set(0, bodyRadius + 1.22, 0);
+                group.add(mainRotor);
+                rotors.push({
+                    group: mainRotor,
+                    axis: "y",
+                    speed: 24
+                });
+                const tailBoom = createBox([6.8, .28, .34], accentColor, [-length / 2 - 3.2, .55, 0]);
+                group.add(tailBoom);
+                const tailRotor = new THREE.Group;
+                tailRotor.name = "__tmRotorTail";
+                tailRotor.add(createBox([.14, 2.6, .18], 0x202326, [0, 0, 0]));
+                tailRotor.add(createBox([.14, .18, 2.6], 0x202326, [0, 0, 0]));
+                tailRotor.position.set(-length / 2 - 6.7, .72, 0);
+                group.add(tailRotor);
+                rotors.push({
+                    group: tailRotor,
+                    axis: "x",
+                    speed: 38
+                });
+                group.add(createBox([5.8, .12, .18], 0x1c1f22, [0, -bodyRadius - .2, -1.25]));
+                group.add(createBox([5.8, .12, .18], 0x1c1f22, [0, -bodyRadius - .2, 1.25]));
+                group.add(createBox([.18, .95, .18], 0x1c1f22, [-1.8, -bodyRadius * .7, -1.25]));
+                group.add(createBox([.18, .95, .18], 0x1c1f22, [1.8, -bodyRadius * .7, -1.25]));
+                group.add(createBox([.18, .95, .18], 0x1c1f22, [-1.8, -bodyRadius * .7, 1.25]));
+                group.add(createBox([.18, .95, .18], 0x1c1f22, [1.8, -bodyRadius * .7, 1.25]));
+            } else {
+                const wingSpan = "passenger" === type ? 78 : "jet" === type ? 20 : 16;
+                const wing = createBox([length * .26, .28, wingSpan], 0xd7dde8, [length * .02, 0, 0]);
+                group.add(wing);
+                const tailWing = createBox([length * .12, .2, wingSpan * .28], 0xd7dde8, [-length * .46, bodyRadius * .45, 0]);
+                group.add(tailWing);
+                const fin = createBox([length * .08, bodyRadius * 2.2, .28], accentColor, [-length * .48, bodyRadius * 1.2, 0]);
+                group.add(fin);
+                const windowCount = "passenger" === type ? 12 : "jet" === type ? 4 : 3;
+                for (let index = 0; index < windowCount; index++) {
+                    const x = length * .26 - index * (length * .52 / Math.max(1, windowCount - 1));
+                    for (const side of [-1, 1]) {
+                        const window = createBox(["passenger" === type ? 1.25 : .55, .42, .07], 0x89c2dc, [x, bodyRadius * .38, side * (bodyRadius + .03)]);
+                        window.material = glass;
+                        group.add(window);
+                    }
+                }
+                if ("passenger" === type)
+                    for (const z of [-wingSpan * .23, wingSpan * .23]) {
+                        const engine = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 3.2, 16), dark);
+                        engine.rotation.z = Math.PI / 2;
+                        engine.position.set(length * .02, -1.2, z);
+                        group.add(engine);
+                    }
+                if ("prop" === type) {
+                    const propeller = new THREE.Group;
+                    propeller.name = "__tmPropeller";
+                    propeller.add(createBox([.16, 3.8, .22], 0x202326, [0, 0, 0]));
+                    propeller.add(createBox([.16, .22, 3.8], 0x202326, [0, 0, 0]));
+                    propeller.position.set(length / 2 + bodyRadius * 2.3, 0, 0);
+                    group.add(propeller);
+                    rotors.push({
+                        group: propeller,
+                        axis: "x",
+                        speed: 34
+                    });
+                }
+                const gearXs = "passenger" === type ? [-length * .22, length * .22] : [-length * .22, length * .18];
+                for (const x of gearXs)
+                    for (const z of [-bodyRadius * 1.05, bodyRadius * 1.05]) {
+                        const wheel = new THREE.Mesh(new THREE.CylinderGeometry(bodyRadius * .18, bodyRadius * .18, bodyRadius * .16, 12), dark);
+                        wheel.rotation.x = Math.PI / 2;
+                        wheel.position.set(x, -bodyRadius - .25, z);
+                        group.add(wheel);
+                        wheels.push(wheel);
+                    }
+                const noseGear = new THREE.Mesh(new THREE.CylinderGeometry(bodyRadius * .16, bodyRadius * .16, bodyRadius * .14, 12), dark);
+                noseGear.rotation.x = Math.PI / 2;
+                noseGear.position.set(length * .38, -bodyRadius - .2, 0);
+                group.add(noseGear);
+                wheels.push(noseGear);
+                const leftLight = createBox([.22, .18, .22], 0xff2935, [length * .02, .08, -wingSpan / 2]);
+                leftLight.material = lightRed;
+                const rightLight = createBox([.22, .18, .22], 0x2ff072, [length * .02, .08, wingSpan / 2]);
+                rightLight.material = lightGreen;
+                group.add(leftLight, rightLight);
+                lights.push(leftLight, rightLight);
+            }
+            const beacon = createBox([.32, .2, .32], 0xffffff, [-length * .05, bodyRadius + .18, 0]);
+            beacon.material = lightWhite;
+            group.add(beacon);
+            lights.push(beacon);
+            group.userData.rotors = rotors;
+            group.userData.wheels = wheels;
+            group.userData.lights = lights;
+            group.userData.wheelRadius = Math.max(.22, bodyRadius * .18);
+            group.userData.tmAircraftType = type;
+            return group;
+        }
+
+        function animateAircraftVisual(group, speed, dtSeconds) {
+            if (!group)
+                return;
+            const dt = clamp(Number(dtSeconds) || .016, 1 / 240, .08);
+            const motion = Math.max(2, Math.abs(Number(speed) || 0));
+            for (const rotor of toSafeArray(group.userData.rotors)) {
+                if (!rotor || !rotor.group)
+                    continue;
+                const delta = dt * motion * (Number(rotor.speed) || 24) / 12;
+                if ("x" === rotor.axis)
+                    rotor.group.rotation.x += delta;
+                else if ("z" === rotor.axis)
+                    rotor.group.rotation.z += delta;
+                else
+                    rotor.group.rotation.y += delta;
+            }
+            const radius = Number(group.userData.wheelRadius) || .28;
+            for (const wheel of toSafeArray(group.userData.wheels))
+                wheel.rotation.z -= motion * dt / radius;
+            const flash = Math.floor(performance.now() / 160) % 2;
+            for (let index = 0; index < toSafeArray(group.userData.lights).length; index++)
+                group.userData.lights[index].visible = index === group.userData.lights.length - 1 || flash === index % 2;
+        }
+
+        function createAirportOverlay(airport) {
+            const overlay = ensureRuntimeOverlayGroup();
+            if (!overlay || runtimeState.overlayItems.some(item => item.kind === "airport" && item.key === airport.key))
+                return;
+            const group = new globalState.THREE.Group;
+            group.name = `__tmAirport:${airport.key}`;
+            const base = airport.center.clone().addScaledVector(airport.side, airport.width / 2 + 58);
+            base.y = getTerrainYWorld(base, 0);
+            const terminal = createBox([42, 8, 24], 0xbfc7d1, [0, 4, 0]);
+            const apron = createBox([120, .18, 70], 0x555b61, [0, .09, 0]);
+            const hangar = createBox([34, 9, 30], 0x788694, [-58, 4.5, 0]);
+            group.add(apron, terminal, hangar);
+            group.position.copy(base);
+            group.rotation.y = Math.atan2(airport.direction.x, airport.direction.z) - Math.PI / 2;
+            overlay.add(group);
+            runtimeState.overlayItems.push({
+                kind: "airport",
+                key: airport.key,
+                group,
+                position: base,
+                data: airport
+            });
+            const types = ["passenger", "jet", "prop", "helicopter"];
+            for (let index = 0; index < types.length; index++) {
+                const aircraft = createAircraftModel(types[index]);
+                const pos = base.clone().addScaledVector(airport.direction, -42 + 28 * index).addScaledVector(airport.side, 34);
+                pos.y += "helicopter" === types[index] ? .8 : 1.6;
+                aircraft.position.copy(pos);
+                aircraft.rotation.y = getYawFromVector(airport.direction);
+                overlay.add(aircraft);
+                runtimeState.overlayItems.push({
+                    kind: "aircraft",
+                    key: `${airport.key}:parked:${index}`,
+                    group: aircraft,
+                    position: pos,
+                    data: {
+                        type: types[index],
+                        airport,
+                        parked: !0,
+                        speed: 0,
+                        heading: aircraft.rotation.y,
+                        airborne: !1
+                    }
+                });
+            }
+        }
+
+        function ensureAirportSystems() {
+            if (!featureState.aircraft)
+                return;
+            for (const airport of getAirportEntries())
+                createAirportOverlay(airport);
+        }
+
+        function maybeSpawnBotAircraft() {
+            if (!featureState.aircraft || runtimeState.botAircraft && runtimeState.botAircraft.length >= 3)
+                return;
+            const now = performance.now() / 1e3;
+            if (runtimeState.nextBotAircraftAt && now < runtimeState.nextBotAircraftAt)
+                return;
+            runtimeState.nextBotAircraftAt = now + 28 + 24 * Math.random();
+            const airports = runtimeState.airports && runtimeState.airports.length ? runtimeState.airports : getAirportEntries();
+            if (!airports.length)
+                return;
+            const airport = airports[Math.floor(Math.random() * airports.length)];
+            const overlay = ensureRuntimeOverlayGroup();
+            if (!overlay)
+                return;
+            const type = Math.random() < .45 ? "passenger" : Math.random() < .7 ? "jet" : "prop";
+            const group = createAircraftModel(type);
+            const start = airport.points[0].clone().addScaledVector(airport.direction, -160);
+            start.y = getTerrainYWorld(start, 0) + 1.6;
+            group.position.copy(start);
+            group.rotation.y = getYawFromVector(airport.direction);
+            overlay.add(group);
+            runtimeState.botAircraft || (runtimeState.botAircraft = []);
+            runtimeState.botAircraft.push({
+                group,
+                airport,
+                type,
+                speed: 22,
+                age: 0,
+                phase: "takeoff",
+                heading: group.rotation.y
+            });
+        }
+
+        function updateBotAircraft(dtSeconds) {
+            maybeSpawnBotAircraft();
+            const keep = [];
+            for (const bot of toSafeArray(runtimeState.botAircraft)) {
+                bot.age += dtSeconds;
+                const dir = bot.airport.direction;
+                bot.speed = Math.min("jet" === bot.type ? 110 : 86, bot.speed + dtSeconds * ("jet" === bot.type ? 18 : 12));
+                bot.group.position.addScaledVector(dir, bot.speed * dtSeconds);
+                const runwayProgress = bot.group.position.clone().sub(bot.airport.center).dot(dir);
+                const groundY = getTerrainYWorld(bot.group.position, 0) + 1.6;
+                const climb = clamp((runwayProgress + bot.airport.length * .35) / Math.max(120, bot.airport.length * .8), 0, 1);
+                bot.group.position.y = groundY + climb * ("jet" === bot.type ? 420 : 280);
+                bot.group.rotation.y = bot.heading;
+                bot.group.rotation.z = Math.sin(bot.age * .8) * .05;
+                animateAircraftVisual(bot.group, bot.speed, dtSeconds);
+                if (bot.age < 95 && bot.group.parent)
+                    keep.push(bot);
+                else
+                    bot.group.parent && bot.group.parent.remove(bot.group);
+            }
+            runtimeState.botAircraft = keep;
+        }
+
+        function leaveAircraft() {
+            const aircraft = runtimeState.activeAircraft;
+            if (aircraft)
+                aircraft.active = !1;
+            const state = runtimeState.aircraftControlState || {};
+            const manager = getControlManager();
+            const car = state.car || getPlayerCar();
+            if (car && car.group && "boolean" == typeof state.carGroupVisible)
+                car.group.visible = state.carGroupVisible;
+            else
+                setPlayerCarHidden(!1);
+            if (car)
+                setPlayerSpeed(car, 0);
+            if (manager) {
+                if (!state.wasInCar && "function" == typeof manager.getOutCar) {
+                    manager.inCar = !1;
+                    try {
+                        manager.getOutCar();
+                    } catch (leaveError) {
+                        manager.inCar = !!state.wasInCar;
+                    }
+                } else
+                    manager.inCar = !!state.wasInCar;
+            }
+            runtimeState.aircraftControlState = null;
+            runtimeState.activeAircraft = null;
+            notifyRuntime("Flugzeug verlassen");
+            return !0;
+        }
+
+        function enterAircraft(item) {
+            const manager = getControlManager();
+            const car = getPlayerCar();
+            if (!item || !item.data || !item.group || !car)
+                return !1;
+            runtimeState.aircraftControlState = {
+                car,
+                wasInCar: manager ? !!manager.inCar : !0,
+                carGroupVisible: car.group ? car.group.visible : !0
+            };
+            if (manager && !manager.inCar && "function" == typeof manager.getInCar)
+                try {
+                    manager.inCar = !0;
+                    manager.getInCar();
+                } catch (enterError) {}
+            else if (manager)
+                manager.inCar = !0;
+            setPlayerCarHidden(!0);
+            stopAutopilot("Flugzeugsteuerung", !1);
+            item.data.active = !0;
+            item.data.speed = Math.max(item.data.speed || 0, 0);
+            item.data.heading = item.group.rotation.y;
+            item.data.group = item.group;
+            runtimeState.activeAircraft = item.data;
+            notifyRuntime(`Sitze im ${item.data.type}`);
+            return !0;
+        }
+
+        function tryToggleAircraft() {
+            if (!featureState.aircraft)
+                return !1;
+            if (runtimeState.activeAircraft)
+                return leaveAircraft();
+            const playerPos = getControlPosition() || getPlayerPosition();
+            if (!playerPos)
+                return !1;
+            let best = null;
+            let bestDistance = 70;
+            for (const item of runtimeState.overlayItems) {
+                if (item.kind !== "aircraft")
+                    continue;
+                const distance = getDistance2D(playerPos, item.group.position);
+                if (distance < bestDistance) {
+                    best = item;
+                    bestDistance = distance;
+                }
+            }
+            return !!best && enterAircraft(best);
+        }
+
+        function updateActiveAircraft(dtSeconds) {
+            const aircraft = runtimeState.activeAircraft;
+            const player = getPlayerCar();
+            if (!aircraft || !aircraft.group || !player)
+                return;
+            const manager = getControlManager();
+            setPlayerCarHidden(!0);
+            const group = aircraft.group;
+            const type = aircraft.type;
+            const throttle = (manager && manager.moveForward ? 1 : 0) || Number(player.speeding) || 0;
+            const braking = runtimeState.input.fullBrake || manager && manager.moveBackward ? 1 : Number(player.breaking) || 0;
+            aircraft.speed = clamp((Number(aircraft.speed) || 0) + throttle * ("passenger" === type ? 13 : "jet" === type ? 22 : "helicopter" === type ? 9 : 11) * dtSeconds - braking * 28 * dtSeconds, 0, "jet" === type ? 135 : "passenger" === type ? 105 : "helicopter" === type ? 48 : 72);
+            const steerInput = runtimeState.input.fastLeft || runtimeState.input.slowLeft || manager && manager.moveLeft ? 1 : runtimeState.input.fastRight || runtimeState.input.slowRight || manager && manager.moveRight ? -1 : Math.sign(Number(player.steeringTarget) || Number(player.steeringAngle) || 0);
+            aircraft.heading += steerInput * ("helicopter" === type ? .9 : .35) * dtSeconds;
+            const forward = new globalState.THREE.Vector3(Math.cos(aircraft.heading),0,-Math.sin(aircraft.heading));
+            group.position.addScaledVector(forward, aircraft.speed * dtSeconds);
+            const groundY = getTerrainYWorld(group.position, 0) + ("helicopter" === type ? 2.5 : 1.4);
+            if ("helicopter" === type) {
+                const targetY = groundY + (throttle > .1 ? 42 : 12);
+                group.position.y += (targetY - group.position.y) * Math.min(1, dtSeconds * .8);
+            } else {
+                const lift = clamp((aircraft.speed - 48) / 26, 0, 1);
+                const targetY = groundY + lift * ("passenger" === type ? 260 : "jet" === type ? 380 : 140);
+                group.position.y += (targetY - group.position.y) * Math.min(1, dtSeconds * .45);
+                if (aircraft.speed < 36)
+                    group.position.y += (groundY - group.position.y) * Math.min(1, dtSeconds * 1.2);
+            }
+            group.rotation.y = aircraft.heading;
+            group.rotation.z = -steerInput * .18;
+            animateAircraftVisual(group, aircraft.speed, dtSeconds);
+            player.cameraGroup.position.copy(group.position);
+            player.cameraGroup.position.y += "helicopter" === type ? 1.2 : 2.2;
+            player.cameraGroup.rotation.y = aircraft.heading;
+            setPlayerSpeed(player, 0);
+            if ("helicopter" === type && runtimeState.input.fire)
+                fireHelicopterRocket(group, forward);
+        }
+
+        function fireHelicopterRocket(group, forward) {
+            const now = performance.now();
+            if (runtimeState.lastRocketAt && now - runtimeState.lastRocketAt < 700)
+                return;
+            runtimeState.lastRocketAt = now;
+            const overlay = ensureRuntimeOverlayGroup();
+            if (!overlay)
+                return;
+            const rocket = createBox([1.6, .22, .22], 0xdedede, [0, 0, 0]);
+            rocket.position.copy(group.position).addScaledVector(forward, 7);
+            rocket.userData.velocity = forward.clone().multiplyScalar(120);
+            rocket.userData.life = 4;
+            overlay.add(rocket);
+            runtimeState.projectileModels.push(rocket);
+        }
+
+        function updateProjectiles(dtSeconds) {
+            const keep = [];
+            for (const projectile of runtimeState.projectileModels) {
+                projectile.userData.life -= dtSeconds;
+                let target = null;
+                let targetDistance = 1 / 0;
+                for (const police of runtimeState.policeCars) {
+                    const distance = police.group ? police.group.position.distanceTo(projectile.position) : 1 / 0;
+                    if (distance < targetDistance) {
+                        target = police.group;
+                        targetDistance = distance;
+                    }
+                }
+                if (target && targetDistance < 220) {
+                    const desired = target.position.clone().sub(projectile.position).normalize().multiplyScalar(120);
+                    projectile.userData.velocity.lerp(desired, Math.min(1, dtSeconds * 1.8));
+                }
+                projectile.position.addScaledVector(projectile.userData.velocity, dtSeconds);
+                if (target && targetDistance < 5) {
+                    target.parent && target.parent.remove(target);
+                    runtimeState.policeCars = runtimeState.policeCars.filter(police => police.group !== target);
+                    projectile.userData.life = 0;
+                }
+                if (projectile.userData.life > 0)
+                    keep.push(projectile);
+                else
+                    projectile.parent && projectile.parent.remove(projectile);
+            }
+            runtimeState.projectileModels = keep;
+        }
+
+        function createBirdFlock(center, seed) {
+            const THREE = globalState.THREE;
+            const group = new THREE.Group;
+            group.name = "__tmBirdFlock";
+            const mat = new THREE.MeshBasicMaterial({
+                color: 0x1d2428
+            });
+            for (let i = 0; i < 9; i++) {
+                const bird = createBox([.65, .08, .18], 0x1d2428, [Math.sin(i) * 8, Math.cos(i * 1.7) * 2, Math.cos(i) * 7]);
+                bird.material = mat;
+                group.add(bird);
+            }
+            group.position.copy(center);
+            group.position.y += 45 + 20 * seededUnit(seed, 3);
+            group.userData.seed = seed;
+            return group;
+        }
+
+        function ensureWildlife() {
+            const overlay = ensureRuntimeOverlayGroup();
+            const playerPos = getPlayerPosition();
+            if (!overlay || !playerPos)
+                return;
+            if (featureState.birds) {
+                for (const chunk of getLoadedChunks()) {
+                    const key = `birds:${chunkPoiKey(chunk)}`;
+                    if (runtimeState.overlayItems.some(item => item.key === key))
+                        continue;
+                    if (seededUnit(chunk.cx + chunk.cz, 21) < .42)
+                        continue;
+                    const center = chunk.centerVec ? chunk.centerVec.clone() : new globalState.THREE.Vector3(chunk.cx,0,chunk.cz);
+                    const flock = createBirdFlock(center, chunk.cx + chunk.cz);
+                    overlay.add(flock);
+                    runtimeState.overlayItems.push({
+                        kind: "birds",
+                        key,
+                        group: flock,
+                        position: center
+                    });
+                }
+            }
+            if (featureState.bees) {
+                for (const item of runtimeState.overlayItems.filter(item => item.kind === "poi" && item.type === "apiary")) {
+                    const key = `bees:${item.key}`;
+                    if (runtimeState.overlayItems.some(existing => existing.key === key))
+                        continue;
+                    const bees = new globalState.THREE.Group;
+                    bees.name = "__tmBeeSwarm";
+                    for (let i = 0; i < 16; i++) {
+                        const bee = createBox([.12, .08, .08], 0xffd21f, [Math.sin(i * 2.1) * 2, 1 + Math.cos(i) * .7, Math.cos(i * 1.4) * 2]);
+                        bees.add(bee);
+                    }
+                    bees.position.copy(item.position);
+                    overlay.add(bees);
+                    runtimeState.overlayItems.push({
+                        kind: "bees",
+                        key,
+                        group: bees,
+                        position: item.position
+                    });
+                }
+            }
+        }
+
+        function updateOverlayCullingAndAnimation(dtSeconds) {
+            const playerPos = getPlayerPosition();
+            if (!playerPos)
+                return;
+            runtimeState.overlayTick += dtSeconds;
+            for (const item of runtimeState.overlayItems) {
+                if (!item.group || !item.position)
+                    continue;
+                const distance = getDistance2D(playerPos, item.group.position || item.position);
+                const limit = item.kind === "airport" || item.kind === "aircraft" ? 6500 : item.kind === "birds" ? 1800 : 900;
+                item.group.visible = !featureState.overlays || distance <= limit || item.data && item.data.active;
+                if (!item.group.visible)
+                    continue;
+                if (item.kind === "birds") {
+                    item.group.position.x += Math.sin(runtimeState.overlayTick * .2 + item.group.userData.seed) * dtSeconds * 5;
+                    item.group.position.z += Math.cos(runtimeState.overlayTick * .23 + item.group.userData.seed) * dtSeconds * 5;
+                    item.group.rotation.y += dtSeconds * .12;
+                    for (const child of item.group.children)
+                        child.rotation.z = Math.sin(runtimeState.overlayTick * 8 + child.position.x) * .45;
+                } else if (item.kind === "bees") {
+                    for (let index = 0; index < item.group.children.length; index++) {
+                        const bee = item.group.children[index];
+                        bee.position.x = Math.sin(runtimeState.overlayTick * 4 + index) * 2.2;
+                        bee.position.z = Math.cos(runtimeState.overlayTick * 3.3 + index * 1.7) * 2.2;
+                    }
+                } else if (item.kind === "aircraft" && !(item.data && item.data.active)) {
+                    animateAircraftVisual(item.group, item.data && item.data.speed || 0, dtSeconds);
+                }
+            }
+        }
+
+        function updateHardStartLock() {
+            if (!featureState.hardStart || !runtimeState.hardStartLocked)
+                return;
+            const car = getPlayerCar();
+            if (!car)
+                return;
+            car.engineRunning = !1;
+            setPlayerSpeed(car, 0);
+        }
+
+        function updateRuntimeSystems(game, dtSeconds) {
+            runtimeState.game = game || runtimeState.game;
+            ensureFeatureMenu(game);
+            ensureVehicleTuningHotkey();
+            ensureRuntimeInputHandlers();
+            const dt = Math.min(.08, Math.max(.001, Number(dtSeconds) || .016));
+            updateAutopilotMapSelection();
+            rebuildPoiOverlays();
+            ensureAirportSystems();
+            updateBotAircraft(dt);
+            ensureWildlife();
+            updateActiveAircraft(dt);
+            updateProjectiles(dt);
+            updateOverlayCullingAndAnimation(dt);
+            updatePolice(dt);
+            updateSurvival(dt);
+            updateHardStartLock();
+            updateVehicleDamageVisuals(dt);
+            runtimeState.input.fire = !1;
         }
 
         function toThreeColor(value, fallback) {
@@ -2355,10 +5303,8 @@
                 const material = node.material;
                 if (!material)
                     return;
-                material.color && material.color.setHex(VISUAL_CONFIG.terrainColor);
-                material.vertexColors = !0;
-                material.needsUpdate = !0;
                 material.map && setTextureQuality(material.map);
+                material.needsUpdate = !0;
             }
             ));
         }
@@ -2366,10 +5312,25 @@
         function createRoadMaterial(baseMaterial) {
             if (!globalState.THREE)
                 return baseMaterial;
+            const material = baseMaterial && baseMaterial.clone ? baseMaterial.clone() : baseMaterial;
+            if (material) {
+                material.side = globalState.THREE.DoubleSide;
+                material.map && setTextureQuality(material.map);
+                material.userData = Object.assign({}, material.userData, {
+                    tmOriginalWebsiteRoad: !0,
+                    tmEnhancedRoad: !0
+                });
+                material.needsUpdate = !0;
+            }
+            return material || baseMaterial;
+        }
+
+        function createFallbackRoadMaterial(baseMaterial) {
+            if (!globalState.THREE)
+                return baseMaterial;
             const material = new globalState.THREE.MeshLambertMaterial({
                 color: VISUAL_CONFIG.roadColor,
-                side: globalState.THREE.DoubleSide,
-                map: getAsphaltTexture()
+                side: globalState.THREE.DoubleSide
             });
             material.userData = Object.assign({}, baseMaterial && baseMaterial.userData, {
                 tmEnhancedRoad: !0
@@ -2727,7 +5688,74 @@
             return shape;
         }
 
-        function createCustomBuildingBody(points, baseY, bodyHeight, colorValue) {
+        function resolveCustomBuildingTextureUrl(value) {
+            const raw = value && "object" == typeof value ? value.url || value.src || value.href || value.path || value.id : value;
+            if (null == raw || "" === String(raw).trim())
+                return CUSTOM_BUILDING_FALLBACK_TEXTURE_URL;
+            const text = String(raw).trim();
+            if (/^\d+$/.test(text))
+                return `${CUSTOM_BUILDING_TEXTURE_BASE}type${text}me.png`;
+            if (/^type\d+me\.png$/i.test(text))
+                return CUSTOM_BUILDING_TEXTURE_BASE + text;
+            try {
+                return new URL(text, BUILDING_CONFIG_URL).href;
+            } catch (urlError) {
+                return CUSTOM_BUILDING_FALLBACK_TEXTURE_URL;
+            }
+        }
+
+        function getCustomBuildingTextureValue(spec) {
+            if (!spec)
+                return CUSTOM_BUILDING_FALLBACK_TEXTURE_URL;
+            return spec.textureUrl || spec.texture || spec.imageUrl || spec.image || spec.material && (spec.material.textureUrl || spec.material.texture || spec.material.imageUrl || spec.material.image) || spec.base && (spec.base.textureUrl || spec.base.texture || spec.base.imageUrl || spec.base.image) || spec.textureId || spec.base && spec.base.textureId || CUSTOM_BUILDING_FALLBACK_TEXTURE_URL;
+        }
+
+        function applyCustomBuildingTexture(material, textureValue, repeatValue) {
+            if (!material || !globalState.THREE)
+                return material;
+            const url = resolveCustomBuildingTextureUrl(textureValue);
+            const repeat = Array.isArray(repeatValue) ? repeatValue : null;
+            const repeatX = repeat ? Math.max(.01, Number(repeat[0]) || 1) : 1;
+            const repeatY = repeat ? Math.max(.01, Number(repeat[1]) || repeatX) : 1;
+            const cacheKey = `${url}|${repeatX}:${repeatY}`;
+            const cached = runtimeState.customBuildingTextureCache.get(cacheKey);
+            if (cached && cached.texture) {
+                material.map = cached.texture;
+                material.needsUpdate = !0;
+                return material;
+            }
+            const loader = new globalState.THREE.TextureLoader;
+            if ("function" == typeof loader.setCrossOrigin)
+                loader.setCrossOrigin("anonymous");
+            const texture = loader.load(url, loadedTexture => {
+                setTextureQuality(loadedTexture);
+                loadedTexture.repeat.set(repeatX, repeatY);
+                material.map = loadedTexture;
+                material.needsUpdate = !0;
+            }, void 0, () => {
+                if (url !== CUSTOM_BUILDING_FALLBACK_TEXTURE_URL)
+                    applyCustomBuildingTexture(material, CUSTOM_BUILDING_FALLBACK_TEXTURE_URL, repeatValue);
+            });
+            setTextureQuality(texture);
+            texture.repeat.set(repeatX, repeatY);
+            runtimeState.customBuildingTextureCache.set(cacheKey, {
+                texture
+            });
+            material.map = texture;
+            material.needsUpdate = !0;
+            return material;
+        }
+
+        function createCustomBuildingMaterial(colorValue, spec) {
+            const material = new globalState.THREE.MeshLambertMaterial({
+                color: null != colorValue ? colorValue : 0xffffff,
+                side: globalState.THREE.DoubleSide
+            });
+            const textureValue = getCustomBuildingTextureValue(spec);
+            return applyCustomBuildingTexture(material, textureValue, spec && (spec.textureRepeat || spec.repeat || spec.base && (spec.base.textureRepeat || spec.base.repeat)));
+        }
+
+        function createCustomBuildingBody(points, baseY, bodyHeight, colorValue, spec) {
             if (!globalState.THREE || points.length < 3)
                 return null;
             const shape = createShapeFromFootprint(points);
@@ -2740,9 +5768,7 @@
             });
             geometry.rotateX(-Math.PI / 2);
             geometry.translate(0, baseY, 0);
-            return new globalState.THREE.Mesh(geometry, new globalState.THREE.MeshLambertMaterial({
-                color: null != colorValue ? colorValue : 14540253
-            }));
+            return new globalState.THREE.Mesh(geometry, createCustomBuildingMaterial(colorValue, spec));
         }
 
         function computeFootprintFrame(points, ridgeMode) {
@@ -2955,28 +5981,187 @@
             }
         }
 
+        function getDetailSize(detail, fallback=[1, 1, 1]) {
+            const raw = Array.isArray(detail && detail.size) ? detail.size : [detail && detail.a, detail && detail.b, detail && detail.c];
+            return [
+                Math.max(.05, Number(raw[0]) || fallback[0]),
+                Math.max(.05, Number(raw[1]) || fallback[1]),
+                Math.max(.05, Number(raw[2]) || fallback[2])
+            ];
+        }
+
+        function createDetailMaterial(detail) {
+            return new globalState.THREE.MeshLambertMaterial({
+                color: null != detail.color ? detail.color : 12632256,
+                transparent: !!detail.transparent || null != detail.opacity && Number(detail.opacity) < 1,
+                opacity: null != detail.opacity ? clamp(Number(detail.opacity) || 0, 0, 1) : 1,
+                side: globalState.THREE.DoubleSide
+            });
+        }
+
+        function pushFace(indices, a, b, c, d) {
+            indices.push(a, b, c);
+            null != d && indices.push(b, d, c);
+        }
+
+        function createCylinderWallGeometry(detail) {
+            const THREE = globalState.THREE;
+            const height = Math.max(.1, Number(detail.height) || Number(detail.b) || 3);
+            const radius = Math.max(.1, Number(detail.radius) || Number(detail.a) || 2);
+            const radiusX = Math.max(.1, Number(detail.radiusX) || radius);
+            const radiusZ = Math.max(.1, Number(detail.radiusZ) || Number(detail.c) || radius);
+            const thickness = Math.min(Math.max(.02, Number(detail.thickness) || .16), Math.min(radiusX, radiusZ) - .01);
+            const segments = Math.max(3, Math.round(Number(detail.segments) || 24));
+            const thetaStart = (Number(detail.thetaStart) || Number(detail.startAngle) || 0) * Math.PI / 180;
+            const thetaLength = clamp(Math.abs(Number(detail.thetaLength) || Number(detail.angle) || 90), 1, 360) * Math.PI / 180;
+            const fullCircle = thetaLength >= Math.PI * 2 - .001;
+            const positions = [];
+            const indices = [];
+            for (let index = 0; index <= segments; index++) {
+                const t = index / segments;
+                const angle = thetaStart + thetaLength * t;
+                const cos = Math.cos(angle);
+                const sin = Math.sin(angle);
+                const outerX = cos * radiusX;
+                const outerZ = sin * radiusZ;
+                const innerX = cos * Math.max(.02, radiusX - thickness);
+                const innerZ = sin * Math.max(.02, radiusZ - thickness);
+                positions.push(outerX, -height / 2, outerZ, outerX, height / 2, outerZ, innerX, -height / 2, innerZ, innerX, height / 2, innerZ);
+            }
+            for (let index = 0; index < segments; index++) {
+                const base = 4 * index;
+                const next = 4 * (index + 1);
+                pushFace(indices, base, next, base + 1, next + 1);
+                pushFace(indices, next + 2, base + 2, next + 3, base + 3);
+                pushFace(indices, base + 1, next + 1, base + 3, next + 3);
+                pushFace(indices, next, base, next + 2, base + 2);
+            }
+            if (!fullCircle) {
+                const first = 0;
+                const last = 4 * segments;
+                pushFace(indices, first, first + 1, first + 2, first + 3);
+                pushFace(indices, last + 2, last + 3, last, last + 1);
+            }
+            const geometry = new THREE.BufferGeometry;
+            geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions,3));
+            geometry.setIndex(indices);
+            geometry.computeVertexNormals();
+            return geometry;
+        }
+
+        function createPolygonPoints(width, depth, sides, sideScales) {
+            if (4 === sides)
+                return [[-width / 2, -depth / 2], [width / 2, -depth / 2], [width / 2, depth / 2], [-width / 2, depth / 2]].map(((point, index) => {
+                    const scale = Math.max(.05, Number(sideScales && sideScales[index]) || 1);
+                    return [point[0] * scale, point[1] * scale];
+                }));
+            const points = [];
+            for (let index = 0; index < sides; index++) {
+                const angle = -Math.PI / 2 + index / sides * Math.PI * 2;
+                const scale = Math.max(.05, Number(sideScales && sideScales[index]) || 1);
+                points.push([Math.cos(angle) * width / 2 * scale, Math.sin(angle) * depth / 2 * scale]);
+            }
+            return points;
+        }
+
+        function createRidgeRoofGeometry(detail, width, height, depth, sideScales) {
+            const THREE = globalState.THREE;
+            const ridgeDirection = "z" === detail.ridgeDirection ? "z" : "x";
+            const corners = createPolygonPoints(width, depth, 4, sideScales);
+            const ridgeLength = Math.max(.1, Math.min("x" === ridgeDirection ? width : depth, Number(detail.ridgeLength) || ("x" === ridgeDirection ? width : depth) * .5));
+            const y0 = -height / 2;
+            const y1 = height / 2;
+            const vertices = "x" === ridgeDirection ? [
+                [corners[0][0], y0, corners[0][1]], [corners[1][0], y0, corners[1][1]], [corners[2][0], y0, corners[2][1]], [corners[3][0], y0, corners[3][1]],
+                [-ridgeLength / 2, y1, 0], [ridgeLength / 2, y1, 0]
+            ] : [
+                [corners[0][0], y0, corners[0][1]], [corners[1][0], y0, corners[1][1]], [corners[2][0], y0, corners[2][1]], [corners[3][0], y0, corners[3][1]],
+                [0, y1, -ridgeLength / 2], [0, y1, ridgeLength / 2]
+            ];
+            const indices = "x" === ridgeDirection ? [0, 1, 4, 1, 5, 4, 3, 4, 2, 2, 4, 5, 0, 4, 3, 1, 2, 5] : [0, 4, 1, 1, 4, 5, 3, 2, 5, 3, 5, 4, 0, 3, 4, 1, 5, 2];
+            const geometry = new THREE.BufferGeometry;
+            geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices.flat(),3));
+            geometry.setIndex(indices);
+            geometry.computeVertexNormals();
+            return geometry;
+        }
+
+        function createPyramidGeometry(detail) {
+            const THREE = globalState.THREE;
+            const size = getDetailSize(detail, [4, 2, 4]);
+            const width = size[0];
+            const height = size[1];
+            const depth = size[2];
+            const sides = Math.max(3, Math.round(Number(detail.sides) || 4));
+            const sideScales = Array.isArray(detail.sideScales) ? detail.sideScales : [];
+            const topMode = String(detail.topMode || detail.mode || "point").toLowerCase();
+            if ("ridge" === topMode)
+                return createRidgeRoofGeometry(detail, width, height, depth, sideScales);
+            const bottom = createPolygonPoints(width, depth, sides, sideScales);
+            const positions = [];
+            const indices = [];
+            for (const point of bottom)
+                positions.push(point[0], -height / 2, point[1]);
+            const topSize = Array.isArray(detail.topSize) ? detail.topSize : null;
+            const topScale = "flat" === topMode ? Math.max(.02, Number(detail.topScale) || .35) : Math.max(0, Number(detail.topScale) || 0);
+            if (topScale > 0 || topSize) {
+                const topWidth = Math.max(.02, Number(topSize && topSize[0]) || width * topScale);
+                const topDepth = Math.max(.02, Number(topSize && topSize[1]) || depth * topScale);
+                const top = createPolygonPoints(topWidth, topDepth, sides, []);
+                for (const point of top)
+                    positions.push(point[0], height / 2, point[1]);
+                for (let index = 0; index < sides; index++) {
+                    const next = (index + 1) % sides;
+                    pushFace(indices, index, next, sides + index, sides + next);
+                }
+                for (let index = 1; index < sides - 1; index++)
+                    indices.push(sides, sides + index, sides + index + 1);
+            } else {
+                const apexIndex = positions.length / 3;
+                positions.push(0, height / 2, 0);
+                for (let index = 0; index < sides; index++)
+                    indices.push(index, (index + 1) % sides, apexIndex);
+            }
+            for (let index = 1; index < sides - 1; index++)
+                indices.push(0, index + 1, index);
+            const geometry = new THREE.BufferGeometry;
+            geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions,3));
+            geometry.setIndex(indices);
+            geometry.computeVertexNormals();
+            return geometry;
+        }
+
         function createPrimitiveDetailMesh(detail, anchorPoint) {
             if (!globalState.THREE || !detail || !detail.type)
                 return null;
+            const type = String(detail.type || "").toLowerCase();
             let geometry = null;
-            if ("box" === detail.type) {
-                const size = detail.size || [1, 1, 1];
-                geometry = new globalState.THREE.BoxGeometry(Math.max(.1, Number(size[0]) || 1), Math.max(.1, Number(size[1]) || 1), Math.max(.1, Number(size[2]) || 1));
-            } else if ("cylinder" === detail.type) {
-                geometry = new globalState.THREE.CylinderGeometry(Math.max(.05, Number(detail.radiusTop) || Number(detail.radius) || .25), Math.max(.05, Number(detail.radiusBottom) || Number(detail.radius) || .25), Math.max(.1, Number(detail.height) || 1), Math.max(6, Number(detail.segments) || 10));
-            } else if ("sphere" === detail.type) {
+            if ("box" === type || "wall" === type) {
+                const size = getDetailSize(detail);
+                geometry = new globalState.THREE.BoxGeometry(size[0], size[1], size[2]);
+            } else if ("panel" === type) {
+                const size = getDetailSize(detail, [1, 1, .04]);
+                geometry = new globalState.THREE.BoxGeometry(size[0], size[1], Math.max(.02, size[2]));
+            } else if ("cylinder" === type || "cone" === type) {
+                const radius = Math.max(.05, Number(detail.radius) || Number(detail.a) || .25);
+                const radiusTop = "cone" === type ? 0 : null != detail.radiusTop ? Math.max(0, Number(detail.radiusTop) || 0) : radius;
+                const radiusBottom = null != detail.radiusBottom ? Math.max(.05, Number(detail.radiusBottom) || .05) : radius;
+                geometry = new globalState.THREE.CylinderGeometry(radiusTop, radiusBottom, Math.max(.1, Number(detail.height) || Number(detail.b) || 1), Math.max(3, Number(detail.segments) || 16));
+                if (detail.radiusX || detail.radiusZ || detail.c) {
+                    const radiusX = Math.max(.05, Number(detail.radiusX) || radius);
+                    const radiusZ = Math.max(.05, Number(detail.radiusZ) || Number(detail.c) || radius);
+                    geometry.scale(radiusX / radius, 1, radiusZ / radius);
+                }
+            } else if ("sphere" === type) {
                 geometry = new globalState.THREE.SphereGeometry(Math.max(.05, Number(detail.radius) || .5), 12, 10);
-            } else if ("panel" === detail.type) {
-                const size = detail.size || [1, 1];
-                geometry = new globalState.THREE.BoxGeometry(Math.max(.1, Number(size[0]) || 1), Math.max(.1, Number(size[1]) || 1), Math.max(.02, Number(size[2]) || .04));
+            } else if ("cylinderwall" === type || "arcwall" === type) {
+                geometry = createCylinderWallGeometry(detail);
+            } else if ("pyramid" === type || "pyramidroof" === type || "roofpyramid" === type || "frustumroof" === type) {
+                geometry = createPyramidGeometry(detail);
             }
             if (!geometry)
                 return null;
-            const mesh = new globalState.THREE.Mesh(geometry, new globalState.THREE.MeshLambertMaterial({
-                color: null != detail.color ? detail.color : 12632256,
-                transparent: !!detail.transparent,
-                opacity: null != detail.opacity ? clamp(Number(detail.opacity) || 0, 0, 1) : 1
-            }));
+            const mesh = new globalState.THREE.Mesh(geometry, createDetailMaterial(detail));
             const position = detail.position || [0, 0, 0];
             const rotation = detail.rotation || [0, 0, 0];
             const offsetX = detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.x) || 0;
@@ -3020,13 +6205,16 @@
             const points = getBuildingFootprint(match.building, spec);
             const baseY = Number(spec.base && spec.base.y) || Number(match.building.y) || 0;
             const bodyHeight = Math.max(1.4, Number(spec.base && spec.base.height) || Math.max(1, Number(spec.base && spec.base.floors) || 2) * Math.max(2.4, Number(spec.base && spec.base.floorHeight) || 3));
-            const body = createCustomBuildingBody(points, baseY, bodyHeight, spec.base && spec.base.color);
-            body && group.add(body);
-            const roof = createCustomRoof(points, baseY, bodyHeight, spec.roof);
-            roof && group.add(roof);
-            createWindowsForFootprint(group, points, baseY, bodyHeight, deepMergeConfig(spec.windows, {
-                sides: spec.sides || {}
-            }));
+            const baseEnabled = !(spec.base && !1 === spec.base.enabled);
+            if (baseEnabled) {
+                const body = createCustomBuildingBody(points, baseY, bodyHeight, spec.base && spec.base.color, spec);
+                body && group.add(body);
+                const roof = createCustomRoof(points, baseY, bodyHeight, spec.roof);
+                roof && group.add(roof);
+                createWindowsForFootprint(group, points, baseY, bodyHeight, deepMergeConfig(spec.windows, {
+                    sides: spec.sides || {}
+                }));
+            }
             const anchorPoint = match.building.houseCenterLocal || {
                 x: match.building.houseCenter ? match.building.houseCenter.x - (match.building.chunkCenter && match.building.chunkCenter.x || 0) : 0,
                 z: match.building.houseCenter ? match.building.houseCenter.z - (match.building.chunkCenter && match.building.chunkCenter.z || 0) : 0
@@ -3118,6 +6306,9 @@
             townSignsState.scene = game.scene || townSignsState.scene;
             townSignsState.chunkManager = game.chunkManager || townSignsState.chunkManager;
             patchMissionManagerRuntime(game.missionManager);
+            ensureFeatureMenu(game);
+            ensureVehicleTuningHotkey();
+            ensureRuntimeInputHandlers();
             if (!game.__tmRuntimeInitialized) {
                 game.__tmRuntimeInitialized = !0;
                 refreshCustomBuildingDebug();
@@ -3162,6 +6353,7 @@
                 const biomModule = requireFn(REQUIRED_MODULES.BIOM);
                 const missionModule = requireFn(REQUIRED_MODULES.MISSION_MANAGER);
                 const bufferGeometryUtils = requireFn(REQUIRED_MODULES.BUFFER_GEOMETRY_UTILS);
+                const geoModule = requireFn(REQUIRED_MODULES.GEO);
 
                 const worldProto = worldModule && worldModule.GameSessionOpenWorld && worldModule.GameSessionOpenWorld.prototype;
                 const aiProto = aiModule && aiModule.BetterAiCar && aiModule.BetterAiCar.prototype;
@@ -3181,6 +6373,7 @@
                 runtimeState.treeModule = treeModule;
                 runtimeState.biomModule = biomModule;
                 runtimeState.missionModule = missionModule;
+                runtimeState.geoModule = geoModule;
                 runtimeState.bufferGeometryUtils = bufferGeometryUtils;
 
                 globalThis.__tmCollisionHookDebug = {
@@ -3197,6 +6390,7 @@
                         treeModule,
                         biomModule,
                         missionModule,
+                        geoModule,
                         bufferGeometryUtils,
                         THREE
                     }
@@ -3207,19 +6401,8 @@
                     terrainProto.createTerrainMesh = function(...args) {
                         const result = originalCreateTerrainMesh.apply(this, args);
                         const mesh = result && result[0];
-                        const material = result && result[1];
                         if (mesh)
                             mesh.__tmTerrainMesh = !0;
-                        if (mesh && material && globalState.THREE && !material.__tmTerrainEnhanced) {
-                            const enhanced = new globalState.THREE.MeshLambertMaterial({
-                                color: VISUAL_CONFIG.terrainColor,
-                                vertexColors: !0
-                            });
-                            material.map && (enhanced.map = material.map);
-                            mesh.material = enhanced;
-                            result[1] = enhanced;
-                            enhanced.__tmTerrainEnhanced = !0;
-                        }
                         return result;
                     };
                     terrainProto.__tmTerrainVisualPatched = !0;
@@ -3302,7 +6485,13 @@
                     const originalMove = worldProto.move;
                     worldProto.move = function(...args) {
                         captureTownSignsGame(this);
-                        return originalMove.apply(this, args);
+                        const before = performance.now();
+                        const result = originalMove.apply(this, args);
+                        const now = performance.now();
+                        const previous = runtimeState.lastRuntimeUpdateAt || before;
+                        runtimeState.lastRuntimeUpdateAt = now;
+                        updateRuntimeSystems(this, Math.min(.08, Math.max(.001, (now - previous) / 1e3)));
+                        return result;
                     };
                     worldProto.__tmTownSignsMovePatched = !0;
                 }
@@ -3310,6 +6499,7 @@
                 if (!chunkProto.__tmTownSignsBuildPatched) {
                     const originalBuild = chunkProto.build;
                     chunkProto.build = function(...args) {
+                        suppressRunwayBuildings(this);
                         const result = originalBuild.apply(this, args);
                         refreshCustomBuildingDebug();
                         queueTownRebuild("chunk_build");
@@ -3334,6 +6524,7 @@
                 if (!chunkProto.__tmCustomBuildingsCheckLoadedPatched) {
                     const originalCheckLoaded = chunkProto.checkLoaded;
                     chunkProto.checkLoaded = async function(...args) {
+                        suppressRunwayBuildings(this);
                         try {
                             await ensureChunkCustomBuildingsPrepared(this);
                         } catch (customBuildingError) {
@@ -3341,6 +6532,7 @@
                         }
                         const result = await originalCheckLoaded.apply(this, args);
                         refreshCustomBuildingDebug();
+                        queueTownRebuild("chunk_check_loaded");
                         queueChunkVisualRefresh(this, "chunk_check_loaded");
                         return result;
                     };
@@ -3375,6 +6567,10 @@
                             this.freezeStates[aiId] = Math.max(Number(this.freezeStates[aiId]) || 0, 45);
                         }
                         const result = originalUpdateCar.apply(this, arguments);
+                        if (aiCar && !aiCar.__tmImpactState) {
+                            enhanceVehicleAppearance(aiCar);
+                            applyTrafficEnvironmentPolicy(this, aiId, aiCar);
+                        }
                         if (aiCar && aiCar.__tmImpactState)
                             try {
                                 const liveState = aiCar.__tmImpactState;
@@ -3396,18 +6592,28 @@
                 if (!controllableProto.__tmMoveGroupPatched) {
                     const originalMoveGroup = controllableProto.moveGroup;
                     controllableProto.moveGroup = function(dtMs) {
-                        this.__tmImpactState && removeAppliedImpactTransform(this);
-                        this.__tmImpactState && stopPlayer(this);
-                        const result = originalMoveGroup.apply(this, arguments);
-                        if (this.__tmImpactState)
+                        const dtSeconds = (Number(dtMs) || 0) / 1e3;
+                        if (this.__tmImpactState) {
+                            removeAppliedImpactTransform(this);
+                            stopPlayer(this);
+                            const result = originalMoveGroup.apply(this, arguments);
                             try {
                                 stopPlayer(this);
-                                updateImpactState(this, (Number(dtMs) || 0) / 1e3);
+                                updateImpactState(this, dtSeconds);
                             } catch (impactError) {
                                 error("Fehler waehrend Spieler-Impact-Update:", impactError);
                                 syncVehicleCrashState(this, !1);
                                 clearImpactState(this, "player_impact_update_error");
                             }
+                            return result;
+                        }
+                        const previousSpeed = Number(this.speed) || 0;
+                        applyExtendedVehicleControls(this, dtSeconds);
+                        enhanceVehicleAppearance(this);
+                        const result = originalMoveGroup.apply(this, arguments);
+                        applyExtendedVehicleControls(this, dtSeconds);
+                        applyVehicleTuning(this, dtSeconds, previousSpeed);
+                        applyAutopilotToCar(this, dtSeconds);
                         return result;
                     };
                     controllableProto.__tmMoveGroupPatched = !0;
@@ -3498,6 +6704,8 @@
                     config: TOWN_SIGN_CONFIG
                 });
                 globalThis.__tmCollisionHookDebug.customTasks = CUSTOM_TASK_OPTIONS.slice();
+                globalThis.__tmCollisionHookDebug.features = featureState;
+                globalThis.__tmCollisionHookDebug.runtime = runtimeState;
                 globalThis.__tmTownSignsDebug = globalThis.__tmCollisionHookDebug.townSigns;
                 refreshCustomBuildingDebug();
                 globalThis.__tmCollisionHookDebug.game && captureTownSignsGame(globalThis.__tmCollisionHookDebug.game);
@@ -3547,13 +6755,28 @@
             return source.slice(0, markerIndex) + injection + source.slice(markerIndex);
         }
 
+        function cacheBustedBundleUrl(bundleUrl) {
+            try {
+                const url = new URL(bundleUrl, location.href);
+                url.searchParams.set("__tm_hook_bundle_bust", `${Date.now()}_${Math.random().toString(36).slice(2)}`);
+                return url.href;
+            } catch (urlError) {
+                return `${bundleUrl}${String(bundleUrl).includes("?") ? "&" : "?"}__tm_hook_bundle_bust=${Date.now()}`;
+            }
+        }
+
         function fetchBundleSourceSync(bundleUrl) {
+            const requestUrl = cacheBustedBundleUrl(bundleUrl);
             const xhr = new XMLHttpRequest;
-            xhr.open("GET", bundleUrl, !1);
+            xhr.open("GET", requestUrl, !1);
             xhr.overrideMimeType("text/plain; charset=utf-8");
+            try {
+                xhr.setRequestHeader("Cache-Control", "no-cache, no-store, max-age=0");
+                xhr.setRequestHeader("Pragma", "no-cache");
+            } catch (headerError) {}
             xhr.send(null);
             if (xhr.status && (xhr.status < 200 || xhr.status >= 300))
-                throw new Error(`HTTP ${xhr.status} beim Laden von ${bundleUrl}`);
+                throw new Error(`HTTP ${xhr.status} beim Laden von ${requestUrl}`);
             return xhr.responseText;
         }
 
@@ -3762,13 +6985,32 @@
             ), 6e3);
         }
 
+        ensureStartMenuFeatureWatcher();
         log("Bootstrap gestartet.", "readyState=", document.readyState, "realm=page", "href=", location.href);
         installBundleSourceHook();
         installRequireSniffer();
     }
 
-    const script = document.createElement("script");
-    script.textContent = `(${pageMain.toString()})();\n//# sourceURL=tm-collision-hook.page.js`;
-    (document.documentElement || document.head || document.body).appendChild(script);
-    script.remove();
+    function injectPageScript() {
+        const target = document.documentElement || document.head || document.body;
+        if (!target)
+            return !1;
+        const script = document.createElement("script");
+        script.textContent = `(${pageMain.toString()})();\n//# sourceURL=tm-collision-hook.page.js`;
+        target.appendChild(script);
+        script.remove();
+        return !0;
+    }
+
+    if (!injectPageScript()) {
+        const observer = new MutationObserver((() => {
+            if (injectPageScript())
+                observer.disconnect();
+        }
+        ));
+        observer.observe(document, {
+            childList: !0,
+            subtree: !0
+        });
+    }
 })();
