@@ -3,10 +3,72 @@
 // @match        https://terradrive.eu/*
 // @grant        none
 // @description  nothing
-// @version      1.1.2.3
+// @version      1.1.2.4
 // @downloadURL  https://toni857.github.io/terradrive/Texture%20Override%20(Universal%20Safe)-1.1.1.1.user.js
 // @updateURL    https://toni857.github.io/terradrive/Texture%20Override%20(Universal%20Safe)-1.1.1.1.user.js
 // ==/UserScript==
+
+(function() {
+    "use strict";
+    console.log("[Texture Hook] gestartet");
+
+    const BASE = "https://toni857.github.io/my-textures/";
+    const cache = {
+        fallback: BASE + "type1me.png"
+    };
+
+    function resolveUrl(id) {
+        return BASE + `type${id}me.png`;
+    }
+
+    function testImage(url, cb) {
+        const img = new Image;
+        img.onload = () => cb(!0);
+        img.onerror = () => cb(!1);
+        img.src = url;
+    }
+
+    const desc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "src");
+    if (!desc || "function" != typeof desc.set) {
+        console.warn("[Texture Hook] HTMLImageElement.src konnte nicht gehookt werden.");
+        return;
+    }
+
+    try {
+        Object.defineProperty(HTMLImageElement.prototype, "src", {
+            configurable: !1 !== desc.configurable,
+            enumerable: !!desc.enumerable,
+            set(value) {
+                if ("string" != typeof value || !value.includes("textures/building/type"))
+                    return desc.set.call(this, value);
+
+                const match = value.match(/type(\d+)\.png/);
+                const id = match ? match[1] : "1";
+                const targetUrl = resolveUrl(id);
+                console.log("[Texture Hook] pruefe:", targetUrl);
+                testImage(targetUrl, ok => {
+                    let finalUrl = targetUrl;
+                    if (!ok) {
+                        console.warn("[Texture Hook] fehlt:", targetUrl, "-> fallback type1me");
+                        finalUrl = cache.fallback;
+                    }
+                    console.log("[Texture Hook] final:", finalUrl);
+                    desc.set.call(this, finalUrl);
+                }
+                );
+            },
+            get: desc.get
+        });
+    } catch (hookError) {
+        console.error("[Texture Hook] IMG-Hook konnte nicht installiert werden:", hookError);
+        return;
+    }
+
+    console.log("[Texture Hook] IMG-Hook aktiv");
+})();
+
+
+
 
 
 (function bootstrapTampermonkeyBridge() {
@@ -24,7 +86,7 @@
             CHUNK: 4763
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
-        const globalState = globalThis.__tmCollisionHookState ||= {
+        const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
             version: "1.3.0",
             require: null,
             patched: !1,
@@ -35,7 +97,7 @@
             bundlePatchedInDom: !1,
             observedBundleUrl: null,
             THREE: null
-        };
+        });
         const TOWN_SIGN_CONFIG = {
             placeClusterDistance: 1250,
             destinationClusterDistance: 900,
@@ -48,7 +110,7 @@
             signDedupDistance: 9,
             signNearbyDedupDistance: 18
         };
-        const townSignsState = globalState.townSigns ||= {
+        const townSignsState = globalState.townSigns || (globalState.townSigns = {
             roadModule: null,
             game: null,
             scene: null,
@@ -62,7 +124,7 @@
             signCount: 0,
             poleGeometry: null,
             poleMaterial: null
-        };
+        });
 
         function log(...args) {
             console.log(PREFIX, ...args);
@@ -1459,9 +1521,15 @@
                     }
                 if (!target) {
                     merged.push({
-                        ...place,
+                        name: place.name,
+                        center: place.center.clone(),
+                        radius: place.radius,
+                        strongCount: place.strongCount,
+                        weakCount: place.weakCount,
+                        destinationSupport: place.destinationSupport,
+                        buildingCount: place.buildingCount,
                         centers: [place.center.clone()],
-                        sourceNames: [...place.sourceNames]
+                        sourceNames: place.sourceNames.slice()
                     });
                     continue;
                 }
@@ -1549,7 +1617,7 @@
             for (let index = 1; index < points.length; index++) {
                 const current = points[index];
                 const currentDelta = townDistance2D(current, place.center) - place.radius;
-                hasOutside ||= currentDelta > 0;
+                hasOutside = hasOutside || currentDelta > 0;
                 if (hasOutside && previousDelta > 0 && currentDelta <= 0) {
                     const direction = current.clone().sub(previous);
                     direction.y = 0;
@@ -1744,7 +1812,8 @@
             return townSignsState.overlayGroup;
         }
 
-        function rebuildTownSigns(reason="manual") {
+        function rebuildTownSigns(reason) {
+            void 0 === reason && (reason = "manual");
             townSignsState.rebuildQueued = !1;
             if (!townSignsState.chunkManager || !townSignsState.scene || !globalState.THREE || !townSignsState.roadModule)
                 return;
