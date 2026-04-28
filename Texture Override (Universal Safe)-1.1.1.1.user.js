@@ -3,7 +3,7 @@
 // @match        https://terradrive.eu/*
 // @grant        none
 // @description  nothing
-// @version      1.1.2.4
+// @version      1.4.0
 // @downloadURL  https://toni857.github.io/terradrive/Texture%20Override%20(Universal%20Safe)-1.1.1.1.user.js
 // @updateURL    https://toni857.github.io/terradrive/Texture%20Override%20(Universal%20Safe)-1.1.1.1.user.js
 // ==/UserScript==
@@ -83,11 +83,16 @@
             TRAFFIC_RESOLVER: 4258,
             CONTROLLABLE_CAR: 7818,
             ROAD_FACTORY: 5263,
-            CHUNK: 4763
+            CHUNK: 4763,
+            TERRAIN: 5367,
+            TREE_LIBRARY: 419,
+            BIOM: 495,
+            MISSION_MANAGER: 5769,
+            BUFFER_GEOMETRY_UTILS: 4754
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "1.3.0",
+            version: "1.4.0",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -125,6 +130,54 @@
             poleGeometry: null,
             poleMaterial: null
         });
+        const BUILDING_CONFIG_URL = "https://toni857.github.io/terradrive/buildings.js";
+        const CUSTOM_TASK_OPTIONS = [{
+            value: "tmTownHop",
+            label: "Town Hop"
+        }, {
+            value: "tmResidentialDash",
+            label: "Residential Dash"
+        }, {
+            value: "tmFuelRun",
+            label: "Fuel Run"
+        }, {
+            value: "tmForestPatrol",
+            label: "Forest Patrol"
+        }, {
+            value: "tmRingRoadRun",
+            label: "Ring Road Run"
+        }];
+        const runtimeState = globalState.runtime || (globalState.runtime = {
+            game: null,
+            terrainModule: null,
+            treeModule: null,
+            biomModule: null,
+            missionModule: null,
+            bufferGeometryUtils: null,
+            buildingConfigPromise: null,
+            buildingConfig: null,
+            asphaltTexture: null,
+            roadMaterialCache: new WeakMap,
+            terrainMaterialCache: new WeakMap,
+            customMissionRegistry: new Map,
+            missionPanelsPatched: new WeakSet,
+            visualRefreshTimers: new WeakMap,
+            chunkCustomOverlayGroups: new WeakMap,
+            buildingDebugEntries: [],
+            customBuildingEntriesByChunk: new WeakMap
+        });
+        const VISUAL_CONFIG = {
+            roadColor: 0x5e5750,
+            roadEdgeColor: 0x6d665f,
+            terrainColor: 0xffffff,
+            terrainSaturationBoost: .06,
+            treeLeafLightnessTop: .08,
+            treeLeafLightnessBottom: -.09,
+            treeLeafSaturationBoost: .1,
+            treeTrunkDarken: .38,
+            windowGlassColor: 0xa5d7ff,
+            windowFrameColor: 0xf4eee6
+        };
 
         function log(...args) {
             console.log(PREFIX, ...args);
@@ -1258,7 +1311,7 @@
             return text.length >= 2 && text.length <= 48 && /[A-Za-z]/.test(text);
         }
 
-        function extractTownBaseLabel(value) {
+        function extractTownBaseLabel(value, source) {
             const text = normalizeTownLabel(value);
             if (!text)
                 return "";
@@ -1269,7 +1322,14 @@
                 if (index >= 0 && (-1 === cutIndex || index < cutIndex))
                     cutIndex = index;
             }
-            const candidate = normalizeTownLabel(cutIndex >= 0 ? text.slice(0, cutIndex) : text);
+            let candidate = normalizeTownLabel(cutIndex >= 0 ? text.slice(0, cutIndex) : text);
+            if ("bus" === source || "train" === source) {
+                candidate = candidate.replace(/\b(?:bahnhof|busbahnhof|bus station|train station|zentrum|center|centre|mitte|ost|west|nord|sued|south|north|east|airport|flughafen|klinikum|klinik|hospital|schule|kirche|markt|rathaus|city hall|stadion|stadium|campus|gewerbegebiet|industrie|industrial park)\b/gi, " ");
+                candidate = candidate.replace(/\b\d+[A-Za-z]?\b/g, " ");
+                candidate = normalizeTownLabel(candidate);
+            }
+            if (candidate.length < 3)
+                candidate = normalizeTownLabel(cutIndex >= 0 ? text.slice(0, cutIndex) : text);
             return candidate.length >= 3 ? candidate : text;
         }
 
@@ -1353,9 +1413,11 @@
 
         function chooseTownStopDisplayName(candidate, stopBaseCounts, destinationBaseCounts) {
             const raw = normalizeTownLabel(candidate.rawName);
-            const base = extractTownBaseLabel(raw);
+            const base = extractTownBaseLabel(raw, candidate.source);
             if (!base)
                 return raw;
+            if ("bus" === candidate.source)
+                return base;
             if (base !== raw && ("train" === candidate.source || (stopBaseCounts.get(base) || 0) > 1 || (destinationBaseCounts.get(base) || 0) > 0))
                 return base;
             return raw;
@@ -1395,6 +1457,7 @@
             const chunks = Object.values(chunkManager && chunkManager.loadedChunks || {});
             const buildings = [];
             const stopCandidates = [];
+            const busCandidates = [];
             const destinationCandidates = [];
             const roads = [];
 
@@ -1420,7 +1483,7 @@
                     const rawName = normalizeTownLabel(stop && stop.name);
                     if (!isLikelyTownLabel(rawName) || !stop.pos || !chunk.centerVec)
                         continue;
-                    stopCandidates.push({
+                    busCandidates.push({
                         rawName,
                         source: "bus",
                         position: stop.pos.clone().add(chunk.centerVec)
@@ -1464,7 +1527,7 @@
 
             const stopBaseCounts = new Map;
             for (const candidate of stopCandidates) {
-                const base = extractTownBaseLabel(candidate.rawName);
+                const base = extractTownBaseLabel(candidate.rawName, candidate.source);
                 stopBaseCounts.set(base, (stopBaseCounts.get(base) || 0) + 1);
             }
 
@@ -1472,12 +1535,31 @@
             for (const candidate of destinationCandidates)
                 destinationBaseCounts.set(candidate.name, (destinationBaseCounts.get(candidate.name) || 0) + 1);
 
+            const busBaseCounts = new Map;
+            for (const candidate of busCandidates) {
+                const base = extractTownBaseLabel(candidate.rawName, "bus");
+                base && busBaseCounts.set(base, (busBaseCounts.get(base) || 0) + 1);
+            }
+
             const namedStops = stopCandidates.map(candidate => ({
                 source: candidate.source,
                 position: candidate.position,
                 name: chooseTownStopDisplayName(candidate, stopBaseCounts, destinationBaseCounts),
                 rawName: candidate.rawName
             })).filter(candidate => isLikelyTownLabel(candidate.name));
+            for (const candidate of busCandidates) {
+                const base = extractTownBaseLabel(candidate.rawName, "bus");
+                const hasDestinationSupport = (destinationBaseCounts.get(base) || 0) > 0;
+                const hasRepeatedTownSupport = (busBaseCounts.get(base) || 0) >= 3;
+                if (!base || !isLikelyTownLabel(base) || !hasDestinationSupport && !hasRepeatedTownSupport)
+                    continue;
+                namedStops.push({
+                    source: candidate.source,
+                    position: candidate.position,
+                    name: base,
+                    rawName: candidate.rawName
+                });
+            }
 
             return {
                 buildings,
@@ -1876,14 +1958,1178 @@
             setTimeout((() => rebuildTownSigns(reason)), 50);
         }
 
+        function getLoadedChunks() {
+            return Object.values(townSignsState.chunkManager && townSignsState.chunkManager.loadedChunks || {}).filter(Boolean);
+        }
+
+        function seededUnit(seed, salt=0) {
+            const base = Number(seed) || 0;
+            const value = Math.sin(12.9898 * (base + 1) + 78.233 * (salt + 1)) * 43758.5453;
+            return value - Math.floor(value);
+        }
+
+        function getDistance2D(a, b) {
+            if (!a || !b)
+                return 1 / 0;
+            return Math.hypot((Number(a.x) || 0) - (Number(b.x) || 0), (Number(a.z) || 0) - (Number(b.z) || 0));
+        }
+
+        function cloneVector3(value) {
+            if (!value)
+                return null;
+            return value.clone ? value.clone() : new globalState.THREE.Vector3(Number(value.x) || 0, Number(value.y) || 0, Number(value.z) || 0);
+        }
+
+        function chooseSpacedTargets(targets, count, minDistance, seed) {
+            const chosen = [];
+            const pool = targets.slice().sort(((a, b) => seededUnit(seed, a.position.x + 17 * a.position.z) - seededUnit(seed, b.position.x + 17 * b.position.z)));
+            for (const candidate of pool) {
+                if (chosen.length >= count)
+                    break;
+                if (chosen.every(existing => getDistance2D(existing.position, candidate.position) >= minDistance))
+                    chosen.push(candidate);
+            }
+            return chosen.length >= count ? chosen : pool.slice(0, count);
+        }
+
+        function formatMissionSeconds(seconds) {
+            const safe = Math.max(0, Number(seconds) || 0);
+            const mins = Math.floor(safe / 60);
+            const secs = Math.floor(safe % 60);
+            return `${mins}:${String(secs).padStart(2, "0")}`;
+        }
+
+        function collectTownMissionTargets() {
+            return toSafeArray(townSignsState.debugPlaces).map(((place, index) => ({
+                key: `town_${index}`,
+                label: place.name,
+                position: new globalState.THREE.Vector3(Number(place.center.x) || 0, Number(place.center.y) || 0, Number(place.center.z) || 0),
+                radius: clamp(Number(place.radius) || 55, 35, 90)
+            }))).filter((target => target.label && target.position));
+        }
+
+        function collectResidentialMissionTargets(manager) {
+            return toSafeArray(manager && manager.buildings).filter((building => building && building.houseCenter)).map((building => ({
+                key: `house_${building.index}`,
+                label: `House ${building.index}`,
+                position: building.houseCenter.clone(),
+                radius: 26,
+                building
+            })));
+        }
+
+        function collectGasStationMissionTargets() {
+            const targets = [];
+            for (const chunk of getLoadedChunks())
+                for (const station of toSafeArray(chunk.gasStations)) {
+                    const position = station && station.pumpPositions && station.pumpPositions[0] ? station.pumpPositions[0].clone() : station && station.origin ? station.origin.clone() : null;
+                    position && targets.push({
+                        key: `fuel_${targets.length}`,
+                        label: "Fuel station",
+                        position,
+                        radius: 22
+                    });
+                }
+            return targets;
+        }
+
+        function collectForestMissionTargets() {
+            const targets = [];
+            for (const chunk of getLoadedChunks()) {
+                const coverage = chunk && chunk.terrain && typeof chunk.terrain.getForestCoverage === "function" ? Number(chunk.terrain.getForestCoverage()) || 0 : 0;
+                if (coverage < .22)
+                    continue;
+                const position = chunk.centerVec ? chunk.centerVec.clone() : new globalState.THREE.Vector3(Number(chunk.cx) || 0, 0, Number(chunk.cz) || 0);
+                targets.push({
+                    key: `forest_${targets.length}`,
+                    label: `Forest ${targets.length + 1}`,
+                    position,
+                    radius: 34,
+                    coverage
+                });
+            }
+            return targets.sort(((a, b) => b.coverage - a.coverage));
+        }
+
+        function collectMainRoadMissionTargets() {
+            const points = [];
+            if (!townSignsState.roadModule)
+                return points;
+            for (const chunk of getLoadedChunks())
+                for (const edge of toSafeArray(chunk.newRoadGraph && chunk.newRoadGraph.edges)) {
+                    if (!edge || !isRoadEligibleForTownHints(edge))
+                        continue;
+                    if (edge.type !== townSignsState.roadModule.ROAD_TYPE_PRIMARY && edge.type !== townSignsState.roadModule.ROAD_TYPE_MOTORWAY && edge.type !== townSignsState.roadModule.ROAD_TYPE_MERGING_LANE)
+                        continue;
+                    const worldPoints = getEdgeWorldPoints(edge);
+                    if (!worldPoints.length)
+                        continue;
+                    const midPoint = worldPoints[Math.floor(worldPoints.length / 2)].clone();
+                    points.push({
+                        key: `road_${points.length}`,
+                        label: "Main road checkpoint",
+                        position: midPoint,
+                        radius: 28
+                    });
+                }
+            return points;
+        }
+
+        function buildCustomMissionStages(type, manager, player) {
+            const playerPos = player && typeof player.getPosition === "function" ? player.getPosition().clone() : new globalState.THREE.Vector3;
+            const towns = collectTownMissionTargets();
+            const homes = collectResidentialMissionTargets(manager);
+            const fuelStations = collectGasStationMissionTargets();
+            const forests = collectForestMissionTargets();
+            const mainRoads = collectMainRoadMissionTargets();
+            if ("tmTownHop" === type) {
+                const chosen = chooseSpacedTargets(towns, Math.min(3, towns.length), 500, playerPos.x + playerPos.z);
+                return chosen.map(((target, index) => ({
+                    label: target.label,
+                    position: target.position,
+                    radius: target.radius,
+                    markerColor: 0 === index ? "#ffbf40" : "#f26f3d",
+                    status: `Reach ${target.label}`,
+                    description: `Drive through ${target.label} and continue to the next town.`
+                })));
+            }
+            if ("tmResidentialDash" === type) {
+                const sorted = homes.sort(((a, b) => getDistance2D(playerPos, a.position) - getDistance2D(playerPos, b.position)));
+                const first = sorted[0];
+                const second = sorted.find((target => getDistance2D(first && first.position, target.position) > 500));
+                const third = sorted.find((target => second && getDistance2D(second.position, target.position) > 350 && target !== first));
+                return [first, second, third].filter(Boolean).map((target => ({
+                    label: target.label,
+                    position: target.position,
+                    radius: target.radius,
+                    markerColor: "#69d2ff",
+                    status: `Residential stop: ${target.label}`,
+                    description: "Sprint between residential stops without wrecking the car."
+                })));
+            }
+            if ("tmFuelRun" === type) {
+                const nearestFuel = fuelStations.sort(((a, b) => getDistance2D(playerPos, a.position) - getDistance2D(playerPos, b.position)))[0];
+                const deliveryHome = homes.sort(((a, b) => nearestFuel ? getDistance2D(nearestFuel.position, a.position) - getDistance2D(nearestFuel.position, b.position) : 0)).find((target => !nearestFuel || getDistance2D(nearestFuel.position, target.position) > 250));
+                return [nearestFuel && {
+                    label: nearestFuel.label,
+                    position: nearestFuel.position,
+                    radius: nearestFuel.radius,
+                    markerColor: "#63f08d",
+                    status: "Reach the fuel station",
+                    description: "Drive to the station first, then bring the car back into town."
+                }, deliveryHome && {
+                    label: deliveryHome.label,
+                    position: deliveryHome.position,
+                    radius: deliveryHome.radius,
+                    markerColor: "#40b8ff",
+                    status: `Return to ${deliveryHome.label}`,
+                    description: "Finish the run at a residential destination."
+                }].filter(Boolean);
+            }
+            if ("tmForestPatrol" === type) {
+                const forest = forests[0];
+                const town = towns.sort(((a, b) => forest ? getDistance2D(forest.position, a.position) - getDistance2D(forest.position, b.position) : 0)).find((target => !forest || getDistance2D(forest.position, target.position) > 500));
+                return [forest && {
+                    label: forest.label,
+                    position: forest.position,
+                    radius: forest.radius,
+                    markerColor: "#7ee35b",
+                    status: "Reach the forest edge",
+                    description: "Head out of town and reach the greener part of the map."
+                }, town && {
+                    label: town.label,
+                    position: town.position,
+                    radius: town.radius,
+                    markerColor: "#ffc46b",
+                    status: `Return to ${town.label}`,
+                    description: "Turn back and finish inside a nearby settlement."
+                }].filter(Boolean);
+            }
+            if ("tmRingRoadRun" === type) {
+                const chosen = chooseSpacedTargets(mainRoads, Math.min(2, mainRoads.length), 600, playerPos.x - playerPos.z);
+                return chosen.map(((target, index) => ({
+                    label: `${target.label} ${index + 1}`,
+                    position: target.position,
+                    radius: target.radius,
+                    markerColor: 0 === index ? "#c389ff" : "#ff6fa7",
+                    status: `Reach ${target.label.toLowerCase()} ${index + 1}`,
+                    description: "Use the bigger roads and connect the checkpoints cleanly."
+                })));
+            }
+            return [];
+        }
+
+        function ensureCustomMissionOptions(panel) {
+            if (!panel || !panel.missionTypes || runtimeState.missionPanelsPatched.has(panel))
+                return;
+            for (const task of CUSTOM_TASK_OPTIONS)
+                if (!panel.missionTypes.querySelector(`option[value="${task.value}"]`)) {
+                    const option = document.createElement("option");
+                    option.value = task.value;
+                    option.textContent = task.label;
+                    panel.missionTypes.appendChild(option);
+                }
+            runtimeState.missionPanelsPatched.add(panel);
+        }
+
+        class RuntimeRouteMission {
+            constructor(manager, type) {
+                this.missionManager = manager;
+                this.type = type;
+                this.markerIndex = -1;
+                this.stageIndex = 0;
+                this.stages = [];
+                this.startedAt = 0;
+                this.startDistance = 0;
+                this.initialized = !1;
+                this.failed = !1;
+                this.completed = !1;
+            }
+
+            cancelMission() {
+                this.removeMarker();
+                this.missionManager.missionPanel.turnOffCompass();
+                this.missionManager.missionPanel.updateEntry1("");
+                this.missionManager.missionPanel.updateEntry2("");
+                this.missionManager.missionPanel.updateEntry3("");
+                this.missionManager.missionPanel.updateEntry4("");
+            }
+
+            resetMission() {
+                this.removeMarker();
+                this.stageIndex = 0;
+                this.stages = [];
+                this.initialized = !1;
+                this.failed = !1;
+                this.completed = !1;
+            }
+
+            removeMarker() {
+                if (this.markerIndex >= 0) {
+                    this.missionManager.removeMarker(this.markerIndex);
+                    this.markerIndex = -1;
+                }
+            }
+
+            ensureInitialized(currentTime, player) {
+                if (this.initialized || this.failed)
+                    return;
+                this.startedAt = Number(currentTime) || 0;
+                this.startDistance = Number(player && player.millage) || 0;
+                this.stages = buildCustomMissionStages(this.type, this.missionManager, player);
+                if (!this.stages.length) {
+                    this.failed = !0;
+                    this.missionManager.missionPanel.showNavigation();
+                    this.missionManager.missionPanel.updateStatus("No suitable route found here");
+                    this.missionManager.missionPanel.updateMissionDescriptiopn("Drive to another area or reload nearby chunks, then start the task again.");
+                    this.missionManager.missionPanel.turnOffCompass();
+                    return;
+                }
+                this.initialized = !0;
+                this.setStage(0);
+            }
+
+            setStage(index) {
+                const stage = this.stages[index];
+                if (!stage)
+                    return;
+                this.stageIndex = index;
+                this.removeMarker();
+                this.markerIndex = this.missionManager.addMarker(stage.markerColor || "#40ff90", stage.position, stage.label);
+                this.missionManager.missionPanel.showNavigation();
+                this.missionManager.missionPanel.updateStatus(stage.status || stage.label);
+                this.missionManager.missionPanel.updateMissionDescriptiopn(stage.description || stage.label);
+            }
+
+            finish(currentTime, player) {
+                this.completed = !0;
+                this.removeMarker();
+                const elapsed = Math.max(0, (Number(currentTime) || 0) - this.startedAt);
+                const distance = Math.max(0, (Number(player && player.millage) || this.startDistance) - this.startDistance);
+                this.missionManager.missionPanel.updateStatus("Task complete");
+                this.missionManager.missionPanel.updateMissionDescriptiopn("Open the T menu for another custom route or stop this one.");
+                this.missionManager.missionPanel.turnOffCompass();
+                this.missionManager.missionPanel.updateEntry1(`${this.stages.length}/${this.stages.length} checkpoints`);
+                this.missionManager.missionPanel.updateEntry2(`Time: ${formatMissionSeconds(elapsed)}`);
+                this.missionManager.missionPanel.updateEntry3(`Dist: ${(distance / 1e3).toFixed(1)} km`);
+                this.missionManager.missionPanel.updateEntry4("");
+            }
+
+            update(dtSeconds, currentTime, inputState, player) {
+                if (!player || this.completed)
+                    return;
+                this.ensureInitialized(currentTime, player);
+                if (!this.initialized)
+                    return;
+                const stage = this.stages[this.stageIndex];
+                if (!stage)
+                    return void this.finish(currentTime, player);
+                const playerPos = player.getPosition();
+                this.missionManager.missionPanel.updateCompass(playerPos, player.getHeadings(), stage.position);
+                this.missionManager.missionPanel.updateEntry1(`${this.stageIndex + 1}/${this.stages.length} checkpoints`);
+                this.missionManager.missionPanel.updateEntry2(stage.label);
+                this.missionManager.missionPanel.updateEntry3(`ETA: ${Math.max(0, getDistance2D(playerPos, stage.position)).toFixed(0)} m`);
+                this.missionManager.missionPanel.updateEntry4(`Time: ${formatMissionSeconds((Number(currentTime) || 0) - this.startedAt)}`);
+                if (getDistance2D(playerPos, stage.position) <= (Number(stage.radius) || 24))
+                    if (this.stageIndex >= this.stages.length - 1)
+                        this.finish(currentTime, player);
+                    else
+                        this.setStage(this.stageIndex + 1);
+            }
+        }
+
+        function patchMissionManagerRuntime(missionManager) {
+            if (!missionManager || missionManager.__tmCustomMissionPatched)
+                return;
+            ensureCustomMissionOptions(missionManager.missionPanel);
+            const originalCreateMission = missionManager.createMission;
+            missionManager.createMission = function(type) {
+                if (CUSTOM_TASK_OPTIONS.some((task => task.value === type))) {
+                    this.cancelCurrentMission();
+                    this.currentMission = new RuntimeRouteMission(this, type);
+                    return;
+                }
+                return originalCreateMission.apply(this, arguments);
+            };
+            missionManager.__tmCustomMissionPatched = !0;
+        }
+
+        function toThreeColor(value, fallback) {
+            if (!globalState.THREE)
+                return null;
+            const color = new globalState.THREE.Color(null != fallback ? fallback : 16777215);
+            try {
+                null != value && color.set(value);
+            } catch (colorError) {}
+            return color;
+        }
+
+        function setTextureQuality(texture) {
+            if (!texture || !globalState.THREE)
+                return;
+            texture.wrapS = globalState.THREE.RepeatWrapping;
+            texture.wrapT = globalState.THREE.RepeatWrapping;
+            texture.minFilter = globalState.THREE.LinearMipmapLinearFilter;
+            texture.magFilter = globalState.THREE.LinearFilter;
+            texture.anisotropy = 8;
+            texture.needsUpdate = !0;
+        }
+
+        function getAsphaltTexture() {
+            if (runtimeState.asphaltTexture || !globalState.THREE)
+                return runtimeState.asphaltTexture;
+            const canvas = document.createElement("canvas");
+            canvas.width = 256;
+            canvas.height = 256;
+            const ctx = canvas.getContext("2d");
+            if (!ctx)
+                return null;
+            const image = ctx.createImageData(canvas.width, canvas.height);
+            for (let index = 0; index < image.data.length; index += 4) {
+                const pixel = index / 4;
+                const x = pixel % canvas.width;
+                const y = Math.floor(pixel / canvas.width);
+                const grain = 54 + Math.floor(22 * seededUnit(x, y));
+                const tire = Math.floor(8 * Math.sin(.09 * x) * Math.sin(.04 * y));
+                const lineWear = Math.abs(y - canvas.height / 2) < 6 ? 18 : 0;
+                const tone = clamp(grain + tire + lineWear, 25, 110);
+                image.data[index] = tone;
+                image.data[index + 1] = tone - 2;
+                image.data[index + 2] = tone - 4;
+                image.data[index + 3] = 255;
+            }
+            ctx.putImageData(image, 0, 0);
+            const texture = new globalState.THREE.CanvasTexture(canvas);
+            texture.repeat.set(.18, .18);
+            setTextureQuality(texture);
+            runtimeState.asphaltTexture = texture;
+            return texture;
+        }
+
+        function enhanceTerrainMesh(chunk) {
+            if (!chunk || !chunk.group)
+                return;
+            chunk.group.traverse((node => {
+                if (!node || !node.isMesh || !node.__tmTerrainMesh)
+                    return;
+                const material = node.material;
+                if (!material)
+                    return;
+                material.color && material.color.setHex(VISUAL_CONFIG.terrainColor);
+                material.vertexColors = !0;
+                material.needsUpdate = !0;
+                material.map && setTextureQuality(material.map);
+            }
+            ));
+        }
+
+        function createRoadMaterial(baseMaterial) {
+            if (!globalState.THREE)
+                return baseMaterial;
+            const material = new globalState.THREE.MeshLambertMaterial({
+                color: VISUAL_CONFIG.roadColor,
+                side: globalState.THREE.DoubleSide,
+                map: getAsphaltTexture()
+            });
+            material.userData = Object.assign({}, baseMaterial && baseMaterial.userData, {
+                tmEnhancedRoad: !0
+            });
+            return material;
+        }
+
+        function enhanceRoadMeshes(chunk) {
+            if (!chunk || !chunk.roadMeshes || !globalState.THREE)
+                return;
+            for (const mesh of chunk.roadMeshes) {
+                if (!mesh || !mesh.isMesh || mesh.__tmEnhancedRoad)
+                    continue;
+                mesh.material = createRoadMaterial(mesh.material);
+                mesh.__tmEnhancedRoad = !0;
+            }
+        }
+
+        function queueChunkVisualRefresh(chunk, reason) {
+            if (!chunk)
+                return;
+            const previousTimer = runtimeState.visualRefreshTimers.get(chunk);
+            previousTimer && clearTimeout(previousTimer);
+            const timer = setTimeout((() => {
+                runtimeState.visualRefreshTimers.delete(chunk);
+                try {
+                    enhanceTerrainMesh(chunk);
+                    enhanceRoadMeshes(chunk);
+                    rebuildCustomBuildingsForChunk(chunk);
+                } catch (visualError) {
+                    error(`Fehler beim Visual-Refresh fuer Chunk ${chunk.cx}/${chunk.cz}:`, visualError);
+                }
+            }
+            ), 30);
+            runtimeState.visualRefreshTimers.set(chunk, timer);
+        }
+
+        function mergeGeometriesSafe(geometries) {
+            const usable = geometries.filter(Boolean);
+            if (!usable.length)
+                return null;
+            if (1 === usable.length || !runtimeState.bufferGeometryUtils || "function" != typeof runtimeState.bufferGeometryUtils.mergeBufferGeometries)
+                return usable[0];
+            return runtimeState.bufferGeometryUtils.mergeBufferGeometries(usable);
+        }
+
+        function transformGeometry(geometry, options) {
+            if (!geometry)
+                return null;
+            const scaleX = options && null != options.scaleX ? options.scaleX : 1;
+            const scaleY = options && null != options.scaleY ? options.scaleY : 1;
+            const scaleZ = options && null != options.scaleZ ? options.scaleZ : 1;
+            const rotateY = options && Number(options.rotateY) || 0;
+            const translateX = options && Number(options.x) || 0;
+            const translateY = options && Number(options.y) || 0;
+            const translateZ = options && Number(options.z) || 0;
+            geometry.scale(scaleX, scaleY, scaleZ);
+            rotateY && geometry.rotateY(rotateY);
+            geometry.translate(translateX, translateY, translateZ);
+            return geometry;
+        }
+
+        function applyGradientVertexColors(geometry, baseValue, seed, mode) {
+            if (!globalState.THREE || !geometry || !geometry.attributes || !geometry.attributes.position)
+                return geometry;
+            const position = geometry.attributes.position;
+            const colors = new Float32Array(3 * position.count);
+            const base = toThreeColor(baseValue, "trunk" === mode ? 5263684 : 6781251);
+            let minY = 1 / 0;
+            let maxY = -1 / 0;
+            for (let index = 0; index < position.count; index++) {
+                const y = position.getY(index);
+                minY = Math.min(minY, y);
+                maxY = Math.max(maxY, y);
+            }
+            const range = Math.max(1e-3, maxY - minY);
+            for (let index = 0; index < position.count; index++) {
+                const x = position.getX(index);
+                const y = position.getY(index);
+                const z = position.getZ(index);
+                const heightFactor = (y - minY) / range;
+                const noise = seededUnit(seed + 11 * x + 7 * z, index + y);
+                const color = base.clone();
+                if ("trunk" === mode)
+                    color.offsetHSL(0, -.05, -VISUAL_CONFIG.treeTrunkDarken + .08 * heightFactor + .05 * (noise - .5));
+                else
+                    color.offsetHSL(.01 * (noise - .5), VISUAL_CONFIG.treeLeafSaturationBoost * (noise - .5), VISUAL_CONFIG.treeLeafLightnessBottom + (VISUAL_CONFIG.treeLeafLightnessTop - VISUAL_CONFIG.treeLeafLightnessBottom) * heightFactor + .05 * (noise - .5));
+                colors[3 * index] = color.r;
+                colors[3 * index + 1] = color.g;
+                colors[3 * index + 2] = color.b;
+            }
+            geometry.setAttribute("color", new globalState.THREE.Float32BufferAttribute(colors,3));
+            return geometry;
+        }
+
+        function createEnhancedTreeGeometries(x, y, z, seed, type) {
+            if (!globalState.THREE)
+                return [null, null];
+            const THREE = globalState.THREE;
+            const randomA = seededUnit(seed, 1);
+            const randomB = seededUnit(seed, 2);
+            const randomC = seededUnit(seed, 3);
+            const variant = Math.floor(seededUnit(seed, 21) * 3);
+            const leafGeometries = [];
+            const trunkGeometries = [];
+            const createSphere = (radius, centerX, centerY, centerZ, scaleY=1, scaleX=1.05, scaleZ=1.05) => transformGeometry(new THREE.SphereGeometry(radius, 9, 7), {
+                scaleX,
+                scaleY,
+                scaleZ,
+                x: centerX,
+                y: centerY,
+                z: centerZ
+            });
+            const createCone = (radiusTop, radiusBottom, height, centerX, centerY, centerZ, segments=8) => transformGeometry(new THREE.CylinderGeometry(radiusTop, radiusBottom, height, segments, 1), {
+                x: centerX,
+                y: centerY,
+                z: centerZ
+            });
+            if (type === runtimeState.treeModule.TREE_BUSH) {
+                const bushRadius = 1.65 + .5 * randomA;
+                leafGeometries.push(createSphere(bushRadius, x - .7, y + 1.15, z, .92));
+                leafGeometries.push(createSphere(.95 * bushRadius, x + .65, y + 1.05, z + .35, .9));
+                leafGeometries.push(createSphere(.82 * bushRadius, x + .1, y + 1.6, z - .55, .8));
+                return [mergeGeometriesSafe(leafGeometries), null];
+            }
+            const baseHeight = type === runtimeState.treeModule.TREE_CITY ? 7.5 + 2.2 * randomA : type === runtimeState.treeModule.TREE_FRUIT ? 6.2 + 1.2 * randomA : type === runtimeState.treeModule.TREE_CONIFER ? 16 + 7 * randomA : type === runtimeState.treeModule.TREE_ALEPPO_PINE ? 13.5 + 5.5 * randomA : type === runtimeState.treeModule.TREE_HOLLY_OAK ? 13 + 4 * randomA : 13 + 6 * randomA;
+            const trunkHeight = type === runtimeState.treeModule.TREE_CONIFER ? .18 * baseHeight : type === runtimeState.treeModule.TREE_ALEPPO_PINE ? .54 * baseHeight : type === runtimeState.treeModule.TREE_HOLLY_OAK ? .34 * baseHeight : type === runtimeState.treeModule.TREE_CITY ? .48 * baseHeight : type === runtimeState.treeModule.TREE_FRUIT ? .42 * baseHeight : .38 * baseHeight;
+            const trunkRadius = type === runtimeState.treeModule.TREE_CITY ? .22 : type === runtimeState.treeModule.TREE_FRUIT ? .18 : type === runtimeState.treeModule.TREE_HOLLY_OAK ? .34 : type === runtimeState.treeModule.TREE_ALEPPO_PINE ? .28 : type === runtimeState.treeModule.TREE_CONIFER ? .24 : .3;
+            trunkGeometries.push(createCone(.68 * trunkRadius, trunkRadius, trunkHeight + .8, x, y + trunkHeight / 2 + .4, z, 7));
+            if (type === runtimeState.treeModule.TREE_CONIFER || type === runtimeState.treeModule.TREE_ALEPPO_PINE) {
+                const levels = type === runtimeState.treeModule.TREE_ALEPPO_PINE ? 3 : 4;
+                for (let index = 0; index < levels; index++) {
+                    const levelProgress = index / Math.max(1, levels - 1);
+                    const coneHeight = (baseHeight - trunkHeight) * (.55 - .08 * levelProgress);
+                    const baseRadius = (type === runtimeState.treeModule.TREE_ALEPPO_PINE ? 3.9 : 3.1) * (1 - .16 * index) + .6 * randomB;
+                    const canopyY = y + trunkHeight + coneHeight / 2 + (baseHeight - trunkHeight) * (.15 * index);
+                    leafGeometries.push(createCone(.12 * baseRadius, baseRadius, coneHeight, x, canopyY, z, 8));
+                }
+                if (type === runtimeState.treeModule.TREE_ALEPPO_PINE && variant > 0)
+                    leafGeometries.push(createSphere(2.4 + .6 * randomC, x, y + baseHeight - 1.7, z, .55, 1.35, 1.35));
+            } else if (type === runtimeState.treeModule.TREE_CITY) {
+                leafGeometries.push(createSphere(2.1 + .3 * randomA, x, y + trunkHeight + 1.6, z, .7, 1.35, 1.35));
+                leafGeometries.push(createSphere(1.65 + .18 * randomB, x - .65, y + trunkHeight + 1.35, z + .45, .82));
+                leafGeometries.push(createSphere(1.55 + .18 * randomC, x + .8, y + trunkHeight + 1.2, z - .4, .78));
+            } else if (type === runtimeState.treeModule.TREE_FRUIT) {
+                leafGeometries.push(createSphere(2.55, x, y + trunkHeight + 1.85, z, .95));
+                leafGeometries.push(createSphere(1.8, x - .75, y + trunkHeight + 1.45, z + .35, .88));
+                leafGeometries.push(createSphere(1.5, x + .8, y + trunkHeight + 1.55, z - .25, .84));
+            } else if (type === runtimeState.treeModule.TREE_HOLLY_OAK) {
+                leafGeometries.push(createSphere(4.6 + .4 * randomA, x, y + trunkHeight + 2.9, z, .62, 1.3, 1.3));
+                leafGeometries.push(createSphere(3.2 + .25 * randomB, x - 1.6, y + trunkHeight + 2.35, z + .7, .7));
+                leafGeometries.push(createSphere(3.1 + .25 * randomC, x + 1.45, y + trunkHeight + 2.15, z - .55, .68));
+            } else {
+                leafGeometries.push(createSphere(3.6 + .6 * randomA, x, y + trunkHeight + 3.1, z, .92 + .12 * randomB, 1.08, 1.08));
+                leafGeometries.push(createSphere(2.5 + .3 * randomB, x - 1.7, y + trunkHeight + 2.25, z + .65, .86));
+                leafGeometries.push(createSphere(2.35 + .3 * randomC, x + 1.45, y + trunkHeight + 2.1, z - .7, .82));
+                if (variant > 0)
+                    leafGeometries.push(createSphere(1.9 + .2 * randomA, x + .2, y + trunkHeight + 4.7, z + .15, .76));
+            }
+            return [mergeGeometriesSafe(leafGeometries), mergeGeometriesSafe(trunkGeometries)];
+        }
+
+        function deepMergeConfig(base, extra) {
+            if (Array.isArray(base) || Array.isArray(extra))
+                return Array.isArray(extra) ? extra.slice() : Array.isArray(base) ? base.slice() : extra;
+            const output = Object.assign({}, base || {});
+            if (!extra || "object" != typeof extra)
+                return output;
+            for (const [key, value] of Object.entries(extra))
+                output[key] = value && "object" == typeof value && !Array.isArray(value) ? deepMergeConfig(output[key], value) : Array.isArray(value) ? value.slice() : value;
+            return output;
+        }
+
+        function cloneJson(value, fallback) {
+            try {
+                return JSON.parse(JSON.stringify(value));
+            } catch (cloneError) {
+                return null != fallback ? fallback : value;
+            }
+        }
+
+        function getBuildingDebugId(chunk, building) {
+            return `${Math.round(Number(chunk && chunk.cx) || 0)}:${Math.round(Number(chunk && chunk.cz) || 0)}/${Number(building && building.index) || 0}`;
+        }
+
+        function refreshCustomBuildingDebug() {
+            const entries = [];
+            for (const chunk of getLoadedChunks())
+                for (const building of toSafeArray(chunk.buildings))
+                    if (building && building.houseCenter)
+                        entries.push({
+                            id: getBuildingDebugId(chunk, building),
+                            match: {
+                                chunk: [Math.round(Number(chunk.cx) || 0), Math.round(Number(chunk.cz) || 0)],
+                                index: Number(building.index) || 0
+                            },
+                            center: {
+                                x: Number(building.houseCenter.x.toFixed(2)),
+                                y: Number(building.houseCenter.y.toFixed(2)),
+                                z: Number(building.houseCenter.z.toFixed(2))
+                            },
+                            level: Number(building.level) || 0,
+                            type: Number(building.type) || 0
+                        });
+            runtimeState.buildingDebugEntries = entries;
+            globalThis.__tmCustomBuildingsDebug = {
+                url: BUILDING_CONFIG_URL,
+                candidates: entries,
+                catalog: runtimeState.buildingConfig,
+                reload: reloadCustomBuildingCatalog
+            };
+            globalThis.__tmCollisionHookDebug && (globalThis.__tmCollisionHookDebug.customBuildings = globalThis.__tmCustomBuildingsDebug);
+        }
+
+        function parseBuildingConfigText(text) {
+            const source = String(text || "").trim();
+            if (!source)
+                return {
+                    templates: {},
+                    buildings: []
+                };
+            try {
+                return JSON.parse(source);
+            } catch (jsonError) {}
+            const globalKeys = ["__tmBuildingsConfig", "tmBuildingsConfig", "BUILDINGS", "buildingsConfig", "TM_BUILDINGS"];
+            try {
+                const getter = new Function(`${source}\n;return ${globalKeys.map((key => `typeof ${key} !== "undefined" ? ${key} : void 0`)).join(" || ")};`);
+                return getter();
+            } catch (scriptError) {}
+            return (new Function(`return (${source});`))();
+        }
+
+        function normalizeBuildingCatalog(rawCatalog) {
+            if (!rawCatalog || "object" != typeof rawCatalog)
+                return {
+                    templates: {},
+                    buildings: []
+                };
+            const templates = rawCatalog.templates && "object" == typeof rawCatalog.templates ? cloneJson(rawCatalog.templates, {}) : {};
+            const rawBuildings = rawCatalog.buildings && "object" == typeof rawCatalog.buildings ? rawCatalog.buildings : rawCatalog;
+            const buildings = Array.isArray(rawBuildings) ? rawBuildings.map(((entry, index) => Object.assign({
+                id: `entry_${index}`
+            }, entry))) : Object.entries(rawBuildings).filter((([key]) => "templates" !== key)).map((([key, entry]) => Object.assign({
+                id: key
+            }, entry)));
+            return {
+                templates,
+                buildings
+            };
+        }
+
+        function ensureBuildingCatalogLoaded() {
+            if (runtimeState.buildingConfigPromise)
+                return runtimeState.buildingConfigPromise;
+            runtimeState.buildingConfigPromise = fetch(BUILDING_CONFIG_URL, {
+                cache: "no-store"
+            }).then((response => response.text())).then((text => normalizeBuildingCatalog(parseBuildingConfigText(text)))).catch((catalogError => {
+                warn("Externe buildings.js konnte nicht geladen werden:", catalogError);
+                return {
+                    templates: {},
+                    buildings: []
+                };
+            })).then((catalog => {
+                runtimeState.buildingConfig = catalog;
+                refreshCustomBuildingDebug();
+                return catalog;
+            }));
+            return runtimeState.buildingConfigPromise;
+        }
+
+        function reloadCustomBuildingCatalog() {
+            runtimeState.buildingConfigPromise = null;
+            runtimeState.buildingConfig = null;
+            for (const chunk of getLoadedChunks()) {
+                chunk.__tmCustomBuildingsPrepared = !1;
+                chunk.__tmCustomBuildingsPreparePromise = null;
+                chunk.__tmMatchedCustomBuildings = [];
+                queueChunkVisualRefresh(chunk, "custom_building_reload");
+            }
+            return ensureBuildingCatalogLoaded();
+        }
+
+        function resolveBuildingTemplate(entry, templates, chain) {
+            const seen = chain || new Set;
+            const templateNames = Array.isArray(entry && entry.template) ? entry.template : entry && entry.template ? [entry.template] : [];
+            let merged = {};
+            for (const templateName of templateNames) {
+                if (!templateName || seen.has(templateName) || !templates || !templates[templateName])
+                    continue;
+                seen.add(templateName);
+                merged = deepMergeConfig(merged, resolveBuildingTemplate(templates[templateName], templates, seen));
+            }
+            return deepMergeConfig(merged, entry || {});
+        }
+
+        function matchBuildingEntry(entry, chunk, building) {
+            if (!entry || !entry.match)
+                return !1;
+            const match = entry.match;
+            if (match.id && match.id !== getBuildingDebugId(chunk, building))
+                return !1;
+            if (Array.isArray(match.chunk) && 2 === match.chunk.length)
+                if (Math.round(Number(chunk.cx) || 0) !== Math.round(Number(match.chunk[0]) || 0) || Math.round(Number(chunk.cz) || 0) !== Math.round(Number(match.chunk[1]) || 0))
+                    return !1;
+            if (null != match.index && Number(building.index) !== Number(match.index))
+                return !1;
+            if (Array.isArray(match.near) && 2 <= match.near.length && building.houseCenter) {
+                const distance = Math.hypot((Number(building.houseCenter.x) || 0) - (Number(match.near[0]) || 0), (Number(building.houseCenter.z) || 0) - (Number(match.near[1]) || 0));
+                if (distance > Math.max(8, Number(match.radius) || 25))
+                    return !1;
+            }
+            return !0;
+        }
+
+        function getBuildingFootprint(building, spec) {
+            const rawPoints = Array.isArray(spec && spec.footprint) && spec.footprint.length >= 3 ? spec.footprint : toSafeArray(building && building.points);
+            if (!rawPoints.length)
+                return [];
+            const points = rawPoints.map((point => ({
+                x: Number(Array.isArray(point) ? point[0] : point.x) || 0,
+                z: Number(Array.isArray(point) ? point[1] : point.z) || 0
+            })));
+            const inset = Number(spec && spec.base && spec.base.inset) || 0;
+            if (Math.abs(inset) < 1e-6)
+                return points;
+            const centroid = points.reduce(((acc, point) => ({
+                x: acc.x + point.x,
+                z: acc.z + point.z
+            })), {
+                x: 0,
+                z: 0
+            });
+            centroid.x /= points.length;
+            centroid.z /= points.length;
+            return points.map((point => {
+                const directionX = centroid.x - point.x;
+                const directionZ = centroid.z - point.z;
+                const length = Math.hypot(directionX, directionZ) || 1;
+                return {
+                    x: point.x + directionX / length * inset,
+                    z: point.z + directionZ / length * inset
+                };
+            }
+            ));
+        }
+
+        function createShapeFromFootprint(points) {
+            if (!globalState.THREE || points.length < 3)
+                return null;
+            const shape = new globalState.THREE.Shape;
+            shape.moveTo(points[0].x, -points[0].z);
+            for (let index = 1; index < points.length; index++)
+                shape.lineTo(points[index].x, -points[index].z);
+            shape.lineTo(points[0].x, -points[0].z);
+            return shape;
+        }
+
+        function createCustomBuildingBody(points, baseY, bodyHeight, colorValue) {
+            if (!globalState.THREE || points.length < 3)
+                return null;
+            const shape = createShapeFromFootprint(points);
+            if (!shape)
+                return null;
+            const geometry = new globalState.THREE.ExtrudeGeometry(shape, {
+                depth: bodyHeight,
+                bevelEnabled: !1,
+                steps: 1
+            });
+            geometry.rotateX(-Math.PI / 2);
+            geometry.translate(0, baseY, 0);
+            return new globalState.THREE.Mesh(geometry, new globalState.THREE.MeshLambertMaterial({
+                color: null != colorValue ? colorValue : 14540253
+            }));
+        }
+
+        function computeFootprintFrame(points, ridgeMode) {
+            let longestLength = 0;
+            let direction = {
+                x: 1,
+                z: 0
+            };
+            for (let index = 0; index < points.length; index++) {
+                const current = points[index];
+                const next = points[(index + 1) % points.length];
+                const dx = next.x - current.x;
+                const dz = next.z - current.z;
+                const length = Math.hypot(dx, dz);
+                if (length > longestLength) {
+                    longestLength = length;
+                    direction = {
+                        x: dx / length,
+                        z: dz / length
+                    };
+                }
+            }
+            const side = {
+                x: -direction.z,
+                z: direction.x
+            };
+            const centroid = points.reduce(((acc, point) => ({
+                x: acc.x + point.x,
+                z: acc.z + point.z
+            })), {
+                x: 0,
+                z: 0
+            });
+            centroid.x /= points.length;
+            centroid.z /= points.length;
+            let minU = 1 / 0;
+            let maxU = -1 / 0;
+            let minV = 1 / 0;
+            let maxV = -1 / 0;
+            const axis = "shortest" === ridgeMode ? side : direction;
+            const ortho = "shortest" === ridgeMode ? direction : side;
+            for (const point of points) {
+                const offsetX = point.x - centroid.x;
+                const offsetZ = point.z - centroid.z;
+                const u = offsetX * axis.x + offsetZ * axis.z;
+                const v = offsetX * ortho.x + offsetZ * ortho.z;
+                minU = Math.min(minU, u);
+                maxU = Math.max(maxU, u);
+                minV = Math.min(minV, v);
+                maxV = Math.max(maxV, v);
+            }
+            return {
+                center: centroid,
+                axis,
+                ortho,
+                minU,
+                maxU,
+                minV,
+                maxV
+            };
+        }
+
+        function localFramePoint(frame, u, v, y) {
+            return new globalState.THREE.Vector3(frame.center.x + frame.axis.x * u + frame.ortho.x * v, y, frame.center.z + frame.axis.z * u + frame.ortho.z * v);
+        }
+
+        function createCustomRoof(points, baseY, bodyHeight, roofSpec) {
+            if (!globalState.THREE || points.length < 3 || !roofSpec || !1 === roofSpec.enabled)
+                return null;
+            const roofType = roofSpec.type || "gable";
+            const overhang = Number(roofSpec.overhang) || 0;
+            const colorValue = null != roofSpec.color ? roofSpec.color : 8606516;
+            if ("flat" === roofType) {
+                const shape = createShapeFromFootprint(points);
+                if (!shape)
+                    return null;
+                const geometry = new globalState.THREE.ShapeGeometry(shape);
+                geometry.rotateX(-Math.PI / 2);
+                geometry.translate(0, baseY + bodyHeight + .03, 0);
+                return new globalState.THREE.Mesh(geometry, new globalState.THREE.MeshLambertMaterial({
+                    color: colorValue,
+                    side: globalState.THREE.DoubleSide
+                }));
+            }
+            const frame = computeFootprintFrame(points, roofSpec.ridgeDirection || "longest");
+            frame.minU -= overhang;
+            frame.maxU += overhang;
+            frame.minV -= overhang;
+            frame.maxV += overhang;
+            const roofHeight = Math.max(.25, Number(roofSpec.height) || 2.2);
+            const y0 = baseY + bodyHeight;
+            const leftA = localFramePoint(frame, frame.minU, frame.minV, y0);
+            const leftB = localFramePoint(frame, frame.maxU, frame.minV, y0);
+            const rightA = localFramePoint(frame, frame.minU, frame.maxV, y0);
+            const rightB = localFramePoint(frame, frame.maxU, frame.maxV, y0);
+            const ridgeA = localFramePoint(frame, frame.minU, 0, y0 + roofHeight);
+            const ridgeB = localFramePoint(frame, frame.maxU, 0, y0 + roofHeight);
+            const positions = [
+                leftA, ridgeA, leftB,
+                leftB, ridgeA, ridgeB,
+                rightA, rightB, ridgeA,
+                rightB, ridgeB, ridgeA,
+                leftA, rightA, ridgeA,
+                leftB, ridgeB, rightB
+            ];
+            const flat = [];
+            for (const point of positions)
+                flat.push(point.x, point.y, point.z);
+            const geometry = new globalState.THREE.BufferGeometry;
+            geometry.setAttribute("position", new globalState.THREE.Float32BufferAttribute(flat,3));
+            geometry.computeVertexNormals();
+            return new globalState.THREE.Mesh(geometry, new globalState.THREE.MeshLambertMaterial({
+                color: colorValue,
+                side: globalState.THREE.DoubleSide
+            }));
+        }
+
+        function createWallPanel(start, end, center, baseY, height, colorValue, depth) {
+            if (!globalState.THREE)
+                return null;
+            const dx = end.x - start.x;
+            const dz = end.z - start.z;
+            const length = Math.hypot(dx, dz);
+            if (length < .4)
+                return null;
+            const directionX = dx / length;
+            const directionZ = dz / length;
+            const midX = (start.x + end.x) / 2;
+            const midZ = (start.z + end.z) / 2;
+            const outwardX = midX - center.x;
+            const outwardZ = midZ - center.z;
+            const outwardLength = Math.hypot(outwardX, outwardZ) || 1;
+            const offsetX = outwardX / outwardLength;
+            const offsetZ = outwardZ / outwardLength;
+            const thickness = Math.max(.03, Number(depth) || .08);
+            const mesh = new globalState.THREE.Mesh(new globalState.THREE.BoxGeometry(length, height, thickness), new globalState.THREE.MeshLambertMaterial({
+                color: colorValue
+            }));
+            mesh.position.set(midX + offsetX * thickness / 2, baseY + height / 2, midZ + offsetZ * thickness / 2);
+            mesh.rotation.y = Math.atan2(directionZ, directionX);
+            return mesh;
+        }
+
+        function createWindowsForFootprint(group, points, baseY, bodyHeight, spec) {
+            if (!globalState.THREE || !group || !points.length || !spec || !1 === spec.enabled)
+                return;
+            const center = points.reduce(((acc, point) => ({
+                x: acc.x + point.x,
+                z: acc.z + point.z
+            })), {
+                x: 0,
+                z: 0
+            });
+            center.x /= points.length;
+            center.z /= points.length;
+            for (let index = 0; index < points.length; index++) {
+                const current = points[index];
+                const next = points[(index + 1) % points.length];
+                const sideSpec = deepMergeConfig(spec, spec.sides && (spec.sides[index] || spec.sides[String(index)]) || {});
+                if (!1 === sideSpec.enabled)
+                    continue;
+                const edgeLength = Math.hypot(next.x - current.x, next.z - current.z);
+                const margin = Math.max(.35, Number(sideSpec.margin) || .8);
+                const width = Math.max(.3, Number(sideSpec.width) || 1.05);
+                const height = Math.max(.35, Number(sideSpec.height) || 1.35);
+                const gap = Math.max(.15, Number(sideSpec.gap) || .65);
+                const rows = Math.max(1, Math.round(Number(sideSpec.rows) || Math.max(1, Math.round((bodyHeight - 1.8) / 2.4))));
+                const availableLength = Math.max(0, edgeLength - 2 * margin);
+                const cols = Math.max(1, Math.round(Number(sideSpec.cols) || Math.max(1, Math.floor((availableLength + gap) / (width + gap)))));
+                const runLength = cols * width + Math.max(0, cols - 1) * gap;
+                const startOffset = (edgeLength - runLength) / 2 + width / 2;
+                const dx = (next.x - current.x) / edgeLength;
+                const dz = (next.z - current.z) / edgeLength;
+                const midX = (current.x + next.x) / 2;
+                const midZ = (current.z + next.z) / 2;
+                const outwardX = midX - center.x;
+                const outwardZ = midZ - center.z;
+                const outwardLength = Math.hypot(outwardX, outwardZ) || 1;
+                const normalX = outwardX / outwardLength;
+                const normalZ = outwardZ / outwardLength;
+                const bottom = Math.max(.7, Number(sideSpec.sill) || 1.1);
+                const topPadding = Math.max(.55, Number(sideSpec.topPadding) || .85);
+                const usableHeight = Math.max(height, bodyHeight - bottom - topPadding);
+                const rowSpacing = rows > 1 ? (usableHeight - height) / (rows - 1) : 0;
+                if (sideSpec.color) {
+                    const panel = createWallPanel(current, next, center, baseY + .1, Math.max(.3, bodyHeight - .2), sideSpec.color, Number(sideSpec.claddingDepth) || .05);
+                    panel && group.add(panel);
+                }
+                for (let row = 0; row < rows; row++)
+                    for (let col = 0; col < cols; col++) {
+                        const along = startOffset + col * (width + gap) - edgeLength / 2;
+                        const basePointX = midX + dx * along;
+                        const basePointZ = midZ + dz * along;
+                        const centerY = baseY + bottom + row * rowSpacing;
+                        const frame = new globalState.THREE.Mesh(new globalState.THREE.BoxGeometry(width, height, .08), new globalState.THREE.MeshLambertMaterial({
+                            color: null != sideSpec.frameColor ? sideSpec.frameColor : VISUAL_CONFIG.windowFrameColor
+                        }));
+                        frame.position.set(basePointX + normalX * .05, centerY, basePointZ + normalZ * .05);
+                        frame.rotation.y = Math.atan2(dz, dx);
+                        group.add(frame);
+                        const glass = new globalState.THREE.Mesh(new globalState.THREE.BoxGeometry(Math.max(.15, width - .18), Math.max(.15, height - .18), .04), new globalState.THREE.MeshLambertMaterial({
+                            color: null != sideSpec.glassColor ? sideSpec.glassColor : VISUAL_CONFIG.windowGlassColor,
+                            transparent: !0,
+                            opacity: .88
+                        }));
+                        glass.position.set(basePointX + normalX * .095, centerY, basePointZ + normalZ * .095);
+                        glass.rotation.y = Math.atan2(dz, dx);
+                        group.add(glass);
+                    }
+            }
+        }
+
+        function createPrimitiveDetailMesh(detail, anchorPoint) {
+            if (!globalState.THREE || !detail || !detail.type)
+                return null;
+            let geometry = null;
+            if ("box" === detail.type) {
+                const size = detail.size || [1, 1, 1];
+                geometry = new globalState.THREE.BoxGeometry(Math.max(.1, Number(size[0]) || 1), Math.max(.1, Number(size[1]) || 1), Math.max(.1, Number(size[2]) || 1));
+            } else if ("cylinder" === detail.type) {
+                geometry = new globalState.THREE.CylinderGeometry(Math.max(.05, Number(detail.radiusTop) || Number(detail.radius) || .25), Math.max(.05, Number(detail.radiusBottom) || Number(detail.radius) || .25), Math.max(.1, Number(detail.height) || 1), Math.max(6, Number(detail.segments) || 10));
+            } else if ("sphere" === detail.type) {
+                geometry = new globalState.THREE.SphereGeometry(Math.max(.05, Number(detail.radius) || .5), 12, 10);
+            } else if ("panel" === detail.type) {
+                const size = detail.size || [1, 1];
+                geometry = new globalState.THREE.BoxGeometry(Math.max(.1, Number(size[0]) || 1), Math.max(.1, Number(size[1]) || 1), Math.max(.02, Number(size[2]) || .04));
+            }
+            if (!geometry)
+                return null;
+            const mesh = new globalState.THREE.Mesh(geometry, new globalState.THREE.MeshLambertMaterial({
+                color: null != detail.color ? detail.color : 12632256,
+                transparent: !!detail.transparent,
+                opacity: null != detail.opacity ? clamp(Number(detail.opacity) || 0, 0, 1) : 1
+            }));
+            const position = detail.position || [0, 0, 0];
+            const rotation = detail.rotation || [0, 0, 0];
+            const offsetX = detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.x) || 0;
+            const offsetZ = detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.z) || 0;
+            mesh.position.set(offsetX + (Number(position[0]) || 0), Number(position[1]) || 0, offsetZ + (Number(position[2]) || 0));
+            mesh.rotation.set((Number(rotation[0]) || 0) * Math.PI / 180, (Number(rotation[1]) || 0) * Math.PI / 180, (Number(rotation[2]) || 0) * Math.PI / 180);
+            return mesh;
+        }
+
+        function buildCustomBuildingObject(match) {
+            if (!globalState.THREE || !match || !match.building)
+                return null;
+            const spec = deepMergeConfig({
+                base: {
+                    floors: Math.max(1, Number(match.building.level) || 2),
+                    floorHeight: 3,
+                    color: 14540253,
+                    inset: 0
+                },
+                roof: {
+                    enabled: !0,
+                    type: "gable",
+                    color: 8606516,
+                    height: 2.2,
+                    overhang: .3,
+                    ridgeDirection: "longest"
+                },
+                windows: {
+                    enabled: !0,
+                    width: 1.05,
+                    height: 1.35,
+                    rows: 2,
+                    gap: .65,
+                    margin: .85,
+                    sill: 1.1
+                },
+                parts: []
+            }, match.entry || {});
+            const group = new globalState.THREE.Group;
+            group.name = `tmCustomBuilding:${match.id}`;
+            const points = getBuildingFootprint(match.building, spec);
+            const baseY = Number(spec.base && spec.base.y) || Number(match.building.y) || 0;
+            const bodyHeight = Math.max(1.4, Number(spec.base && spec.base.height) || Math.max(1, Number(spec.base && spec.base.floors) || 2) * Math.max(2.4, Number(spec.base && spec.base.floorHeight) || 3));
+            const body = createCustomBuildingBody(points, baseY, bodyHeight, spec.base && spec.base.color);
+            body && group.add(body);
+            const roof = createCustomRoof(points, baseY, bodyHeight, spec.roof);
+            roof && group.add(roof);
+            createWindowsForFootprint(group, points, baseY, bodyHeight, deepMergeConfig(spec.windows, {
+                sides: spec.sides || {}
+            }));
+            const anchorPoint = match.building.houseCenterLocal || {
+                x: match.building.houseCenter ? match.building.houseCenter.x - (match.building.chunkCenter && match.building.chunkCenter.x || 0) : 0,
+                z: match.building.houseCenter ? match.building.houseCenter.z - (match.building.chunkCenter && match.building.chunkCenter.z || 0) : 0
+            };
+            for (const part of toSafeArray(spec.parts)) {
+                const detailMesh = createPrimitiveDetailMesh(part, anchorPoint);
+                detailMesh && group.add(detailMesh);
+            }
+            return group;
+        }
+
+        async function ensureChunkCustomBuildingsPrepared(chunk) {
+            if (!chunk)
+                return [];
+            if (chunk.__tmCustomBuildingsPrepared)
+                return chunk.__tmMatchedCustomBuildings || [];
+            if (chunk.__tmCustomBuildingsPreparePromise)
+                return chunk.__tmCustomBuildingsPreparePromise;
+            chunk.__tmOriginalCustomBuildings || (chunk.__tmOriginalCustomBuildings = cloneJson(toSafeArray(chunk.custome_buildings), []));
+            chunk.__tmCustomBuildingsPreparePromise = ensureBuildingCatalogLoaded().then((catalog => {
+                const matched = [];
+                const suppressions = [];
+                for (const rawEntry of toSafeArray(catalog && catalog.buildings)) {
+                    const resolved = resolveBuildingTemplate(rawEntry, catalog.templates);
+                    for (const building of toSafeArray(chunk.buildings))
+                        if (building && building.houseCenter && matchBuildingEntry(resolved, chunk, building)) {
+                            const id = resolved.id || getBuildingDebugId(chunk, building);
+                            matched.push({
+                                id,
+                                entry: resolved,
+                                building
+                            });
+                            suppressions.push({
+                                id,
+                                naa: cloneJson(building.points, []),
+                                list: cloneJson(toSafeArray(resolved.bundleParts), [])
+                            });
+                        }
+                }
+                chunk.custome_buildings = toSafeArray(chunk.__tmOriginalCustomBuildings).concat(suppressions);
+                chunk.__tmMatchedCustomBuildings = matched;
+                chunk.__tmCustomBuildingsPrepared = !0;
+                runtimeState.customBuildingEntriesByChunk.set(chunk, matched);
+                return matched;
+            })).finally((() => {
+                chunk.__tmCustomBuildingsPreparePromise = null;
+            }));
+            return chunk.__tmCustomBuildingsPreparePromise;
+        }
+
+        function rebuildCustomBuildingsForChunk(chunk) {
+            if (!chunk || !chunk.group || !globalState.THREE)
+                return;
+            const matches = chunk.__tmMatchedCustomBuildings || runtimeState.customBuildingEntriesByChunk.get(chunk) || [];
+            let overlay = runtimeState.chunkCustomOverlayGroups.get(chunk);
+            if (!overlay) {
+                overlay = new globalState.THREE.Group;
+                overlay.name = "__tmCustomBuildingsOverlay";
+                runtimeState.chunkCustomOverlayGroups.set(chunk, overlay);
+            }
+            clearTownOverlayChildren(overlay);
+            if (!matches.length) {
+                overlay.parent && overlay.parent.remove(overlay);
+                return;
+            }
+            for (const match of matches) {
+                const object = buildCustomBuildingObject(match);
+                object && overlay.add(object);
+            }
+            overlay.parent !== chunk.group && chunk.group.add(overlay);
+        }
+
+        function cleanupChunkCustomVisuals(chunk) {
+            const overlay = chunk && runtimeState.chunkCustomOverlayGroups.get(chunk);
+            overlay && overlay.parent && overlay.parent.remove(overlay);
+            runtimeState.chunkCustomOverlayGroups.delete(chunk);
+            runtimeState.customBuildingEntriesByChunk.delete(chunk);
+            chunk && (chunk.__tmMatchedCustomBuildings = []);
+        }
+
         function captureTownSignsGame(game) {
             if (!game)
                 return;
+            const previousGame = townSignsState.game;
+            const previousScene = townSignsState.scene;
+            const previousChunkManager = townSignsState.chunkManager;
+            runtimeState.game = game;
             townSignsState.game = game;
             townSignsState.scene = game.scene || townSignsState.scene;
             townSignsState.chunkManager = game.chunkManager || townSignsState.chunkManager;
+            patchMissionManagerRuntime(game.missionManager);
+            if (!game.__tmRuntimeInitialized) {
+                game.__tmRuntimeInitialized = !0;
+                refreshCustomBuildingDebug();
+                ensureBuildingCatalogLoaded().then((() => {
+                    for (const chunk of getLoadedChunks())
+                        ensureChunkCustomBuildingsPrepared(chunk).finally((() => queueChunkVisualRefresh(chunk, "game_capture")));
+                }
+                ));
+            }
             ensureTownOverlayGroup();
-            queueTownRebuild("game_capture");
+            if (previousGame !== game || previousScene !== townSignsState.scene || previousChunkManager !== townSignsState.chunkManager)
+                queueTownRebuild("game_capture");
             globalThis.__tmCollisionHookDebug && (globalThis.__tmCollisionHookDebug.townSigns = Object.assign(globalThis.__tmCollisionHookDebug.townSigns || {}, {
                 game,
                 chunkManager: townSignsState.chunkManager,
@@ -1911,17 +3157,31 @@
                 const controllableModule = requireFn(REQUIRED_MODULES.CONTROLLABLE_CAR);
                 const roadModule = requireFn(REQUIRED_MODULES.ROAD_FACTORY);
                 const chunkModule = requireFn(REQUIRED_MODULES.CHUNK);
+                const terrainModule = requireFn(REQUIRED_MODULES.TERRAIN);
+                const treeModule = requireFn(REQUIRED_MODULES.TREE_LIBRARY);
+                const biomModule = requireFn(REQUIRED_MODULES.BIOM);
+                const missionModule = requireFn(REQUIRED_MODULES.MISSION_MANAGER);
+                const bufferGeometryUtils = requireFn(REQUIRED_MODULES.BUFFER_GEOMETRY_UTILS);
 
                 const worldProto = worldModule && worldModule.GameSessionOpenWorld && worldModule.GameSessionOpenWorld.prototype;
                 const aiProto = aiModule && aiModule.BetterAiCar && aiModule.BetterAiCar.prototype;
                 const trafficProto = trafficModule && trafficModule.AiTrafficResolver && trafficModule.AiTrafficResolver.prototype;
                 const controllableProto = controllableModule && controllableModule.ControllableCar && controllableModule.ControllableCar.prototype;
                 const chunkProto = chunkModule && chunkModule.Chunk && chunkModule.Chunk.prototype;
+                const terrainProto = terrainModule && terrainModule.Terrain && terrainModule.Terrain.prototype;
+                const biomProto = biomModule && biomModule.Biom && biomModule.Biom.prototype;
+                const missionProto = missionModule && missionModule.MissionManager && missionModule.MissionManager.prototype;
 
                 if (!trafficProto || !controllableProto || !aiProto || !chunkProto || !roadModule)
                     throw new Error("Benoetigte Prototypen konnten nicht aufgeloest werden.");
                 globalState.THREE = THREE;
                 townSignsState.roadModule = roadModule;
+                runtimeState.game = townSignsState.game;
+                runtimeState.terrainModule = terrainModule;
+                runtimeState.treeModule = treeModule;
+                runtimeState.biomModule = biomModule;
+                runtimeState.missionModule = missionModule;
+                runtimeState.bufferGeometryUtils = bufferGeometryUtils;
 
                 globalThis.__tmCollisionHookDebug = {
                     require: requireFn,
@@ -1933,9 +3193,99 @@
                         controllableModule,
                         roadModule,
                         chunkModule,
+                        terrainModule,
+                        treeModule,
+                        biomModule,
+                        missionModule,
+                        bufferGeometryUtils,
                         THREE
                     }
                 };
+
+                if (terrainProto && !terrainProto.__tmTerrainVisualPatched) {
+                    const originalCreateTerrainMesh = terrainProto.createTerrainMesh;
+                    terrainProto.createTerrainMesh = function(...args) {
+                        const result = originalCreateTerrainMesh.apply(this, args);
+                        const mesh = result && result[0];
+                        const material = result && result[1];
+                        if (mesh)
+                            mesh.__tmTerrainMesh = !0;
+                        if (mesh && material && globalState.THREE && !material.__tmTerrainEnhanced) {
+                            const enhanced = new globalState.THREE.MeshLambertMaterial({
+                                color: VISUAL_CONFIG.terrainColor,
+                                vertexColors: !0
+                            });
+                            material.map && (enhanced.map = material.map);
+                            mesh.material = enhanced;
+                            result[1] = enhanced;
+                            enhanced.__tmTerrainEnhanced = !0;
+                        }
+                        return result;
+                    };
+                    terrainProto.__tmTerrainVisualPatched = !0;
+                }
+
+                if (treeModule && !treeModule.__tmEnhancedTreesPatched) {
+                    const originalCreateTree = treeModule.createTree;
+                    treeModule.createTree = function(x, y, z, seed, type) {
+                        const enhanced = createEnhancedTreeGeometries(x, y, z, seed, type);
+                        if (enhanced[0] || enhanced[1])
+                            return enhanced;
+                        return originalCreateTree.apply(this, arguments);
+                    };
+                    treeModule.__tmEnhancedTreesPatched = !0;
+                }
+
+                if (biomProto && !biomProto.__tmEnhancedForestPatched) {
+                    biomProto.createForest = function(t, e, types, palette, trunkColor, density, isOrchard=!1) {
+                        const leavesGeometries = [];
+                        const trunkGeometries = [];
+                        const biomIndex = this.calculateIndex(t, e);
+                        const spawnCheck = seededUnit(biomIndex, 41);
+                        const candidateTypes = Array.isArray(types) && types.length ? types : [treeModule.TREE_LEAF];
+                        if (spawnCheck > 1 / Math.max(1, Number(density) || 1))
+                            return {
+                                leavesGeometries,
+                                trunkGeometries
+                            };
+                        const {x1, y1, x2, y2} = this.createCoordPixel(t, e);
+                        const centerX = (x1 + x2) / 2;
+                        const centerZ = (y1 + y2) / 2;
+                        const shiftX = isOrchard ? 0 : Math.sin(10 * biomIndex) * this.squareSize / 2;
+                        const shiftZ = isOrchard ? 0 : Math.cos(3 * biomIndex) * this.squareSize / 2;
+                        const placements = [[centerX + shiftX, centerZ + shiftZ]];
+                        seededUnit(biomIndex, 73) > .72 && !isOrchard && placements.push([centerX - .35 * shiftX, centerZ - .35 * shiftZ]);
+                        for (let placementIndex = 0; placementIndex < placements.length; placementIndex++) {
+                            const [forestX, forestZ] = placements[placementIndex];
+                            if (forestX > chunkModule.CHUNK_SIZE / 2 || forestZ > chunkModule.CHUNK_SIZE / 2 || forestX < -chunkModule.CHUNK_SIZE / 2 || forestZ < -chunkModule.CHUNK_SIZE / 2)
+                                continue;
+                            const terrainY = this.chunk.getTerrainYLoc(forestX, forestZ);
+                            if (null == terrainY || terrainY < -999)
+                                continue;
+                            const treeSeed = biomIndex + 17 * placementIndex;
+                            const typeIndex = Math.min(candidateTypes.length - 1, Math.floor(seededUnit(treeSeed, 11) * candidateTypes.length));
+                            const selectedType = candidateTypes[typeIndex];
+                            const [leavesGeometry,trunkGeometry] = treeModule.createTree(forestX, terrainY, forestZ, treeSeed, selectedType);
+                            if (trunkGeometry) {
+                                applyGradientVertexColors(trunkGeometry, trunkColor, treeSeed, "trunk");
+                                trunkGeometries.push(trunkGeometry);
+                            }
+                            if (leavesGeometry) {
+                                const paletteIndex = Math.min(Math.max(0, placementIndex % Math.max(1, palette.length)), Math.max(0, palette.length - 1));
+                                applyGradientVertexColors(leavesGeometry, palette[paletteIndex], treeSeed, "leaf");
+                                leavesGeometries.push(leavesGeometry);
+                            }
+                        }
+                        return {
+                            leavesGeometries,
+                            trunkGeometries
+                        };
+                    };
+                    biomProto.__tmEnhancedForestPatched = !0;
+                }
+
+                if (missionProto && !missionProto.__tmMissionOptionPatchFlag)
+                    missionProto.__tmMissionOptionPatchFlag = !0;
 
                 if (worldProto && !worldProto.__tmCollisionCapturePatched) {
                     const originalInitOpenWorld = worldProto.initOpenWorld;
@@ -1961,7 +3311,9 @@
                     const originalBuild = chunkProto.build;
                     chunkProto.build = function(...args) {
                         const result = originalBuild.apply(this, args);
+                        refreshCustomBuildingDebug();
                         queueTownRebuild("chunk_build");
+                        queueChunkVisualRefresh(this, "chunk_build");
                         return result;
                     };
                     chunkProto.__tmTownSignsBuildPatched = !0;
@@ -1971,10 +3323,28 @@
                     const originalDispose = chunkProto.dispose;
                     chunkProto.dispose = function(...args) {
                         const result = originalDispose.apply(this, args);
+                        cleanupChunkCustomVisuals(this);
+                        refreshCustomBuildingDebug();
                         queueTownRebuild("chunk_dispose");
                         return result;
                     };
                     chunkProto.__tmTownSignsDisposePatched = !0;
+                }
+
+                if (!chunkProto.__tmCustomBuildingsCheckLoadedPatched) {
+                    const originalCheckLoaded = chunkProto.checkLoaded;
+                    chunkProto.checkLoaded = async function(...args) {
+                        try {
+                            await ensureChunkCustomBuildingsPrepared(this);
+                        } catch (customBuildingError) {
+                            warn(`Custom-Building-Vorbereitung fehlgeschlagen fuer Chunk ${this.cx}/${this.cz}:`, customBuildingError);
+                        }
+                        const result = await originalCheckLoaded.apply(this, args);
+                        refreshCustomBuildingDebug();
+                        queueChunkVisualRefresh(this, "chunk_check_loaded");
+                        return result;
+                    };
+                    chunkProto.__tmCustomBuildingsCheckLoadedPatched = !0;
                 }
 
                 if (!trafficProto.__tmSetControlManagerPatched) {
@@ -2127,8 +3497,12 @@
                     rebuild: rebuildTownSigns,
                     config: TOWN_SIGN_CONFIG
                 });
+                globalThis.__tmCollisionHookDebug.customTasks = CUSTOM_TASK_OPTIONS.slice();
                 globalThis.__tmTownSignsDebug = globalThis.__tmCollisionHookDebug.townSigns;
+                refreshCustomBuildingDebug();
                 globalThis.__tmCollisionHookDebug.game && captureTownSignsGame(globalThis.__tmCollisionHookDebug.game);
+                for (const chunk of getLoadedChunks())
+                    ensureChunkCustomBuildingsPrepared(chunk).finally((() => queueChunkVisualRefresh(chunk, "bundle_patch")));
                 log("Hook erfolgreich installiert.");
                 log("Debug-Objekt verfuegbar unter window.__tmCollisionHookDebug");
                 log("Tuning-Objekt verfuegbar unter window.__tmCollisionHookConfig");
