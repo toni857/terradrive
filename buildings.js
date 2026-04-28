@@ -1,7 +1,7 @@
 window.__tmBuildingsConfig = {
   templates: {
     classic2: {
-      base: { floors: 2, floorHeight: 3, color: "#d8cfbf" },
+      base: { floors: 100, floorHeight: 100, color: "#d8cfbf" },
       roof: { type: "gable", color: "#7a3326", height: 2.4 },
       windows: { rows: 2, width: 1.05, height: 1.35 }
     }
