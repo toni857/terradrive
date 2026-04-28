@@ -2329,7 +2329,3 @@
     (document.documentElement || document.head || document.body).appendChild(script);
     script.remove();
 })();
-
-
-    console.log("🔥 IMG hook + fallback aktiv");
-})();
