@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.1.4.0
+// @version      2.1.5.0
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -74,11 +74,14 @@
 
 (function() {
     "use strict";
-    console.log("[Texture Hook] gestartet");
+    const DEBUG_TEXTURE_HOOK = !1;
+    const textureLog = (...args) => DEBUG_TEXTURE_HOOK && console.log(...args);
+    textureLog("[Texture Hook] gestartet");
 
     const BASE = "https://toni857.github.io/my-textures/";
     const cache = {
-        fallback: BASE + "type1me.png"
+        fallback: BASE + "type1me.png",
+        checks: new Map
     };
 
     function resolveUrl(id) {
@@ -86,9 +89,30 @@
     }
 
     function testImage(url, cb) {
+        const cached = cache.checks.get(url);
+        if (cached) {
+            if ("boolean" == typeof cached.ok)
+                return cb(cached.ok);
+            cached.callbacks.push(cb);
+            return;
+        }
+        cache.checks.set(url, {
+            callbacks: [cb]
+        });
         const img = new Image;
-        img.onload = () => cb(!0);
-        img.onerror = () => cb(!1);
+        const finish = ok => {
+            const entry = cache.checks.get(url) || {
+                callbacks: [cb]
+            };
+            entry.ok = ok;
+            const callbacks = entry.callbacks || [];
+            entry.callbacks = [];
+            cache.checks.set(url, entry);
+            for (const callback of callbacks)
+                callback(ok);
+        };
+        img.onload = () => finish(!0);
+        img.onerror = () => finish(!1);
         img.src = url;
     }
 
@@ -109,14 +133,14 @@
                 const match = value.match(/type(\d+)\.png/);
                 const id = match ? match[1] : "1";
                 const targetUrl = resolveUrl(id);
-                console.log("[Texture Hook] pruefe:", targetUrl);
+                textureLog("[Texture Hook] pruefe:", targetUrl);
                 testImage(targetUrl, ok => {
                     let finalUrl = targetUrl;
                     if (!ok) {
-                        console.warn("[Texture Hook] fehlt:", targetUrl, "-> fallback type1me");
+                        textureLog("[Texture Hook] fehlt:", targetUrl, "-> fallback type1me");
                         finalUrl = cache.fallback;
                     }
-                    console.log("[Texture Hook] final:", finalUrl);
+                    textureLog("[Texture Hook] final:", finalUrl);
                     desc.set.call(this, finalUrl);
                 }
                 );
@@ -128,7 +152,7 @@
         return;
     }
 
-    console.log("[Texture Hook] IMG-Hook aktiv");
+    textureLog("[Texture Hook] IMG-Hook aktiv");
 })();
 
 
@@ -158,7 +182,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.1.4.0",
+            version: "2.1.5.0",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -445,7 +469,7 @@
         };
 
         function log(...args) {
-            console.log(PREFIX, ...args);
+            globalThis.__tmCollisionHookVerbose && console.log(PREFIX, ...args);
         }
 
         function warn(...args) {
@@ -5249,6 +5273,13 @@
         }
 
         function updateCustomBuildingDoors(dtSeconds) {
+            if (!runtimeState.customBuildingDoorItems.length)
+                return;
+            runtimeState.customBuildingDoorAccumulator = (Number(runtimeState.customBuildingDoorAccumulator) || 0) + Math.max(.001, Number(dtSeconds) || .016);
+            if (runtimeState.customBuildingDoorAccumulator < .05)
+                return;
+            const doorDt = Math.min(.12, runtimeState.customBuildingDoorAccumulator);
+            runtimeState.customBuildingDoorAccumulator = 0;
             const playerPos = getPlayerPosition();
             if (!playerPos || !globalState.THREE)
                 return;
@@ -5263,7 +5294,7 @@
                 }
                 group.getWorldPosition(worldPosition);
                 const target = getDistance2D(playerPos, worldPosition) <= state.radius ? 1 : 0;
-                const delta = Math.max(.001, Number(dtSeconds) || .016) * state.speed;
+                const delta = doorDt * state.speed;
                 state.current += (target - state.current) * Math.min(1, delta);
                 const eased = state.current * state.current * (3 - 2 * state.current);
                 group.rotation.y = state.closedY + (state.openY - state.closedY) * eased;
@@ -6123,8 +6154,9 @@
                 materialKind: "wood",
                 frameColor: 0xece0cb,
                 hingeSide: seed % 2 ? "right" : "left",
-                openAngle: 82,
-                isOpen: !1
+                openAngle: 0,
+                isOpen: !1,
+                staticDoor: !0
             }];
             if (shopLike)
                 parts.push({
@@ -6192,7 +6224,7 @@
                     frameColor: style.frame,
                     glassColor: style.glass,
                     opacity: .55,
-                    cutHoles: !0
+                    cutHoles: !1
                 },
                 parts
             };
@@ -6211,7 +6243,13 @@
                 },
                 __tmAuto3d: !0
             } : createGeneratedAuto3dBuildingEntry(building, chunk, id);
-            return resolveBuildingTemplate(entry, catalog && catalog.templates);
+            const resolved = resolveBuildingTemplate(entry, catalog && catalog.templates);
+            return deepMergeConfig(resolved, {
+                __tmAuto3d: !0,
+                windows: {
+                    cutHoles: !1
+                }
+            });
         }
 
         function getBuildingFootprint(building, spec) {
@@ -7259,7 +7297,7 @@
             if (!detail)
                 return !1;
             const type = String(detail.type || "").toLowerCase();
-            if (detail.noDoor || detail.noAutoDoor || detail.staticDoor)
+            if (detail.noDoor || detail.noAutoDoor)
                 return !1;
             if (detail.door || detail.openable || detail.hinged || type.includes("door") || type.includes("tuer") || type.includes("tur"))
                 return !0;
@@ -7305,19 +7343,21 @@
                 const leafWidth = Math.max(.08, width - frameThickness * 1.5);
                 const leafHeight = Math.max(.08, height - frameThickness * 1.5);
                 const leaf = createRuntimeBox([leafWidth, leafHeight, Math.max(.03, depth * .82)], leafMaterial, [hingeLeft ? leafWidth / 2 : -leafWidth / 2, 0, 0]);
-                leaf.userData.tmDynamicDoor = !0;
+                detail.staticDoor || (leaf.userData.tmDynamicDoor = !0);
                 pivot.add(leaf);
                 const modelerOpen = detail.isOpen ? clamp(Number(detail.openAngle) || 90, 0, 180) : 0;
                 const interactiveOpen = clamp(Number(detail.openAngle) || 90, 0, 180) * Math.PI / 180 * (hingeLeft ? -1 : 1);
                 pivot.rotation.y = modelerOpen * Math.PI / 180 * (hingeLeft ? -1 : 1);
-                pivot.userData.tmDoor = {
-                    closedY: 0,
-                    openY: interactiveOpen,
-                    current: detail.isOpen ? 1 : 0,
-                    radius: Math.max(4, Number(detail.openRadius) || 9),
-                    speed: Math.max(.8, Number(detail.openSpeed) || 4.5)
-                };
-                pivot.userData.tmDynamicDoor = !0;
+                if (!detail.staticDoor) {
+                    pivot.userData.tmDoor = {
+                        closedY: 0,
+                        openY: interactiveOpen,
+                        current: detail.isOpen ? 1 : 0,
+                        radius: Math.max(4, Number(detail.openRadius) || 9),
+                        speed: Math.max(.8, Number(detail.openSpeed) || 4.5)
+                    };
+                    pivot.userData.tmDynamicDoor = !0;
+                }
                 group.add(pivot);
                 return positionDetailObject(group, detail, anchorPoint);
             }
@@ -7690,6 +7730,22 @@
             ));
         }
 
+        function getCustomBuildingOverlaySignature(matches) {
+            return toSafeArray(matches).map((match => {
+                const building = match && match.building;
+                const entry = match && match.entry;
+                return [
+                    match && match.id || "",
+                    building && building.index,
+                    entry && entry.__tmAuto3d ? "a" : "e",
+                    toSafeArray(entry && entry.parts).length,
+                    entry && entry.base && !1 === entry.base.enabled ? 0 : 1,
+                    entry && entry.windows && !1 === entry.windows.enabled ? 0 : 1
+                ].join(":");
+            }
+            )).join("|");
+        }
+
         function rebuildCustomBuildingsForChunk(chunk) {
             if (!chunk || !chunk.group || !globalState.THREE)
                 return;
@@ -7700,8 +7756,12 @@
                 overlay.name = "__tmCustomBuildingsOverlay";
                 runtimeState.chunkCustomOverlayGroups.set(chunk, overlay);
             }
+            const signature = getCustomBuildingOverlaySignature(matches);
+            if (overlay.parent === chunk.group && overlay.userData && overlay.userData.tmBuildSignature === signature)
+                return;
             runtimeState.customBuildingDoorItems = runtimeState.customBuildingDoorItems.filter((item => item && item.chunk !== chunk));
             clearCustomBuildingOverlayChildren(overlay);
+            overlay.userData.tmBuildSignature = "";
             if (!matches.length) {
                 overlay.parent && overlay.parent.remove(overlay);
                 return;
@@ -7711,6 +7771,7 @@
                 object && overlay.add(object);
             }
             optimizeCustomBuildingOverlay(overlay);
+            overlay.userData.tmBuildSignature = signature;
             overlay.parent !== chunk.group && chunk.group.add(overlay);
             collectCustomBuildingDoorsForChunk(chunk, overlay);
         }
