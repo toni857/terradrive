@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.1.6.2
+// @version      2.1.6.3
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -6051,6 +6051,79 @@
             globalThis.__tmCollisionHookDebug && (globalThis.__tmCollisionHookDebug.customBuildings = globalThis.__tmCustomBuildingsDebug);
         }
 
+        function findJavascriptExpressionEnd(source, startIndex) {
+            let depth = 0;
+            let quote = "";
+            let escaped = !1;
+            for (let index = startIndex; index < source.length; index++) {
+                const char = source[index];
+                if (quote) {
+                    if (escaped) {
+                        escaped = !1;
+                        continue;
+                    }
+                    if ("\\" === char) {
+                        escaped = !0;
+                        continue;
+                    }
+                    if (char === quote)
+                        quote = "";
+                    continue;
+                }
+                if ('"' === char || "'" === char || "`" === char) {
+                    quote = char;
+                    continue;
+                }
+                if ("{" === char || "[" === char || "(" === char) {
+                    depth++;
+                    continue;
+                }
+                if ("}" === char || "]" === char || ")" === char) {
+                    depth = Math.max(0, depth - 1);
+                    continue;
+                }
+                if (";" === char && depth <= 0)
+                    return index;
+            }
+            return source.length;
+        }
+
+        function evaluateBuildingConfigExpression(expression) {
+            return (new Function(`"use strict";return (${expression});`))();
+        }
+
+        function extractAssignedBuildingConfigs(source, globalKeys) {
+            const keyPattern = globalKeys.join("|");
+            const assignmentRe = new RegExp(`(?:^|[;\\n])\\s*(?:(?:const|let|var)\\s+)?(?:globalThis\\.|window\\.)?(${keyPattern})\\s*=`, "g");
+            const configs = [];
+            let match;
+            while ((match = assignmentRe.exec(source))) {
+                const expressionStart = assignmentRe.lastIndex;
+                const expressionEnd = findJavascriptExpressionEnd(source, expressionStart);
+                const expression = source.slice(expressionStart, expressionEnd).trim();
+                assignmentRe.lastIndex = Math.max(expressionEnd, expressionStart + 1);
+                if (!expression)
+                    continue;
+                configs.push(evaluateBuildingConfigExpression(expression));
+            }
+            return configs;
+        }
+
+        function mergeBuildingConfigCatalogs(configs) {
+            if (1 === configs.length)
+                return configs[0];
+            const merged = {
+                templates: {},
+                buildings: []
+            };
+            for (const config of configs) {
+                const catalog = normalizeBuildingCatalog(config);
+                merged.templates = deepMergeConfig(merged.templates, catalog.templates);
+                merged.buildings.push(...toSafeArray(catalog.buildings));
+            }
+            return merged;
+        }
+
         function parseBuildingConfigText(text) {
             const source = String(text || "").trim();
             if (!source)
@@ -6062,6 +6135,9 @@
                 return JSON.parse(source);
             } catch (jsonError) {}
             const globalKeys = ["__tmBuildingsConfig", "tmBuildingsConfig", "BUILDINGS", "buildingsConfig", "TM_BUILDINGS"];
+            const assignedConfigs = extractAssignedBuildingConfigs(source, globalKeys);
+            if (assignedConfigs.length)
+                return mergeBuildingConfigCatalogs(assignedConfigs);
             try {
                 const getter = new Function(`${source}\n;return ${globalKeys.map((key => `typeof ${key} !== "undefined" ? ${key} : void 0`)).join(" || ")};`);
                 return getter();
@@ -6240,6 +6316,74 @@
             return !!(featureState.auto3dBuildings || featureState.customBuildings);
         }
 
+        function getOriginalBuildingMeshesForChunk(chunk) {
+            const factory = chunk && chunk.buildingFactory;
+            return toSafeArray(factory && factory.__tmOriginalBuildingMeshes).filter(Boolean);
+        }
+
+        function shouldHideOriginalBuildingMeshesForChunk(chunk) {
+            return !!(isAny3dBuildingFeatureEnabled() && toSafeArray(chunk && chunk.__tmMatchedCustomBuildings).length);
+        }
+
+        function applyOriginalBuildingMeshVisibilityForChunk(chunk) {
+            const visible = !shouldHideOriginalBuildingMeshesForChunk(chunk);
+            for (const mesh of getOriginalBuildingMeshesForChunk(chunk)) {
+                if (!mesh)
+                    continue;
+                mesh.visible = visible;
+                mesh.traverse && mesh.traverse((child => {
+                    child.visible = visible;
+                }));
+            }
+        }
+
+        function markOriginalBuildingMesh(factory, object) {
+            if (!factory || !object)
+                return;
+            const list = Array.isArray(factory.__tmOriginalBuildingMeshes) ? factory.__tmOriginalBuildingMeshes : factory.__tmOriginalBuildingMeshes = [];
+            object.userData || (object.userData = {});
+            object.userData.tmOriginalBuildingMesh = !0;
+            object.__tmOriginalBuildingMesh = !0;
+            object.traverse && object.traverse((child => {
+                child.userData || (child.userData = {});
+                child.userData.tmOriginalBuildingMesh = !0;
+                child.__tmOriginalBuildingMesh = !0;
+            }));
+            list.includes(object) || list.push(object);
+        }
+
+        function patchBuildingFactoryForChunk(chunk) {
+            const factory = chunk && chunk.buildingFactory;
+            const proto = factory && Object.getPrototypeOf(factory);
+            factory && (factory.__tmOwnerChunk = chunk);
+            if (!factory || !proto || proto.__tmOriginalBuildingMeshPatched)
+                return;
+            const originalCreateNormalBuilding = proto.createNormalBuilding;
+            if ("function" != typeof originalCreateNormalBuilding)
+                return;
+            proto.createNormalBuilding = function(...args) {
+                const group = this.group;
+                const originalAdd = group && group.add;
+                if (!group || "function" != typeof originalAdd)
+                    return originalCreateNormalBuilding.apply(this, args);
+                const captured = [];
+                group.add = function(...objects) {
+                    for (const object of objects)
+                        object && captured.push(object);
+                    return originalAdd.apply(this, objects);
+                };
+                try {
+                    return originalCreateNormalBuilding.apply(this, args);
+                } finally {
+                    group.add = originalAdd;
+                    for (const object of captured)
+                        markOriginalBuildingMesh(this, object);
+                    this.__tmOwnerChunk && applyOriginalBuildingMeshVisibilityForChunk(this.__tmOwnerChunk);
+                }
+            };
+            proto.__tmOriginalBuildingMeshPatched = !0;
+        }
+
         function resetCustomBuildingPreparationForChunk(chunk) {
             if (!chunk)
                 return;
@@ -6252,12 +6396,14 @@
             chunk.__tmCustomBuildingsPreparePromise = null;
             chunk.__tmMatchedCustomBuildings = [];
             runtimeState.customBuildingEntriesByChunk.delete(chunk);
+            applyOriginalBuildingMeshVisibilityForChunk(chunk);
         }
 
         function syncBuildingFactoryBuildingSources(chunk, resetPartialBuild) {
             const factory = chunk && chunk.buildingFactory;
             if (!factory || factory.loaded)
                 return;
+            patchBuildingFactoryForChunk(chunk);
             Array.isArray(chunk.buildings) && (factory.buildings = chunk.buildings);
             Array.isArray(chunk.custome_buildings) && (factory.custome_buildings = chunk.custome_buildings);
             if (!resetPartialBuild || !factory.loadedStarted)
@@ -6887,29 +7033,52 @@
             }));
         }
 
-        function createWallPanel(start, end, center, baseY, height, colorValue, depth) {
-            if (!globalState.THREE)
+        function getWallEdgeFrame(start, end, center) {
+            const rawDx = end.x - start.x;
+            const rawDz = end.z - start.z;
+            const length = Math.hypot(rawDx, rawDz);
+            if (length < .001)
                 return null;
-            const dx = end.x - start.x;
-            const dz = end.z - start.z;
-            const length = Math.hypot(dx, dz);
-            if (length < .4)
-                return null;
-            const directionX = dx / length;
-            const directionZ = dz / length;
+            const alongX = rawDx / length;
+            const alongZ = rawDz / length;
             const midX = (start.x + end.x) / 2;
             const midZ = (start.z + end.z) / 2;
             const outwardX = midX - center.x;
             const outwardZ = midZ - center.z;
-            const outwardLength = Math.hypot(outwardX, outwardZ) || 1;
-            const offsetX = outwardX / outwardLength;
-            const offsetZ = outwardZ / outwardLength;
+            let normalX = -alongZ;
+            let normalZ = alongX;
+            let rotationEdgeX = alongX;
+            let rotationEdgeZ = alongZ;
+            if (normalX * outwardX + normalZ * outwardZ < 0) {
+                normalX = -normalX;
+                normalZ = -normalZ;
+                rotationEdgeX = -rotationEdgeX;
+                rotationEdgeZ = -rotationEdgeZ;
+            }
+            return {
+                length,
+                alongX,
+                alongZ,
+                normalX,
+                normalZ,
+                rotationY: Math.atan2(-rotationEdgeZ, rotationEdgeX),
+                midX,
+                midZ
+            };
+        }
+
+        function createWallPanel(start, end, center, baseY, height, colorValue, depth) {
+            if (!globalState.THREE)
+                return null;
+            const frame = getWallEdgeFrame(start, end, center);
+            if (!frame || frame.length < .4)
+                return null;
             const thickness = Math.max(.03, Number(depth) || .08);
-            const mesh = new globalState.THREE.Mesh(new globalState.THREE.BoxGeometry(length, height, thickness), new globalState.THREE.MeshBasicMaterial({
+            const mesh = new globalState.THREE.Mesh(new globalState.THREE.BoxGeometry(frame.length, height, thickness), new globalState.THREE.MeshBasicMaterial({
                 color: toThreeColor(colorValue, 0xffffff)
             }));
-            mesh.position.set(midX + offsetX * thickness / 2, baseY + height / 2, midZ + offsetZ * thickness / 2);
-            mesh.rotation.y = Math.atan2(directionZ, directionX);
+            mesh.position.set(frame.midX + frame.normalX * thickness / 2, baseY + height / 2, frame.midZ + frame.normalZ * thickness / 2);
+            mesh.rotation.y = frame.rotationY;
             return mesh;
         }
 
@@ -6931,18 +7100,16 @@
                 const sideSpec = deepMergeConfig(spec, spec.sides && (spec.sides[index] || spec.sides[String(index)]) || {});
                 if (!1 === sideSpec.enabled)
                     continue;
-                const edgeLength = Math.hypot(next.x - current.x, next.z - current.z);
+                const frame = getWallEdgeFrame(current, next, center);
+                const edgeLength = frame && frame.length || 0;
                 if (edgeLength < .4)
                     continue;
-                const dx = (next.x - current.x) / edgeLength;
-                const dz = (next.z - current.z) / edgeLength;
-                const midX = (current.x + next.x) / 2;
-                const midZ = (current.z + next.z) / 2;
-                const outwardX = midX - center.x;
-                const outwardZ = midZ - center.z;
-                const outwardLength = Math.hypot(outwardX, outwardZ) || 1;
-                const normalX = outwardX / outwardLength;
-                const normalZ = outwardZ / outwardLength;
+                const dx = frame.alongX;
+                const dz = frame.alongZ;
+                const midX = frame.midX;
+                const midZ = frame.midZ;
+                const normalX = frame.normalX;
+                const normalZ = frame.normalZ;
                 const layout = computeWindowLayout(edgeLength, bodyHeight, sideSpec);
                 if (sideSpec.color) {
                     const panel = createWallPanel(current, next, center, baseY + .1, Math.max(.3, bodyHeight - .2), sideSpec.color, Number(sideSpec.claddingDepth) || .05);
@@ -6980,7 +7147,7 @@
                     const addWindowPart = (size, alongOffset, yOffset, material, normalOffset) => {
                         const mesh = new globalState.THREE.Mesh(new globalState.THREE.BoxGeometry(size[0], size[1], size[2]), material);
                         mesh.position.set(basePointX + dx * alongOffset + normalX * normalOffset, centerY + yOffset, basePointZ + dz * alongOffset + normalZ * normalOffset);
-                        mesh.rotation.y = Math.atan2(dz, dx);
+                        mesh.rotation.y = frame.rotationY;
                         group.add(mesh);
                     };
                     addWindowPart([width, frameThickness, frameDepth], 0, height / 2 - frameThickness / 2, frameMaterial, .055);
@@ -7922,6 +8089,7 @@
                 chunk.__tmMatchedCustomBuildings = matched;
                 chunk.__tmCustomBuildingsPrepared = !0;
                 runtimeState.customBuildingEntriesByChunk.set(chunk, matched);
+                applyOriginalBuildingMeshVisibilityForChunk(chunk);
                 return matched;
             }
             const addCustomBuildingMatch = (id, entry, building) => {
@@ -7961,6 +8129,7 @@
             chunk.__tmMatchedCustomBuildings = matched;
             chunk.__tmCustomBuildingsPrepared = !0;
             runtimeState.customBuildingEntriesByChunk.set(chunk, matched);
+            applyOriginalBuildingMeshVisibilityForChunk(chunk);
             log(`3D-Haeuser vorbereitet fuer Chunk ${chunk.cx}/${chunk.cz}: ${matched.length} ersetzt, ${chunk.buildings.length} PNG-Haeuser bleiben.`);
             return matched;
         }
@@ -8086,6 +8255,7 @@
             overlay.userData.tmBuildSignature = "";
             if (!matches.length || !isAny3dBuildingFeatureEnabled()) {
                 overlay.parent && overlay.parent.remove(overlay);
+                applyOriginalBuildingMeshVisibilityForChunk(chunk);
                 return;
             }
             for (const match of matches) {
@@ -8096,6 +8266,7 @@
             overlay.userData.tmBuildSignature = signature;
             overlay.parent !== chunk.group && chunk.group.add(overlay);
             collectCustomBuildingDoorsForChunk(chunk, overlay);
+            applyOriginalBuildingMeshVisibilityForChunk(chunk);
         }
 
         function cleanupChunkCustomVisuals(chunk) {
@@ -8318,6 +8489,7 @@
                 if (!chunkProto.__tmTownSignsBuildPatched) {
                     const originalBuild = chunkProto.build;
                     chunkProto.build = function(...args) {
+                        patchBuildingFactoryForChunk(this);
                         suppressRunwayBuildings(this);
                         if (isAny3dBuildingFeatureEnabled() && !this.__tmCustomBuildingsPrepared && runtimeState.buildingConfig)
                             try {
@@ -8349,6 +8521,7 @@
                 if (!chunkProto.__tmCustomBuildingsCheckLoadedPatched) {
                     const originalCheckLoaded = chunkProto.checkLoaded;
                     chunkProto.checkLoaded = async function(...args) {
+                        patchBuildingFactoryForChunk(this);
                         suppressRunwayBuildings(this);
                         const showProgress = featureState.customBuildings && (!this.__tmCustomBuildingsPrepared || isPriorityCustomBuildingChunk(this));
                         if (isAny3dBuildingFeatureEnabled()) {
