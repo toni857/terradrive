@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.1.5.1
+// @version      2.1.6.0
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -77,6 +77,18 @@
     const DEBUG_TEXTURE_HOOK = !1;
     const textureLog = (...args) => DEBUG_TEXTURE_HOOK && console.log(...args);
     textureLog("[Texture Hook] gestartet");
+    function readStoredFeatures() {
+        try {
+            const cookie = document.cookie.split(";").map((part => part.trim())).find((part => part.startsWith("tmFeatures=")));
+            return cookie ? JSON.parse(decodeURIComponent(cookie.split("=").slice(1).join("="))) : {};
+        } catch (featureError) {
+            return {};
+        }
+    }
+    if (!1 === readStoredFeatures().buildingTextures) {
+        textureLog("[Texture Hook] per Einstellung deaktiviert");
+        return;
+    }
 
     const BASE = "https://toni857.github.io/my-textures/";
     const cache = {
@@ -182,7 +194,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.1.5.0",
+            version: "2.1.6.0",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -262,6 +274,33 @@
             label: "Ring Road Run"
         }];
         const FEATURE_MENU_ITEMS = [{
+            feature: "buildingTextures",
+            label: "Building textures"
+        }, {
+            feature: "enhancedTerrain",
+            label: "Enhanced terrain"
+        }, {
+            feature: "enhancedRoads",
+            label: "Enhanced roads"
+        }, {
+            feature: "enhancedTrees",
+            label: "Enhanced trees"
+        }, {
+            feature: "enhancedVehicles",
+            label: "Enhanced vehicles"
+        }, {
+            feature: "townSigns",
+            label: "Town signs"
+        }, {
+            feature: "customBuildings",
+            label: "3D custom houses"
+        }, {
+            feature: "customMissions",
+            label: "Custom missions"
+        }, {
+            feature: "vehicleTuning",
+            label: "Vehicle tuning"
+        }, {
             feature: "survival",
             label: "Survival + Shops"
         }, {
@@ -288,9 +327,6 @@
         }, {
             feature: "shops",
             label: "Shops + Navi POIs"
-        }, {
-            feature: "customBuildings",
-            label: "Custom buildings"
         }];
         const NAV_PRESETS = [{
             type: "fuel",
@@ -385,11 +421,19 @@
             vehicleDamage: !1,
             hardStart: !1,
             overlays: !0,
-            birds: !0,
-            bees: !0,
-            aircraft: !0,
-            shops: !0,
-            customBuildings: !1
+            birds: !1,
+            bees: !1,
+            aircraft: !1,
+            shops: !1,
+            customBuildings: !1,
+            buildingTextures: !0,
+            enhancedTerrain: !0,
+            enhancedRoads: !0,
+            enhancedTrees: !1,
+            enhancedVehicles: !0,
+            townSigns: !1,
+            customMissions: !0,
+            vehicleTuning: !0
         });
 
         function loadFeatureStateFromCookies() {
@@ -476,13 +520,22 @@
             vehicleDamage: !1,
             hardStart: !1,
             overlays: !0,
-            birds: !0,
-            bees: !0,
-            aircraft: !0,
-            shops: !0
+            birds: !1,
+            bees: !1,
+            aircraft: !1,
+            shops: !1,
+            customBuildings: !1,
+            buildingTextures: !0,
+            enhancedTerrain: !0,
+            enhancedRoads: !0,
+            enhancedTrees: !1,
+            enhancedVehicles: !0,
+            townSigns: !1,
+            customMissions: !0,
+            vehicleTuning: !0
         }))
             "boolean" == typeof featureState[key] || (featureState[key] = value);
-        vehicleTuningState.active = !!vehicleTuningState.active;
+        vehicleTuningState.active = !!featureState.vehicleTuning && !!vehicleTuningState.active;
         const VISUAL_CONFIG = {
             roadColor: 0x5e5750,
             roadEdgeColor: 0x6d665f,
@@ -1780,6 +1833,8 @@
         }
 
         function queueTownPlaceFetch(chunk) {
+            if (!featureState.townSigns)
+                return;
             if (!chunk || !chunk.bbox || !runtimeState.geoModule)
                 return;
             if (!isOsmPlaceFetchEnabled())
@@ -2407,6 +2462,10 @@
         function rebuildTownSigns(reason) {
             void 0 === reason && (reason = "manual");
             townSignsState.rebuildQueued = !1;
+            if (!featureState.townSigns) {
+                clearTownSignsVisuals();
+                return;
+            }
             if (!townSignsState.chunkManager || !townSignsState.scene || !globalState.THREE || !townSignsState.roadModule)
                 return;
 
@@ -2473,6 +2532,10 @@
         }
 
         function queueTownRebuild(reason) {
+            if (!featureState.townSigns) {
+                clearTownSignsVisuals();
+                return;
+            }
             if (townSignsState.rebuildQueued)
                 return;
             townSignsState.rebuildQueued = !0;
@@ -2735,17 +2798,34 @@
             return [];
         }
 
-        function ensureCustomMissionOptions(panel) {
-            if (!panel || !panel.missionTypes || runtimeState.missionPanelsPatched.has(panel))
+        function syncCustomMissionOptions(panel) {
+            if (!panel || !panel.missionTypes)
                 return;
-            for (const task of CUSTOM_TASK_OPTIONS)
-                if (!panel.missionTypes.querySelector(`option[value="${task.value}"]`)) {
-                    const option = document.createElement("option");
-                    option.value = task.value;
-                    option.textContent = task.label;
-                    panel.missionTypes.appendChild(option);
+            for (const task of CUSTOM_TASK_OPTIONS) {
+                const existingOption = panel.missionTypes.querySelector(`option[value="${task.value}"]`);
+                if (featureState.customMissions && !existingOption) {
+                    const newOption = document.createElement("option");
+                    newOption.value = task.value;
+                    newOption.textContent = task.label;
+                    panel.missionTypes.appendChild(newOption);
+                } else if (!featureState.customMissions && existingOption) {
+                    if (panel.missionTypes.value === task.value)
+                        panel.missionTypes.selectedIndex = 0;
+                    existingOption.remove();
                 }
+            }
+        }
+
+        function ensureCustomMissionOptions(panel) {
+            if (!panel || !panel.missionTypes)
+                return;
+            syncCustomMissionOptions(panel);
             runtimeState.missionPanelsPatched.add(panel);
+        }
+
+        function syncRuntimeCustomMissionOptions() {
+            const panel = runtimeState.game && runtimeState.game.missionManager && runtimeState.game.missionManager.missionPanel;
+            panel && ensureCustomMissionOptions(panel);
         }
 
         class RuntimeRouteMission {
@@ -2871,7 +2951,7 @@
             ensureCustomMissionOptions(missionManager.missionPanel);
             const originalCreateMission = missionManager.createMission;
             missionManager.createMission = function(type) {
-                if (CUSTOM_TASK_OPTIONS.some((task => task.value === type))) {
+                if (featureState.customMissions && CUSTOM_TASK_OPTIONS.some((task => task.value === type))) {
                     this.cancelCurrentMission();
                     this.currentMission = new RuntimeRouteMission(this, type);
                     return;
@@ -2905,7 +2985,7 @@
             const status = panel.querySelector('[data-role="speedhackStatus"]');
             maxSpeedInput && (maxSpeedInput.value = String(sanitizePositiveNumber(vehicleTuningState.maxSpeedKmh, 999, .1)));
             accelerationInput && (accelerationInput.value = String(sanitizePositiveNumber(vehicleTuningState.accelerationPerSecond, 50, .01)));
-            status && (status.textContent = `Speedhack: ${vehicleTuningState.active ? "On" : "Off"}`);
+            status && (status.textContent = featureState.vehicleTuning ? `Speedhack: ${vehicleTuningState.active ? "On" : "Off"}` : "Vehicle tuning: Off");
         }
 
         function commitVehicleTuningPanel() {
@@ -2963,6 +3043,11 @@
         }
 
         function toggleVehicleTuningPanel(forceVisible) {
+            if (!featureState.vehicleTuning) {
+                vehicleTuningState.active = !1;
+                notifyRuntime("Vehicle tuning ist in den Extension-Einstellungen aus.", "error");
+                return;
+            }
             const panel = ensureVehicleTuningPanel();
             if (!panel)
                 return;
@@ -2976,6 +3061,12 @@
         }
 
         function toggleSpeedhack(forceActive) {
+            if (!featureState.vehicleTuning) {
+                vehicleTuningState.active = !1;
+                syncVehicleTuningPanel();
+                notifyRuntime("Vehicle tuning ist in den Extension-Einstellungen aus.", "error");
+                return;
+            }
             vehicleTuningState.active = null == forceActive ? !vehicleTuningState.active : !!forceActive;
             syncVehicleTuningPanel();
             notifyRuntime(`Speedhack ${vehicleTuningState.active ? "an" : "aus"}`);
@@ -2992,6 +3083,8 @@
                 if (target && ("INPUT" === target.tagName || "TEXTAREA" === target.tagName || "SELECT" === target.tagName || target.isContentEditable))
                     return;
                 if ("k" === String(event.key || "").toLowerCase()) {
+                    if (!featureState.vehicleTuning)
+                        return;
                     event.preventDefault();
                     if (event.shiftKey)
                         toggleVehicleTuningPanel();
@@ -3107,7 +3200,7 @@
         }
 
         function applyVehicleTuning(car, dtSeconds, previousSpeed) {
-            if (!car || !vehicleTuningState.active)
+            if (!car || !featureState.vehicleTuning || !vehicleTuningState.active)
                 return;
             const dt = Math.max(1e-3, Number(dtSeconds) || 0);
             const maxSpeedMs = getVehicleTuningMaxSpeedMs();
@@ -3308,6 +3401,18 @@
         }
 
         function startNaviPreset(type) {
+            if (["supermarket", "autoshop", "apiary"].includes(type) && !featureState.shops) {
+                notifyRuntime("Shops + Navi POIs sind in den Extension-Einstellungen aus.", "error");
+                return !1;
+            }
+            if ("airport" === type && !featureState.aircraft) {
+                notifyRuntime("Aircraft + airports ist in den Extension-Einstellungen aus.", "error");
+                return !1;
+            }
+            if ("town" === type && !featureState.townSigns) {
+                notifyRuntime("Town signs ist in den Extension-Einstellungen aus.", "error");
+                return !1;
+            }
             if ("airport" !== type && "town" !== type)
                 for (const chunk of getLoadedChunks())
                     queuePoiFetch(chunk);
@@ -3772,7 +3877,7 @@
             if (!state.enabled || !car || !state.targetPosition || runtimeState.activeAircraft || car.__tmImpactState)
                 return !1;
             const dt = clamp(Number(dtSeconds) || .016, 1 / 240, .08);
-            const speed = Math.max(8, vehicleTuningState.active ? getVehicleTuningMaxSpeedMs() : getAutopilotCruiseSpeedMs(car));
+            const speed = Math.max(8, featureState.vehicleTuning && vehicleTuningState.active ? getVehicleTuningMaxSpeedMs() : getAutopilotCruiseSpeedMs(car));
             const carPosition = car.getPosition();
             const stopTarget = state.targetRoadPosition || state.targetPosition;
             if (getDistance2D(carPosition, state.targetPosition) <= 28 || stopTarget && getDistance2D(carPosition, stopTarget) <= 14) {
@@ -3904,7 +4009,63 @@
             syncFeatureMenu();
         }
 
+        function clearTownSignsVisuals() {
+            townSignsState.rebuildQueued = !1;
+            townSignsState.signCount = 0;
+            townSignsState.debugSigns = [];
+            if (townSignsState.overlayGroup)
+                clearTownOverlayChildren(townSignsState.overlayGroup);
+        }
+
+        function clearRuntimeOverlayItemsByKind(kinds) {
+            const kindSet = new Set(toSafeArray(kinds));
+            if (!kindSet.size)
+                return;
+            runtimeState.overlayItems = runtimeState.overlayItems.filter(item => {
+                if (!item || !kindSet.has(item.kind))
+                    return !0;
+                item.group && item.group.parent && item.group.parent.remove(item.group);
+                item.group && disposeObject3D(item.group);
+                return !1;
+            });
+        }
+
+        function clearAircraftFeatureVisuals() {
+            runtimeState.activeAircraft && leaveAircraft();
+            clearRuntimeOverlayItemsByKind(["airport", "aircraft"]);
+            for (const bot of toSafeArray(runtimeState.botAircraft)) {
+                bot && bot.group && bot.group.parent && bot.group.parent.remove(bot.group);
+                bot && bot.group && disposeObject3D(bot.group);
+            }
+            runtimeState.botAircraft = [];
+            runtimeState.nextBotAircraftAt = 0;
+        }
+
+        function clearCustomBuildingVisualsForLoadedChunks() {
+            const loadedChunks = getLoadedChunks();
+            const loadedSet = new Set(loadedChunks);
+            for (const chunk of loadedChunks) {
+                const overlay = runtimeState.chunkCustomOverlayGroups.get(chunk);
+                if (overlay) {
+                    overlay.parent && overlay.parent.remove(overlay);
+                    clearCustomBuildingOverlayChildren(overlay);
+                    overlay.userData.tmBuildSignature = "";
+                }
+                if (chunk && chunk.__tmOriginalCustomBuildings)
+                    chunk.custome_buildings = cloneJson(chunk.__tmOriginalCustomBuildings, []);
+                if (chunk) {
+                    chunk.__tmCustomBuildingsPrepared = !1;
+                    chunk.__tmCustomBuildingsPreparePromise = null;
+                    chunk.__tmMatchedCustomBuildings = [];
+                }
+                runtimeState.customBuildingEntriesByChunk.delete(chunk);
+            }
+            runtimeState.customBuildingDoorItems = runtimeState.customBuildingDoorItems.filter(item => item && !loadedSet.has(item.chunk));
+        }
+
         function setFeature(name, value) {
+            if (!(name in featureState))
+                return;
             const oldValue = featureState[name];
             featureState[name] = !!value;
             if ("hardStart" === name && featureState.hardStart) {
@@ -3914,14 +4075,36 @@
                 setPlayerMoney(0);
                 runtimeState.hardStartLocked = !0;
             }
-            if ("customBuildings" === name && oldValue !== featureState.customBuildings) {
-                // Toggle custom buildings visibility
-                for (const [chunk, overlay] of runtimeState.chunkCustomOverlayGroups) {
-                    if (featureState.customBuildings) {
-                        rebuildCustomBuildingsForChunk(chunk);
-                    } else {
-                        overlay.parent && overlay.parent.remove(overlay);
-                    }
+            if (oldValue !== featureState[name]) {
+                if ("customBuildings" === name) {
+                    if (featureState.customBuildings)
+                        prepareCustomBuildingsForChunks(getLoadedChunks(), "feature_toggle");
+                    else
+                        clearCustomBuildingVisualsForLoadedChunks();
+                } else if ("townSigns" === name) {
+                    featureState.townSigns ? queueTownRebuild("feature_toggle") : clearTownSignsVisuals();
+                } else if ("shops" === name) {
+                    featureState.shops ? rebuildPoiOverlays() : clearRuntimeOverlayItemsByKind(["poi", "bees"]);
+                } else if ("birds" === name && !featureState.birds) {
+                    clearRuntimeOverlayItemsByKind(["birds"]);
+                } else if ("bees" === name && !featureState.bees) {
+                    clearRuntimeOverlayItemsByKind(["bees"]);
+                } else if ("aircraft" === name && !featureState.aircraft) {
+                    clearAircraftFeatureVisuals();
+                } else if ("customMissions" === name) {
+                    syncRuntimeCustomMissionOptions();
+                } else if ("vehicleTuning" === name && !featureState.vehicleTuning) {
+                    vehicleTuningState.active = !1;
+                    vehicleTuningState.visible = !1;
+                    vehicleTuningState.panel && (vehicleTuningState.panel.style.display = "none");
+                    syncVehicleTuningPanel();
+                } else if ("buildingTextures" === name) {
+                    notifyRuntime("Building textures werden nach dem naechsten Reload voll wirksam.");
+                } else if ("enhancedTrees" === name) {
+                    notifyRuntime("Enhanced trees gelten fuer neue Chunks oder nach Reload.");
+                } else if ("enhancedTerrain" === name || "enhancedRoads" === name) {
+                    for (const chunk of getLoadedChunks())
+                        queueChunkVisualRefresh(chunk, `feature_${name}`);
                 }
             }
             saveFeatureStateToCookies();
@@ -4106,6 +4289,8 @@
                 disposeObject3D(overlay);
             }
             vehicle.__tmAppearanceEnhanced = !1;
+            if (!featureState.enhancedVehicles)
+                return;
         }
 
         function isInTownArea(position) {
@@ -4536,6 +4721,8 @@
         }
 
         function queuePoiFetch(chunk) {
+            if (!featureState.shops)
+                return;
             if (!chunk || !chunk.bbox || !runtimeState.geoModule)
                 return;
             const now = Date.now();
@@ -4701,6 +4888,8 @@
         }
 
         function suppressRunwayBuildings(chunk) {
+            if (!featureState.aircraft)
+                return;
             if (!chunk || chunk.__tmRunwayBuildingsSuppressed || !chunk.aerowayGraph || !Array.isArray(chunk.buildings))
                 return;
             const runways = toSafeArray(chunk.aerowayGraph.edges).filter(edge => edge && typeof edge.getLength === "function" && edge.getLength() >= 330);
@@ -5426,7 +5615,7 @@
         }
 
         function enhanceTerrainMesh(chunk) {
-            if (!chunk || !chunk.group)
+            if (!featureState.enhancedTerrain || !chunk || !chunk.group)
                 return;
             chunk.group.traverse((node => {
                 if (!node || !node.isMesh || !node.__tmTerrainMesh)
@@ -5470,7 +5659,7 @@
         }
 
         function enhanceRoadMeshes(chunk) {
-            if (!chunk || !chunk.roadMeshes || !globalState.THREE)
+            if (!featureState.enhancedRoads || !chunk || !chunk.roadMeshes || !globalState.THREE)
                 return;
             for (const mesh of chunk.roadMeshes) {
                 if (!mesh || !mesh.isMesh || mesh.__tmEnhancedRoad)
@@ -5490,7 +5679,7 @@
                 try {
                     enhanceTerrainMesh(chunk);
                     enhanceRoadMeshes(chunk);
-                    rebuildCustomBuildingsForChunk(chunk);
+                    featureState.customBuildings ? rebuildCustomBuildingsForChunk(chunk) : cleanupChunkCustomVisuals(chunk);
                 } catch (visualError) {
                     error(`Fehler beim Visual-Refresh fuer Chunk ${chunk.cx}/${chunk.cz}:`, visualError);
                 }
@@ -6353,12 +6542,12 @@
 
         function getCustomBuildingTextureValue(spec) {
             if (!spec)
-                return CUSTOM_BUILDING_FALLBACK_TEXTURE_URL;
-            return spec.textureUrl || spec.texture || spec.imageUrl || spec.image || spec.material && (spec.material.textureUrl || spec.material.texture || spec.material.imageUrl || spec.material.image) || spec.base && (spec.base.textureUrl || spec.base.texture || spec.base.imageUrl || spec.base.image) || spec.textureId || spec.base && spec.base.textureId || CUSTOM_BUILDING_FALLBACK_TEXTURE_URL;
+                return null;
+            return spec.textureUrl || spec.texture || spec.imageUrl || spec.image || spec.material && (spec.material.textureUrl || spec.material.texture || spec.material.imageUrl || spec.material.image) || spec.base && (spec.base.textureUrl || spec.base.texture || spec.base.imageUrl || spec.base.image) || spec.textureId || spec.base && spec.base.textureId || null;
         }
 
         function applyCustomBuildingTexture(material, textureValue, repeatValue) {
-            if (!material || !globalState.THREE)
+            if (!material || !textureValue || !globalState.THREE)
                 return material;
             const url = resolveCustomBuildingTextureUrl(textureValue);
             const repeat = Array.isArray(repeatValue) ? repeatValue : null;
@@ -6380,8 +6569,8 @@
                 material.map = loadedTexture;
                 material.needsUpdate = !0;
             }, void 0, () => {
-                if (url !== CUSTOM_BUILDING_FALLBACK_TEXTURE_URL)
-                    applyCustomBuildingTexture(material, CUSTOM_BUILDING_FALLBACK_TEXTURE_URL, repeatValue);
+                material.map = null;
+                material.needsUpdate = !0;
             });
             setTextureQuality(texture);
             texture.repeat.set(repeatX, repeatY);
@@ -6395,11 +6584,11 @@
 
         function createCustomBuildingMaterial(colorValue, spec) {
             const material = new globalState.THREE.MeshBasicMaterial({
-                color: null != colorValue ? colorValue : 0xffffff,
+                color: toThreeColor(colorValue, 0xffffff),
                 side: globalState.THREE.DoubleSide
             });
             const textureValue = getCustomBuildingTextureValue(spec);
-            return applyCustomBuildingTexture(material, textureValue, spec && (spec.textureRepeat || spec.repeat || spec.base && (spec.base.textureRepeat || spec.base.repeat)));
+            return textureValue ? applyCustomBuildingTexture(material, textureValue, spec && (spec.textureRepeat || spec.repeat || spec.base && (spec.base.textureRepeat || spec.base.repeat))) : material;
         }
 
         function computeWindowLayout(edgeLength, bodyHeight, sideSpec) {
@@ -6618,8 +6807,8 @@
                 const geometry = new globalState.THREE.ShapeGeometry(shape);
                 geometry.rotateX(-Math.PI / 2);
                 geometry.translate(0, baseY + bodyHeight + .03, 0);
-                return new globalState.THREE.Mesh(geometry, new globalState.THREE.MeshLambertMaterial({
-                    color: colorValue,
+                return new globalState.THREE.Mesh(geometry, new globalState.THREE.MeshBasicMaterial({
+                    color: toThreeColor(colorValue, 0x834734),
                     side: globalState.THREE.DoubleSide
                 }));
             }
@@ -6650,8 +6839,8 @@
             const geometry = new globalState.THREE.BufferGeometry;
             geometry.setAttribute("position", new globalState.THREE.Float32BufferAttribute(flat,3));
             geometry.computeVertexNormals();
-            return new globalState.THREE.Mesh(geometry, new globalState.THREE.MeshLambertMaterial({
-                color: colorValue,
+            return new globalState.THREE.Mesh(geometry, new globalState.THREE.MeshBasicMaterial({
+                color: toThreeColor(colorValue, 0x834734),
                 side: globalState.THREE.DoubleSide
             }));
         }
@@ -6674,8 +6863,8 @@
             const offsetX = outwardX / outwardLength;
             const offsetZ = outwardZ / outwardLength;
             const thickness = Math.max(.03, Number(depth) || .08);
-            const mesh = new globalState.THREE.Mesh(new globalState.THREE.BoxGeometry(length, height, thickness), new globalState.THREE.MeshLambertMaterial({
-                color: colorValue
+            const mesh = new globalState.THREE.Mesh(new globalState.THREE.BoxGeometry(length, height, thickness), new globalState.THREE.MeshBasicMaterial({
+                color: toThreeColor(colorValue, 0xffffff)
             }));
             mesh.position.set(midX + offsetX * thickness / 2, baseY + height / 2, midZ + offsetZ * thickness / 2);
             mesh.rotation.y = Math.atan2(directionZ, directionX);
@@ -6842,7 +7031,7 @@
             const transparent = null != overrides.transparent ? overrides.transparent : !!(detail && detail.transparent) || null != (detail && detail.opacity) && Number(detail.opacity) < 1 || detail && "glass" === detail.materialKind && "window" !== String(detail.type || "").toLowerCase();
             const opacity = null != overrides.opacity ? overrides.opacity : null != (detail && detail.opacity) ? clamp(Number(detail.opacity) || 0, .05, 1) : 1;
             const materialOptions = {
-                color: null != overrides.color ? overrides.color : null != (detail && detail.color) ? detail.color : 12632256,
+                color: toThreeColor(null != overrides.color ? overrides.color : null != (detail && detail.color) ? detail.color : 12632256, 12632256),
                 roughness: null != overrides.roughness ? overrides.roughness : preset.roughness,
                 metalness: null != overrides.metalness ? overrides.metalness : preset.metalness,
                 transparent,
@@ -6850,6 +7039,14 @@
                 depthWrite: !(transparent || opacity < 1),
                 side: THREE.DoubleSide
             };
+            if (THREE.MeshBasicMaterial)
+                return new THREE.MeshBasicMaterial({
+                    color: materialOptions.color,
+                    transparent: materialOptions.transparent,
+                    opacity: materialOptions.opacity,
+                    depthWrite: materialOptions.depthWrite,
+                    side: materialOptions.side
+                });
             return THREE.MeshStandardMaterial ? new THREE.MeshStandardMaterial(materialOptions) : new THREE.MeshLambertMaterial(materialOptions);
         }
 
@@ -7693,6 +7890,8 @@
         async function ensureChunkCustomBuildingsPrepared(chunk) {
             if (!chunk)
                 return [];
+            if (!featureState.customBuildings)
+                return [];
             if (chunk.__tmCustomBuildingsPrepared)
                 return chunk.__tmMatchedCustomBuildings || [];
             if (chunk.__tmCustomBuildingsPreparePromise)
@@ -7729,6 +7928,10 @@
         }
 
         async function prepareCustomBuildingsForChunks(chunks, reason) {
+            if (!featureState.customBuildings) {
+                clearCustomBuildingVisualsForLoadedChunks();
+                return;
+            }
             const unique = Array.from(new Set(toSafeArray(chunks).filter(Boolean)));
             if (!unique.length)
                 return;
@@ -7747,7 +7950,7 @@
         }
 
         function prepareCustomBuildingsNearPosition(position, reason) {
-            if (!position)
+            if (!featureState.customBuildings || !position)
                 return;
             const chunks = getLoadedChunks().filter((chunk => {
                 const center = getChunkApproxCenter(chunk);
@@ -7825,7 +8028,12 @@
             runtimeState.chunkCustomOverlayGroups.delete(chunk);
             runtimeState.customBuildingEntriesByChunk.delete(chunk);
             runtimeState.customBuildingDoorItems = runtimeState.customBuildingDoorItems.filter((item => item && item.chunk !== chunk));
-            chunk && (chunk.__tmMatchedCustomBuildings = []);
+            chunk && chunk.__tmOriginalCustomBuildings && (chunk.custome_buildings = cloneJson(chunk.__tmOriginalCustomBuildings, []));
+            if (chunk) {
+                chunk.__tmCustomBuildingsPrepared = !1;
+                chunk.__tmCustomBuildingsPreparePromise = null;
+                chunk.__tmMatchedCustomBuildings = [];
+            }
         }
 
         function captureTownSignsGame(game) {
@@ -7845,7 +8053,7 @@
             if (!game.__tmRuntimeInitialized) {
                 game.__tmRuntimeInitialized = !0;
                 refreshCustomBuildingDebug();
-                prepareCustomBuildingsForChunks(getLoadedChunks(), "game_capture");
+                featureState.customBuildings && prepareCustomBuildingsForChunks(getLoadedChunks(), "game_capture");
             }
             ensureTownOverlayGroup();
             if (previousGame !== game || previousScene !== townSignsState.scene || previousChunkManager !== townSignsState.chunkManager)
@@ -7924,7 +8132,7 @@
                         THREE
                     }
                 };
-                ensureBuildingCatalogLoaded().catch((catalogWarmupError => warn("Custom-Building-Katalog konnte beim Start nicht vorgeladen werden:", catalogWarmupError)));
+                featureState.customBuildings && ensureBuildingCatalogLoaded().catch((catalogWarmupError => warn("Custom-Building-Katalog konnte beim Start nicht vorgeladen werden:", catalogWarmupError)));
 
                 if (terrainProto && !terrainProto.__tmTerrainVisualPatched) {
                     const originalCreateTerrainMesh = terrainProto.createTerrainMesh;
@@ -7941,16 +8149,24 @@
                 if (treeModule && !treeModule.__tmEnhancedTreesPatched) {
                     const originalCreateTree = treeModule.createTree;
                     treeModule.createTree = function(x, y, z, seed, type) {
+                        if (!featureState.enhancedTrees)
+                            return "function" == typeof originalCreateTree ? originalCreateTree.apply(this, arguments) : [null, null];
                         const enhanced = createEnhancedTreeGeometries(x, y, z, seed, type);
                         if (enhanced[0] || enhanced[1])
                             return enhanced;
-                        return originalCreateTree.apply(this, arguments);
+                        return "function" == typeof originalCreateTree ? originalCreateTree.apply(this, arguments) : enhanced;
                     };
                     treeModule.__tmEnhancedTreesPatched = !0;
                 }
 
                 if (biomProto && !biomProto.__tmEnhancedForestPatched) {
+                    const originalCreateForest = biomProto.createForest;
                     biomProto.createForest = function(t, e, types, palette, trunkColor, density, isOrchard=!1) {
+                        if (!featureState.enhancedTrees)
+                            return "function" == typeof originalCreateForest ? originalCreateForest.apply(this, arguments) : {
+                                leavesGeometries: [],
+                                trunkGeometries: []
+                            };
                         const leavesGeometries = [];
                         const trunkGeometries = [];
                         const biomIndex = this.calculateIndex(t, e);
@@ -8030,7 +8246,7 @@
                     const originalBuild = chunkProto.build;
                     chunkProto.build = function(...args) {
                         suppressRunwayBuildings(this);
-                        if (!this.__tmCustomBuildingsPrepared && runtimeState.buildingConfig)
+                        if (featureState.customBuildings && !this.__tmCustomBuildingsPrepared && runtimeState.buildingConfig)
                             try {
                                 prepareCustomBuildingMatchesForChunk(this, runtimeState.buildingConfig);
                             } catch (syncCustomBuildingError) {
@@ -8039,7 +8255,7 @@
                         const result = originalBuild.apply(this, args);
                         refreshCustomBuildingDebug();
                         queueTownRebuild("chunk_build");
-                        ensureChunkCustomBuildingsPrepared(this).catch((customBuildingError => warn(`Custom-Building-Vorbereitung fehlgeschlagen fuer Chunk ${this.cx}/${this.cz}:`, customBuildingError))).finally((() => rebuildCustomBuildingsForChunk(this)));
+                        featureState.customBuildings ? ensureChunkCustomBuildingsPrepared(this).catch((customBuildingError => warn(`Custom-Building-Vorbereitung fehlgeschlagen fuer Chunk ${this.cx}/${this.cz}:`, customBuildingError))).finally((() => rebuildCustomBuildingsForChunk(this))) : cleanupChunkCustomVisuals(this);
                         return result;
                     };
                     chunkProto.__tmTownSignsBuildPatched = !0;
@@ -8061,19 +8277,21 @@
                     const originalCheckLoaded = chunkProto.checkLoaded;
                     chunkProto.checkLoaded = async function(...args) {
                         suppressRunwayBuildings(this);
-                        const showProgress = !this.__tmCustomBuildingsPrepared || isPriorityCustomBuildingChunk(this);
-                        showProgress && setCustomBuildingProgress(0, 2, isPriorityCustomBuildingChunk(this) ? "Adress-Haus vorbereiten" : "3D-Haeuser vorbereiten");
-                        try {
-                            await ensureChunkCustomBuildingsPrepared(this);
-                            showProgress && setCustomBuildingProgress(1, 2, isPriorityCustomBuildingChunk(this) ? "Adress-Haus vorbereiten" : "3D-Haeuser vorbereiten");
-                        } catch (customBuildingError) {
-                            warn(`Custom-Building-Vorbereitung fehlgeschlagen fuer Chunk ${this.cx}/${this.cz}:`, customBuildingError);
+                        const showProgress = featureState.customBuildings && (!this.__tmCustomBuildingsPrepared || isPriorityCustomBuildingChunk(this));
+                        if (featureState.customBuildings) {
+                            showProgress && setCustomBuildingProgress(0, 2, isPriorityCustomBuildingChunk(this) ? "Adress-Haus vorbereiten" : "3D-Haeuser vorbereiten");
+                            try {
+                                await ensureChunkCustomBuildingsPrepared(this);
+                                showProgress && setCustomBuildingProgress(1, 2, isPriorityCustomBuildingChunk(this) ? "Adress-Haus vorbereiten" : "3D-Haeuser vorbereiten");
+                            } catch (customBuildingError) {
+                                warn(`Custom-Building-Vorbereitung fehlgeschlagen fuer Chunk ${this.cx}/${this.cz}:`, customBuildingError);
+                            }
                         }
                         try {
                             const result = await originalCheckLoaded.apply(this, args);
                             refreshCustomBuildingDebug();
                             queueTownRebuild("chunk_check_loaded");
-                            rebuildCustomBuildingsForChunk(this);
+                            featureState.customBuildings ? rebuildCustomBuildingsForChunk(this) : cleanupChunkCustomVisuals(this);
                             showProgress && setCustomBuildingProgress(2, 2, isPriorityCustomBuildingChunk(this) ? "Adress-Haus vorbereiten" : "3D-Haeuser vorbereiten");
                             showProgress && finishCustomBuildingProgress();
                             return result;
@@ -8255,7 +8473,7 @@
                 globalThis.__tmTownSignsDebug = globalThis.__tmCollisionHookDebug.townSigns;
                 refreshCustomBuildingDebug();
                 globalThis.__tmCollisionHookDebug.game && captureTownSignsGame(globalThis.__tmCollisionHookDebug.game);
-                prepareCustomBuildingsForChunks(getLoadedChunks(), "bundle_patch");
+                featureState.customBuildings && prepareCustomBuildingsForChunks(getLoadedChunks(), "bundle_patch");
                 log("Hook erfolgreich installiert.");
                 log("Debug-Objekt verfuegbar unter window.__tmCollisionHookDebug");
                 log("Tuning-Objekt verfuegbar unter window.__tmCollisionHookConfig");
