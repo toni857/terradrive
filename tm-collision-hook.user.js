@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.1.6.6
+// @version      2.1.6.7
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -193,12 +193,13 @@
             BIOM: 495,
             MISSION_MANAGER: 5769,
             GAME_MENU: 9479,
-            BUFFER_GEOMETRY_UTILS: 4754,
+            BUFFER_GEOMETRY_UTILS: 1566,
+            WATER: 9963,
             GEO: 1521
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.1.6.6",
+            version: "2.1.6.7",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -225,11 +226,11 @@
         const BUILDING_FIT_CONFIG = {
             foundationMinHeight: .32,
             groundClearance: .42,
-            regularRoadClearance: 1.8,
-            addressRoadClearance: 4.8,
-            regularOverlapPadding: .85,
-            addressOverlapPadding: 2.8,
-            minimumRegularScale: .76
+            regularRoadClearance: 4.2,
+            addressRoadClearance: 10,
+            regularOverlapPadding: 1.4,
+            addressOverlapPadding: 4,
+            minimumRegularScale: .48
         };
         const townSignsState = globalState.townSigns || (globalState.townSigns = {
             roadModule: null,
@@ -354,6 +355,10 @@
             feature: "shops",
             label: "Shops + Navi POIs"
         }];
+        const FEATURE_DEPENDENCIES = {
+            hardStart: ["survival", "police", "vehicleDamage"],
+            bees: ["shops"]
+        };
         const NAV_PRESETS = [{
             type: "fuel",
             label: "Tankstelle"
@@ -385,6 +390,7 @@
             buildingConfigPromise: null,
             buildingConfig: null,
             asphaltTexture: null,
+            waterTexture: null,
             roadMaterialCache: new WeakMap,
             terrainMaterialCache: new WeakMap,
             customMissionRegistry: new Map,
@@ -415,6 +421,8 @@
             navPanel: null,
             navVisible: !1,
             navSearching: !1,
+            navMode: "drive",
+            navGuidance: null,
             moduleDisables: {},
             moduleFaults: {},
             startMenuFeatureWatcherInstalled: !1,
@@ -533,6 +541,8 @@
             navPanel: runtimeState.navPanel || null,
             navVisible: !!runtimeState.navVisible,
             navSearching: !!runtimeState.navSearching,
+            navMode: "guide" === runtimeState.navMode ? "guide" : "drive",
+            navGuidance: runtimeState.navGuidance || null,
             startMenuFeatureWatcherInstalled: !!runtimeState.startMenuFeatureWatcherInstalled,
             customBuildingTextureCache: runtimeState.customBuildingTextureCache instanceof Map ? runtimeState.customBuildingTextureCache : new Map,
             customBuildingAddressCache: runtimeState.customBuildingAddressCache instanceof Map ? runtimeState.customBuildingAddressCache : new Map,
@@ -2078,7 +2088,7 @@
         }
 
         function isOsmPlaceFetchEnabled() {
-            return !!globalThis.__tmEnableOsmPlaceFetch;
+            return !globalThis.__tmDisableOsmPlaceFetch;
         }
 
         function queueTownPlaceFetch(chunk) {
@@ -2481,7 +2491,12 @@
                 return !1;
             travelDirection.normalize();
             const right = new globalState.THREE.Vector3(-travelDirection.z,0,travelDirection.x).normalize();
-            const position = anchor.clone().addScaledVector(right, getTownRoadLateralOffset(edge)).addScaledVector(travelDirection, -TOWN_SIGN_CONFIG.edgeEntryOffset);
+            const signAnchor = anchor.clone();
+            const insideDistance = townDistance2D(signAnchor, place.center);
+            if (insideDistance < place.radius)
+                signAnchor.addScaledVector(travelDirection, -(place.radius - insideDistance + TOWN_SIGN_CONFIG.edgeEntryOffset * .45));
+            const position = signAnchor.addScaledVector(right, getTownRoadLateralOffset(edge)).addScaledVector(travelDirection, -TOWN_SIGN_CONFIG.edgeEntryOffset);
+            position.y = getTerrainYWorld(position, Number(position.y) || 0) + .08;
             const beforeCount = signs.length;
             pushUniqueTownSign(signs, {
                 placeName: place.name,
@@ -3636,6 +3651,12 @@
             syncAutopilotDebug();
         }
 
+        function clearNaviGuidance(reason, shouldNotify=!1) {
+            runtimeState.navGuidance = null;
+            shouldNotify && notifyRuntime(`Navi aus: ${reason || "gestoppt"}`);
+            setNaviPanelStatus("");
+        }
+
         function findTargetRoadPosition(position) {
             const match = findNearestRoadSegment(position, 1800);
             return match && match.point ? match.point.clone() : cloneVector3(position);
@@ -3686,6 +3707,37 @@
             notifyRuntime(`Navi aktiv: ${label || "Ziel gesetzt"}.`);
             syncAutopilotDebug();
             return !0;
+        }
+
+        function startNaviGuidanceToWorldPosition(position, label, source) {
+            if (!position || !globalState.THREE)
+                return !1;
+            const target = cloneVector3(position);
+            if (!target)
+                return !1;
+            runtimeState.navGuidance = {
+                position: target,
+                label: label || "Ziel",
+                source: source || "navi",
+                startedAt: performance.now()
+            };
+            stopAutopilot("Navi zeigt nur den Weg", !1);
+            notifyRuntime(`Navi zeigt Weg: ${label || "Ziel gesetzt"}.`);
+            setNaviPanelStatus(`Weg zeigen: ${label || "Ziel gesetzt"}`);
+            return !0;
+        }
+
+        function startNaviToWorldPosition(position, label, source) {
+            if ("guide" === runtimeState.navMode)
+                return startNaviGuidanceToWorldPosition(position, label, source);
+            clearNaviGuidance();
+            if (!featureState.autopilot) {
+                notifyRuntime("Autopilot ist aus. Navi-Modus auf Weg zeigen gewechselt.", "error");
+                runtimeState.navMode = "guide";
+                syncNaviPanelMode();
+                return startNaviGuidanceToWorldPosition(position, label, source);
+            }
+            return startAutopilotToWorldPosition(position, label, source);
         }
 
         function collectPoiNaviTargets(type) {
@@ -3763,7 +3815,7 @@
                 notifyRuntime("Navi: kein passendes Ziel in geladenen Daten gefunden.", "error");
                 return !1;
             }
-            return startAutopilotToWorldPosition(target.position, target.label || type, `preset:${type}`);
+            return startNaviToWorldPosition(target.position, target.label || type, `preset:${type}`);
         }
 
         function setNaviPanelStatus(message, kind) {
@@ -3809,7 +3861,7 @@
                 const label = normalizeTownLabel(result.display_name).slice(0, 72) || text;
                 addCustomBuildingPriorityTarget(position, label);
                 prepareCustomBuildingsNearPosition(position, "address");
-                startAutopilotToWorldPosition(position, label, "address");
+                startNaviToWorldPosition(position, label, "address");
                 setNaviPanelStatus(`Ziel gesetzt: ${label}`);
             }).catch(searchError => {
                 setNaviPanelStatus(`Adresse nicht gefunden: ${searchError.message || searchError}`, "error");
@@ -3832,6 +3884,10 @@
                     <div style="letter-spacing:.04em;text-transform:uppercase;color:#d8d0c4;">Navi</div>
                     <button type="button" data-role="close" style="border:0;background:transparent;color:#d8d0c4;font:inherit;cursor:pointer;padding:0 2px;">x</button>
                 </div>
+                <div data-role="mode" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;">
+                    <button type="button" data-mode="drive" style="border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.08);color:#f5f1e8;border-radius:8px;padding:7px 6px;font:inherit;cursor:pointer;">Automatisch</button>
+                    <button type="button" data-mode="guide" style="border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.08);color:#f5f1e8;border-radius:8px;padding:7px 6px;font:inherit;cursor:pointer;">Weg zeigen</button>
+                </div>
                 <div data-role="presets" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:10px;">
                     ${NAV_PRESETS.map(preset => `<button type="button" data-preset="${preset.type}" style="border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.08);color:#f5f1e8;border-radius:8px;padding:7px 6px;font:inherit;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${preset.label}</button>`).join("")}
                 </div>
@@ -3844,6 +3900,12 @@
             panel.addEventListener("keydown", (event => event.stopPropagation()));
             panel.addEventListener("keyup", (event => event.stopPropagation()));
             panel.querySelector('[data-role="close"]').addEventListener("click", (() => toggleNaviPanel(!1)));
+            for (const button of panel.querySelectorAll("button[data-mode]"))
+                button.addEventListener("click", (() => {
+                    runtimeState.navMode = "guide" === button.dataset.mode ? "guide" : "drive";
+                    syncNaviPanelMode();
+                    setNaviPanelStatus("guide" === runtimeState.navMode ? "Navi zeigt nur den Weg." : "Navi faehrt automatisch, wenn Autopilot an ist.");
+                }));
             panel.querySelector('[data-role="addressForm"]').addEventListener("submit", (event => {
                 event.preventDefault();
                 const input = panel.querySelector('[data-role="address"]');
@@ -3853,7 +3915,20 @@
                 button.addEventListener("click", (() => startNaviPreset(button.dataset.preset)));
             document.body.appendChild(panel);
             runtimeState.navPanel = panel;
+            syncNaviPanelMode();
             return panel;
+        }
+
+        function syncNaviPanelMode() {
+            const panel = runtimeState.navPanel;
+            if (!panel)
+                return;
+            for (const button of panel.querySelectorAll("button[data-mode]")) {
+                const active = button.dataset.mode === runtimeState.navMode;
+                button.style.background = active ? "#d7e2f2" : "rgba(255,255,255,.08)";
+                button.style.color = active ? "#12202d" : "#f5f1e8";
+                button.style.borderColor = active ? "rgba(255,255,255,.4)" : "rgba(255,255,255,.14)";
+            }
         }
 
         function toggleNaviPanel(forceVisible) {
@@ -3868,6 +3943,7 @@
             panel.style.display = runtimeState.navVisible ? "block" : "none";
             if (runtimeState.navVisible) {
                 setNaviPanelStatus("");
+                syncNaviPanelMode();
                 const input = panel.querySelector('[data-role="address"]');
                 input && input.focus();
             }
@@ -4633,6 +4709,7 @@
             } else if ("navigation" === name && !featureState.navigation) {
                 runtimeState.navPanel && (runtimeState.navPanel.style.display = "none");
                 runtimeState.navVisible = !1;
+                clearNaviGuidance();
             } else if ("buildingTextures" === name) {
                 notifyRuntime("Building textures werden nach dem naechsten Reload voll wirksam.");
             } else if ("enhancedTrees" === name) {
@@ -4640,6 +4717,36 @@
             } else if ("enhancedTerrain" === name || "enhancedRoads" === name) {
                 for (const chunk of getLoadedChunks())
                     queueChunkVisualRefresh(chunk, `feature_${name}`);
+            }
+        }
+
+        function getDependentFeatures(featureName) {
+            const dependents = [];
+            for (const [feature, dependencies] of Object.entries(FEATURE_DEPENDENCIES))
+                toSafeArray(dependencies).includes(featureName) && dependents.push(feature);
+            return dependents;
+        }
+
+        function disableDependentFeatures(featureName, reason) {
+            for (const dependent of getDependentFeatures(featureName)) {
+                if (!featureState[dependent])
+                    continue;
+                featureState[dependent] = !1;
+                applyFeatureSideEffects(dependent);
+                notifyRuntime(`${dependent} aus: benoetigt ${featureName}${reason ? ` (${reason})` : ""}.`, "error");
+            }
+        }
+
+        function enableFeatureDependencies(featureName) {
+            for (const dependency of toSafeArray(FEATURE_DEPENDENCIES[featureName])) {
+                if (!(dependency in featureState))
+                    continue;
+                if (featureState[dependency])
+                    continue;
+                featureState[dependency] = !0;
+                clearFeatureFault(dependency);
+                clearInternalModuleFaultsForFeature(dependency);
+                applyFeatureSideEffects(dependency);
             }
         }
 
@@ -4655,6 +4762,7 @@
             };
             const wasActive = !!featureState[name];
             featureState[name] = !1;
+            disableDependentFeatures(name, "Basisfunktion fehlerhaft");
             saveFeatureStateToCookies();
             saveFeatureFaultStateToCookies();
             wasActive && applyFeatureSideEffects(name);
@@ -4671,11 +4779,11 @@
             if (featureState[name]) {
                 clearFeatureFault(name);
                 clearInternalModuleFaultsForFeature(name);
+                enableFeatureDependencies(name);
+            } else {
+                disableDependentFeatures(name, "Basisfunktion deaktiviert");
             }
             if ("hardStart" === name && featureState.hardStart) {
-                featureState.survival = !0;
-                featureState.police = !0;
-                featureState.vehicleDamage = !0;
                 setPlayerMoney(0);
                 runtimeState.hardStartLocked = !0;
                 runInternalModule("hardStartFlow", (() => {
@@ -5407,10 +5515,11 @@
                 transparent: !0,
                 opacity: .78
             });
-            const smokeMaterial = new THREE.MeshLambertMaterial({
+            const smokeMaterial = new THREE.MeshBasicMaterial({
                 color: 0x5f6468,
                 transparent: !0,
-                opacity: .38
+                opacity: .28,
+                depthWrite: !1
             });
             const sparkMaterial = new THREE.MeshBasicMaterial({
                 color: 0xffa331
@@ -5424,8 +5533,18 @@
                 group.add(dent);
             const smoke = new THREE.Group;
             smoke.name = "__tmDamageSmoke";
-            for (let index = 0; index < 7; index++) {
-                const puff = createEllipsoid([.34 + .05 * index, .25 + .05 * index, .34 + .05 * index], 0x5f6468, [1.35 + .12 * index, 1.42 + .22 * index, -.25 + Math.sin(index) * .24], smokeMaterial.clone());
+            for (let index = 0; index < 12; index++) {
+                const puff = new THREE.Group;
+                puff.userData.phase = seededUnit(index, 37);
+                for (let part = 0; part < 3; part++) {
+                    const spread = .08 + part * .035;
+                    const material = smokeMaterial.clone();
+                    material.opacity = .18 + .04 * part;
+                    const waver = seededUnit(index, part + 11) * Math.PI * 2;
+                    const mote = createEllipsoid([.16 + .035 * index + .03 * part, .1 + .025 * index, .14 + .03 * index + .025 * part], 0x5f6468, [Math.cos(waver) * spread, Math.sin(waver * 1.7) * spread, Math.sin(waver) * spread], material);
+                    puff.add(mote);
+                }
+                puff.position.set(1.35 + .08 * index, 1.42 + .16 * index, -.25 + Math.sin(index) * .2);
                 smoke.add(puff);
             }
             group.add(smoke);
@@ -5464,12 +5583,14 @@
                 smoke.visible = ratio > .35;
                 for (let index = 0; index < smoke.children.length; index++) {
                     const puff = smoke.children[index];
-                    const wave = (time * (.8 + ratio) + index * .37) % 1;
+                    const wave = (time * (.8 + ratio) + index * .37 + (puff.userData.phase || 0)) % 1;
                     puff.position.y = 1.35 + index * .18 + wave * .55;
                     puff.position.x = 1.15 + Math.sin(time * 2 + index) * .18 + index * .08;
                     puff.position.z = -.2 + Math.cos(time * 1.7 + index) * .22;
                     puff.scale.setScalar(.25 + ratio * .45 + wave * .18);
-                    puff.material && (puff.material.opacity = clamp(.16 + ratio * .35 - wave * .12, .08, .55));
+                    puff.traverse && puff.traverse(node => {
+                        node.material && (node.material.opacity = clamp(.08 + ratio * .22 - wave * .08 + (node.position.length ? node.position.length() : 0) * .06, .04, .42));
+                    });
                 }
             }
             const sparks = group.userData.sparks;
@@ -6582,6 +6703,34 @@
             setPlayerSpeed(car, 0);
         }
 
+        function updateNaviGuidance() {
+            const guidance = runtimeState.navGuidance;
+            if (!featureState.navigation || !guidance || !guidance.position)
+                return;
+            const game = runtimeState.game;
+            const panel = game && game.missionManager && game.missionManager.missionPanel;
+            const player = getPlayerCar();
+            const playerPos = getControlPosition() || getPlayerPosition();
+            if (!panel || !playerPos)
+                return;
+            const distance = getDistance2D(playerPos, guidance.position);
+            if (distance <= 22) {
+                panel.updateStatus && panel.updateStatus("Navi-Ziel erreicht");
+                panel.turnOffCompass && panel.turnOffCompass();
+                clearNaviGuidance("Ziel erreicht", !0);
+                return;
+            }
+            panel.showNavigation && panel.showNavigation();
+            panel.updateStatus && panel.updateStatus(`Navi: ${guidance.label || "Ziel"}`);
+            panel.updateMissionDescriptiopn && panel.updateMissionDescriptiopn("Folge der Kompassrichtung zum gesetzten Navi-Ziel.");
+            if (panel.updateCompass && player && "function" == typeof player.getHeadings)
+                panel.updateCompass(playerPos, player.getHeadings(), guidance.position);
+            panel.updateEntry1 && panel.updateEntry1("Weg zeigen");
+            panel.updateEntry2 && panel.updateEntry2(guidance.label || "Ziel");
+            panel.updateEntry3 && panel.updateEntry3(distance > 1000 ? `${(distance / 1000).toFixed(1)} km` : `${distance.toFixed(0)} m`);
+            panel.updateEntry4 && panel.updateEntry4("");
+        }
+
         function updateRuntimeSystems(game, dtSeconds) {
             runtimeState.game = game || runtimeState.game;
             runInternalModule("featureMenuUi", (() => ensureFeatureMenu(game)), null, "Feature-Menue");
@@ -6593,6 +6742,7 @@
             runFeatureModule("aircraft", ensureAirportSystems, null, "Airport systems");
             runFeatureModule("aircraft", (() => updateBotAircraft(dt)), null, "Bot aircraft");
             runInternalModule("wildlifeRuntime", ensureWildlife, null, "Wildlife runtime");
+            runFeatureModule("navigation", updateNaviGuidance, null, "Navi guidance");
             runFeatureModule("aircraft", (() => updateActiveAircraft(dt)), null, "Active aircraft");
             runFeatureModule("aircraft", (() => updateProjectiles(dt)), null, "Aircraft projectiles");
             runInternalModule("overlayRuntime", (() => updateOverlayCullingAndAnimation(dt)), null, "Overlay runtime");
@@ -6670,6 +6820,177 @@
             setTextureQuality(texture);
             runtimeState.asphaltTexture = texture;
             return texture;
+        }
+
+        function getEnhancedWaterTexture() {
+            if (runtimeState.waterTexture || !globalState.THREE)
+                return runtimeState.waterTexture;
+            const canvas = document.createElement("canvas");
+            canvas.width = 256;
+            canvas.height = 256;
+            const ctx = canvas.getContext("2d");
+            if (!ctx)
+                return null;
+            const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+            gradient.addColorStop(0, "#2d92ca");
+            gradient.addColorStop(.48, "#49b5dd");
+            gradient.addColorStop(1, "#1d6f9e");
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.globalAlpha = .2;
+            ctx.strokeStyle = "#e6fbff";
+            ctx.lineWidth = 2;
+            for (let row = -24; row < canvas.height + 24; row += 24) {
+                ctx.beginPath();
+                for (let x = -8; x <= canvas.width + 8; x += 8) {
+                    const y = row + Math.sin(x * .06 + row * .15) * 5;
+                    0 === x + 8 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+            }
+            ctx.globalAlpha = .12;
+            ctx.strokeStyle = "#062944";
+            ctx.lineWidth = 1;
+            for (let row = 4; row < canvas.height; row += 19) {
+                ctx.beginPath();
+                for (let x = -8; x <= canvas.width + 8; x += 8) {
+                    const y = row + Math.sin(x * .08 + row * .11) * 3;
+                    0 === x + 8 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+            }
+            const texture = new globalState.THREE.CanvasTexture(canvas);
+            texture.repeat.set(.08, .08);
+            setTextureQuality(texture);
+            runtimeState.waterTexture = texture;
+            return texture;
+        }
+
+        function createEnhancedWaterMaterial(baseMaterial) {
+            const THREE = globalState.THREE;
+            if (!THREE)
+                return baseMaterial;
+            const material = THREE.MeshBasicMaterial ? new THREE.MeshBasicMaterial({
+                color: 0x4bb9df,
+                transparent: !0,
+                opacity: .72,
+                side: THREE.DoubleSide,
+                depthWrite: !1,
+                map: getEnhancedWaterTexture()
+            }) : baseMaterial && baseMaterial.clone ? baseMaterial.clone() : baseMaterial;
+            if (material) {
+                material.color && material.color.set(0x4bb9df);
+                material.transparent = !0;
+                material.opacity = .72;
+                material.depthWrite = !1;
+                material.side = THREE.DoubleSide;
+                material.map || (material.map = getEnhancedWaterTexture());
+                material.needsUpdate = !0;
+            }
+            return material || baseMaterial;
+        }
+
+        function waterPointToVector2(point) {
+            return new globalState.THREE.Vector2(-(Number(point && point[0]) || 0), Number(point && point[1]) || 0);
+        }
+
+        function waterVectorToPoint(vector) {
+            return {
+                x: Number(vector && vector.x) || 0,
+                z: Number(vector && vector.y) || 0
+            };
+        }
+
+        function buildingPointsForWater(building) {
+            return toSafeArray(building && building.points).map(point => ({
+                x: Number(Array.isArray(point) ? point[0] : point.x) || 0,
+                z: Number(Array.isArray(point) ? point[1] : point.z) || 0
+            })).filter(point => Number.isFinite(point.x) && Number.isFinite(point.z));
+        }
+
+        function createWaterHoleFromFootprint(points, padding=.8) {
+            if (!globalState.THREE || !Array.isArray(points) || points.length < 3)
+                return null;
+            const center = getFootprintCenter(points);
+            const bounds = getFootprintBounds(points);
+            const span = Math.max(.001, Math.max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ));
+            const scale = 1 + padding / span;
+            const inflated = scaleFootprint(points, scale, center).reverse();
+            const path = new globalState.THREE.Path;
+            path.moveTo(inflated[0].x, inflated[0].z);
+            for (let index = 1; index < inflated.length; index++)
+                path.lineTo(inflated[index].x, inflated[index].z);
+            path.lineTo(inflated[0].x, inflated[0].z);
+            return path;
+        }
+
+        function addBuildingWaterHoles(shape, waterPoints, chunk) {
+            if (!shape || !Array.isArray(waterPoints) || waterPoints.length < 3 || !chunk)
+                return;
+            const waterBounds = getFootprintBounds(waterPoints);
+            for (const building of toSafeArray(chunk.__tmOriginalBuildings || chunk.buildings)) {
+                const points = buildingPointsForWater(building);
+                if (points.length < 3)
+                    continue;
+                const bounds = getFootprintBounds(points);
+                if (!boundsOverlap(waterBounds, bounds))
+                    continue;
+                const center = getFootprintCenter(points);
+                if (!isPointInsideFootprint(center, waterPoints))
+                    continue;
+                const hole = createWaterHoleFromFootprint(points, .9);
+                hole && shape.holes.push(hole);
+            }
+        }
+
+        function getEnhancedWaterSurfaceY(water, points, chunk) {
+            const samples = [];
+            for (const point of points) {
+                for (const offset of [[0, 0], [6, 0], [-6, 0], [0, 6], [0, -6]]) {
+                    const y = chunk && "function" == typeof chunk.getTerrainYLoc ? chunk.getTerrainYLoc(point.x + offset[0], point.z + offset[1]) : null;
+                    null != y && Number.isFinite(Number(y)) && samples.push(Number(y));
+                }
+            }
+            samples.sort(((a, b) => a - b));
+            const lowBank = samples.length ? samples[Math.floor(samples.length * .22)] : 0;
+            const dataY = Number(water && water.y);
+            const baseY = Number.isFinite(dataY) ? dataY : lowBank;
+            return Math.min(baseY, lowBank + .12) + .04;
+        }
+
+        async function createEnhancedWaterMesh(waterData, material, chunk, fallback, context) {
+            if (!globalState.THREE || !Array.isArray(waterData))
+                return "function" == typeof fallback ? fallback.call(context, waterData, material, chunk) : null;
+            const THREE = globalState.THREE;
+            const geometries = [];
+            for (const water of waterData) {
+                const outline = toSafeArray(water && water.p).map(waterPointToVector2);
+                if (outline.length < 3)
+                    continue;
+                const shape = new THREE.Shape(outline);
+                for (const rawHole of toSafeArray(water && water.h)) {
+                    const hole = toSafeArray(rawHole).map(waterPointToVector2);
+                    hole.length >= 3 && shape.holes.push(new THREE.Path(hole));
+                }
+                const waterPoints = outline.map(waterVectorToPoint);
+                addBuildingWaterHoles(shape, waterPoints, chunk);
+                const geometry = new THREE.ShapeGeometry(shape);
+                const y = getEnhancedWaterSurfaceY(water, waterPoints, chunk);
+                geometry.rotateX(Math.PI / 2);
+                geometry.translate(0, y, 0);
+                geometries.push(geometry);
+            }
+            if (!geometries.length)
+                return null;
+            const merged = mergeGeometriesSafe(geometries);
+            if (!merged)
+                return "function" == typeof fallback ? fallback.call(context, waterData, material, chunk) : null;
+            const waterMaterial = createEnhancedWaterMaterial(material);
+            const waterMesh = new THREE.Mesh(merged, waterMaterial);
+            waterMesh.__tmEnhancedWater = !0;
+            const bankMesh = new THREE.Mesh(new THREE.BufferGeometry, waterMaterial);
+            bankMesh.__tmEnhancedWaterBank = !0;
+            return [waterMesh, bankMesh];
         }
 
         function enhanceTerrainMesh(chunk) {
@@ -7896,7 +8217,7 @@
                 return points;
             let bestPoints = points;
             let bestScore = baseEval.penalty;
-            for (const scale of [1, .97, .94, .91, .88, .85, .82, .79, BUILDING_FIT_CONFIG.minimumRegularScale]) {
+            for (const scale of [1, .97, .94, .91, .88, .85, .82, .79, .73, .67, .6, .54, BUILDING_FIT_CONFIG.minimumRegularScale]) {
                 const scaled = 1 === scale ? points : scaleFootprint(points, scale, center);
                 const evaluation = evaluateFootprintPlacement(scaled, chunk, excludeBuilding, {
                     roadClearance: BUILDING_FIT_CONFIG.regularRoadClearance,
@@ -8335,13 +8656,24 @@
                 return {
                     rects: []
                 };
-            const margin = Math.max(.35, Number(sideSpec.margin) || .8);
+            const margin = Math.max(.55, Number(sideSpec.margin) || .8);
             const width = Math.max(.3, Number(sideSpec.width) || 1.05);
             const height = Math.max(.35, Number(sideSpec.height) || 1.35);
             const gap = Math.max(.15, Number(sideSpec.gap) || .65);
             const rows = Math.max(1, Math.round(Number(sideSpec.rows) || Math.max(1, Math.round((bodyHeight - 1.8) / 2.4))));
             const availableLength = Math.max(0, edgeLength - 2 * margin);
-            const cols = Math.max(1, Math.round(Number(sideSpec.cols) || Math.max(1, Math.floor((availableLength + gap) / (width + gap)))));
+            if (availableLength < width)
+                return {
+                    rects: [],
+                    width,
+                    height,
+                    gap,
+                    rows: 0,
+                    cols: 0,
+                    bottom: 0,
+                    rowSpacing: 0
+                };
+            const cols = Math.max(1, Math.floor(Number(sideSpec.cols) || Math.max(1, Math.floor((availableLength + gap) / (width + gap)))));
             const runLength = cols * width + Math.max(0, cols - 1) * gap;
             const startOffset = (edgeLength - runLength) / 2 + width / 2;
             const bottom = Math.max(.7, Number(sideSpec.sill) || 1.1);
@@ -8357,7 +8689,9 @@
                     const x2 = clamp(centerU + width / 2, .03, Math.max(.03, edgeLength - .03));
                     const y1 = clamp(centerY - height / 2, .03, Math.max(.03, bodyHeight - .03));
                     const y2 = clamp(centerY + height / 2, .03, Math.max(.03, bodyHeight - .03));
-                    if (x2 - x1 > .08 && y2 - y1 > .08)
+                    if (x1 < margin - .02 || x2 > edgeLength - margin + .02)
+                        continue;
+                    if (x2 - x1 > width * .78 && y2 - y1 > height * .78)
                         rects.push({
                             col,
                             row,
@@ -8588,24 +8922,35 @@
             return new globalState.THREE.Vector3(frame.center.x + frame.axis.x * u + frame.ortho.x * v, y, frame.center.z + frame.axis.z * u + frame.ortho.z * v);
         }
 
+        function createFlatCustomRoof(points, baseY, bodyHeight, colorValue) {
+            const shape = createShapeFromFootprint(points);
+            if (!shape)
+                return null;
+            const geometry = new globalState.THREE.ShapeGeometry(shape);
+            geometry.rotateX(-Math.PI / 2);
+            geometry.translate(0, baseY + bodyHeight + .03, 0);
+            return new globalState.THREE.Mesh(geometry, new globalState.THREE.MeshBasicMaterial({
+                color: toThreeColor(colorValue, 0x834734),
+                side: globalState.THREE.DoubleSide
+            }));
+        }
+
+        function shouldUseFootprintRoof(points) {
+            if (!Array.isArray(points) || points.length > 4)
+                return !0;
+            const bounds = getFootprintBounds(points);
+            const boundsArea = Math.max(.001, (bounds.maxX - bounds.minX) * (bounds.maxZ - bounds.minZ));
+            return getFootprintArea(points) / boundsArea < .82;
+        }
+
         function createCustomRoof(points, baseY, bodyHeight, roofSpec) {
             if (!globalState.THREE || points.length < 3 || !roofSpec || !1 === roofSpec.enabled)
                 return null;
             const roofType = roofSpec.type || "gable";
             const overhang = Number(roofSpec.overhang) || 0;
             const colorValue = null != roofSpec.color ? roofSpec.color : 8606516;
-            if ("flat" === roofType) {
-                const shape = createShapeFromFootprint(points);
-                if (!shape)
-                    return null;
-                const geometry = new globalState.THREE.ShapeGeometry(shape);
-                geometry.rotateX(-Math.PI / 2);
-                geometry.translate(0, baseY + bodyHeight + .03, 0);
-                return new globalState.THREE.Mesh(geometry, new globalState.THREE.MeshBasicMaterial({
-                    color: toThreeColor(colorValue, 0x834734),
-                    side: globalState.THREE.DoubleSide
-                }));
-            }
+            if ("flat" === roofType || shouldUseFootprintRoof(points))
+                return createFlatCustomRoof(points, baseY, bodyHeight, colorValue);
             const frame = computeFootprintFrame(points, roofSpec.ridgeDirection || "longest");
             frame.minU -= overhang;
             frame.maxU += overhang;
@@ -10037,6 +10382,7 @@
                 const biomModule = requireFn(REQUIRED_MODULES.BIOM);
                 const missionModule = requireFn(REQUIRED_MODULES.MISSION_MANAGER);
                 const bufferGeometryUtils = requireFn(REQUIRED_MODULES.BUFFER_GEOMETRY_UTILS);
+                const waterModule = requireFn(REQUIRED_MODULES.WATER);
                 const geoModule = requireFn(REQUIRED_MODULES.GEO);
 
                 const worldProto = worldModule && worldModule.GameSessionOpenWorld && worldModule.GameSessionOpenWorld.prototype;
@@ -10075,6 +10421,7 @@
                         biomModule,
                         missionModule,
                         geoModule,
+                        waterModule,
                         bufferGeometryUtils,
                         THREE
                     }
@@ -10091,6 +10438,16 @@
                         return result;
                     };
                     terrainProto.__tmTerrainVisualPatched = !0;
+                }
+
+                if (waterModule && !waterModule.__tmEnhancedWaterPatched) {
+                    const originalCreateWaterMesh = waterModule.createWaterMesh;
+                    waterModule.createWaterMesh = function(waterData, material, chunk) {
+                        if (!featureState.enhancedTerrain)
+                            return "function" == typeof originalCreateWaterMesh ? originalCreateWaterMesh.apply(this, arguments) : null;
+                        return createEnhancedWaterMesh(waterData, material, chunk, originalCreateWaterMesh, this);
+                    };
+                    waterModule.__tmEnhancedWaterPatched = !0;
                 }
 
                 if (treeModule && !treeModule.__tmEnhancedTreesPatched) {
