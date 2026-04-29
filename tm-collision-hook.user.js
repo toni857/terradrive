@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.1.2.0
+// @version      2.1.3.0
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -158,7 +158,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.1.2.0",
+            version: "2.1.3.0",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -6575,6 +6575,14 @@
                     roughness: .72,
                     metalness: .08
                 },
+                smallTile: {
+                    roughness: .72,
+                    metalness: .08
+                },
+                checkerTile: {
+                    roughness: .7,
+                    metalness: .08
+                },
                 laminate: {
                     roughness: .68,
                     metalness: .06
@@ -6590,7 +6598,7 @@
         function createDetailStandardMaterial(detail, overrides={}) {
             const THREE = globalState.THREE;
             const preset = getDetailMaterialPreset(overrides.materialKind || detail && detail.materialKind);
-            const transparent = null != overrides.transparent ? overrides.transparent : !!(detail && detail.transparent) || null != (detail && detail.opacity) && Number(detail.opacity) < 1;
+            const transparent = null != overrides.transparent ? overrides.transparent : !!(detail && detail.transparent) || null != (detail && detail.opacity) && Number(detail.opacity) < 1 || detail && "glass" === detail.materialKind && "window" !== String(detail.type || "").toLowerCase();
             const opacity = null != overrides.opacity ? overrides.opacity : null != (detail && detail.opacity) ? clamp(Number(detail.opacity) || 0, .05, 1) : 1;
             const materialOptions = {
                 color: null != overrides.color ? overrides.color : null != (detail && detail.color) ? detail.color : 12632256,
@@ -6611,7 +6619,165 @@
         function createRuntimeBox(size, material, position=[0, 0, 0]) {
             const mesh = new globalState.THREE.Mesh(new globalState.THREE.BoxGeometry(size[0], size[1], size[2]),material);
             mesh.position.set(position[0], position[1], position[2]);
+            mesh.castShadow = !0;
+            mesh.receiveShadow = !0;
             return mesh;
+        }
+
+        function shadeDetailColor(colorValue, amount) {
+            if (!globalState.THREE)
+                return colorValue || 0xffffff;
+            const color = toThreeColor(colorValue, 0xffffff);
+            const target = new globalState.THREE.Color(amount >= 0 ? 0xffffff : 0x000000);
+            color.lerp(target, Math.abs(Number(amount) || 0));
+            return color.getHex();
+        }
+
+        function getDetailPattern(detail) {
+            const pattern = detail && detail.pattern && "object" == typeof detail.pattern ? detail.pattern : null;
+            const type = String(pattern && pattern.type || detail && detail.patternType || "none");
+            if (!type || "none" === type)
+                return null;
+            return {
+                type,
+                scale: Math.max(.2, Number(pattern && pattern.scale || detail && detail.patternScale) || 1),
+                depth: Math.max(.008, Number(pattern && pattern.depth || detail && detail.patternDepth) || .03)
+            };
+        }
+
+        function addDetailBoxPattern(group, detail, size, mode="wall") {
+            const pattern = getDetailPattern(detail);
+            if (!globalState.THREE || !group || !pattern)
+                return;
+            const width = Math.max(.1, Number(size[0]) || 1);
+            const height = Math.max(.1, Number(size[1]) || 1);
+            const depth = Math.max(.04, Number(size[2]) || .2);
+            const patternType = pattern.type;
+            const scale = pattern.scale;
+            const bump = pattern.depth;
+            const baseColor = null != detail.color ? detail.color : 0xffffff;
+            const color = shadeDetailColor(baseColor, .12);
+            const patternMaterial = createDetailStandardMaterial(detail, {
+                color,
+                materialKind: detail.materialKind || "plaster",
+                transparent: !1,
+                opacity: 1,
+                roughness: .88,
+                metalness: .08
+            });
+
+            const addFrontBackBox = (sx, sy, px, py, pz, material=patternMaterial, boxColor=color) => {
+                group.add(createRuntimeBox([sx, sy, bump], material, [px, py, pz]));
+            };
+            const addTopBox = (sx, sz, px, py, pz, material=patternMaterial, boxColor=color) => {
+                group.add(createRuntimeBox([sx, bump, sz], material, [px, py, pz]));
+            };
+
+            if ("floor" === mode || "tile" === patternType || "smallTile" === patternType || "checkerTile" === patternType || "laminate" === patternType || "castFloor" === patternType) {
+                if ("castFloor" === patternType) {
+                    const bands = Math.max(4, Math.round(width / (.9 * scale)));
+                    for (let band = 0; band < bands; band++) {
+                        const localX = -width / 2 + width * (band + .5) / bands;
+                        addTopBox(width / bands * .18, depth * .96, localX, height / 2 + bump / 2, 0);
+                    }
+                    return;
+                }
+                if ("laminate" === patternType) {
+                    const plankWidth = Math.max(.18, .28 * scale);
+                    const planks = Math.max(4, Math.round(width / plankWidth));
+                    for (let plank = 0; plank < planks; plank++) {
+                        const localX = -width / 2 + width * (plank + .5) / planks;
+                        const shade = plank % 2 ? shadeDetailColor(baseColor, .08) : color;
+                        const plankMaterial = createDetailStandardMaterial(detail, {
+                            color: shade,
+                            materialKind: detail.materialKind || "laminate",
+                            transparent: !1,
+                            opacity: 1,
+                            roughness: .7,
+                            metalness: .05
+                        });
+                        addTopBox(width / planks * .86, depth * .96, localX, height / 2 + bump / 2, 0, plankMaterial, shade);
+                    }
+                    return;
+                }
+                const tileBase = "smallTile" === patternType ? .34 : .72;
+                const tileSize = Math.max(.14, tileBase * scale);
+                const cols = Math.max(2, Math.round(width / tileSize));
+                const rows = Math.max(2, Math.round(depth / tileSize));
+                const tileWidth = width / cols;
+                const tileDepth = depth / rows;
+                for (let row = 0; row < rows; row++)
+                    for (let col = 0; col < cols; col++) {
+                        const localX = -width / 2 + tileWidth / 2 + col * tileWidth;
+                        const localZ = -depth / 2 + tileDepth / 2 + row * tileDepth;
+                        const shade = "checkerTile" === patternType && (row + col) % 2 ? shadeDetailColor(baseColor, -.28) : color;
+                        const tileMaterial = shade === color ? patternMaterial : createDetailStandardMaterial(detail, {
+                            color: shade,
+                            materialKind: detail.materialKind || "tile",
+                            transparent: !1,
+                            opacity: 1,
+                            roughness: .72,
+                            metalness: .08
+                        });
+                        addTopBox(tileWidth * .88, tileDepth * .88, localX, height / 2 + bump / 2, localZ, tileMaterial, shade);
+                    }
+                return;
+            }
+
+            if ("roof" === mode || "roofTiles" === patternType || "shingles" === patternType || "ribbedMetal" === patternType) {
+                const rows = Math.max(3, Math.round(depth / (.42 * scale)));
+                const cols = Math.max(2, Math.round(width / (.8 * scale)));
+                const tileWidth = width / cols;
+                const tileDepth = depth / rows;
+                for (let row = 0; row < rows; row++) {
+                    const localZ = -depth / 2 + tileDepth / 2 + row * tileDepth;
+                    if ("ribbedMetal" === patternType) {
+                        for (let rib = 0; rib < cols; rib++) {
+                            const localX = -width / 2 + tileWidth / 2 + rib * tileWidth;
+                            addTopBox(tileWidth * .16, tileDepth * .96, localX, height / 2 + bump / 2, localZ);
+                        }
+                        continue;
+                    }
+                    for (let col = 0; col < cols; col++) {
+                        const shift = row % 2 ? tileWidth * .18 : 0;
+                        const localX = clamp(-width / 2 + tileWidth / 2 + col * tileWidth + shift, -width / 2 + tileWidth / 2, width / 2 - tileWidth / 2);
+                        addTopBox(tileWidth * .88, tileDepth * ("shingles" === patternType ? .56 : .72), localX, height / 2 + bump / 2, localZ);
+                    }
+                }
+                return;
+            }
+
+            const rows = Math.max(2, Math.round(height / (.45 * scale)));
+            const cols = Math.max(2, Math.round(width / (.8 * scale)));
+            const cellWidth = width / cols;
+            const cellHeight = height / rows;
+            for (const face of [-1, 1]) {
+                if ("wood" === patternType) {
+                    const boardWidth = width / Math.max(3, Math.round(width / (.28 * scale)));
+                    const boards = Math.max(3, Math.round(width / boardWidth));
+                    for (let board = 0; board < boards; board++) {
+                        const localX = -width / 2 + boardWidth / 2 + board * boardWidth;
+                        addFrontBackBox(boardWidth * .82, height * .96, localX, 0, face * (depth / 2 + bump / 2));
+                    }
+                    continue;
+                }
+                for (let row = 0; row < rows; row++)
+                    for (let col = 0; col < cols; col++) {
+                        const offset = "brick" === patternType && row % 2 ? cellWidth / 2 : 0;
+                        const localX = clamp(-width / 2 + cellWidth / 2 + col * cellWidth + offset, -width / 2 + cellWidth / 2, width / 2 - cellWidth / 2);
+                        const localY = -height / 2 + cellHeight / 2 + row * cellHeight;
+                        const sx = "naturalStone" === patternType ? cellWidth * (.55 + col % 3 * .12) : cellWidth * .88;
+                        const sy = "naturalStone" === patternType ? cellHeight * (.62 + row % 2 * .14) : cellHeight * .72;
+                        addFrontBackBox(sx, sy, localX, localY, face * (depth / 2 + bump / 2));
+                    }
+            }
+        }
+
+        function createDetailPatternBoxGroup(detail, size, mode="wall") {
+            const group = new globalState.THREE.Group;
+            group.add(createRuntimeBox(size, createDetailMaterial(detail), [0, 0, 0]));
+            addDetailBoxPattern(group, detail, size, mode);
+            return group;
         }
 
         function pushFace(indices, a, b, c, d) {
@@ -6664,6 +6830,140 @@
             return geometry;
         }
 
+        function createFillCylinderGeometry(detail) {
+            const THREE = globalState.THREE;
+            const size = getDetailSize(detail, [1, 3, 1]);
+            const radiusX = Math.max(.05, Number(detail.radiusX) || Number(detail.radius) || size[0]);
+            const radiusZ = Math.max(.05, Number(detail.radiusZ) || Number(detail.radius) || size[2] || radiusX);
+            const height = Math.max(.05, Number(detail.height) || size[1]);
+            const radius = Math.max(radiusX, radiusZ);
+            const geometry = new THREE.CylinderGeometry(radius, radius, height, Math.max(3, Math.round(Number(detail.segments) || 24)));
+            geometry.scale(radiusX / radius, 1, radiusZ / radius);
+            return geometry;
+        }
+
+        function createTriangleWallGeometry(detail) {
+            const THREE = globalState.THREE;
+            const size = getDetailSize(detail, [2, 2, .15]);
+            const width = Math.max(.05, size[0]);
+            const height = Math.max(.05, size[1]);
+            const depth = Math.max(.02, size[2]);
+            const leftHigh = String(detail.slopeDirection || "left").toLowerCase() !== "right";
+            const topX = leftHigh ? -width / 2 : width / 2;
+            const flatX = leftHigh ? width / 2 : -width / 2;
+            const front = [[topX, height / 2, depth / 2], [flatX, -height / 2, depth / 2], [topX, -height / 2, depth / 2]];
+            const back = front.map((point => [point[0], point[1], -depth / 2]));
+            const geometry = new THREE.BufferGeometry;
+            geometry.setAttribute("position", new THREE.Float32BufferAttribute([...front, ...back].flat(),3));
+            geometry.setIndex([0, 1, 2, 5, 4, 3, 0, 3, 1, 1, 3, 4, 0, 2, 3, 2, 5, 3, 2, 1, 5, 1, 4, 5]);
+            geometry.computeVertexNormals();
+            return geometry;
+        }
+
+        function createWedgeFillGeometry(detail) {
+            const THREE = globalState.THREE;
+            const size = getDetailSize(detail, [2, 1, .5]);
+            const width = Math.max(.05, size[0]);
+            const height = Math.max(.05, size[1]);
+            const depth = Math.max(.05, size[2]);
+            const leftHigh = String(detail.slopeDirection || "left").toLowerCase() !== "right";
+            const highX = leftHigh ? -width / 2 : width / 2;
+            const lowX = leftHigh ? width / 2 : -width / 2;
+            const vertices = [
+                [highX, height / 2, -depth / 2],
+                [lowX, -height / 2, -depth / 2],
+                [highX, -height / 2, -depth / 2],
+                [highX, height / 2, depth / 2],
+                [lowX, -height / 2, depth / 2],
+                [highX, -height / 2, depth / 2]
+            ];
+            const geometry = new THREE.BufferGeometry;
+            geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices.flat(),3));
+            geometry.setIndex([0, 1, 2, 5, 4, 3, 0, 3, 1, 1, 3, 4, 0, 2, 3, 2, 5, 3, 2, 1, 5, 1, 4, 5]);
+            geometry.computeVertexNormals();
+            return geometry;
+        }
+
+        function createModelerRidgeGeometry(width, height, depth, ridgeDirection="x", ridgeLength=null) {
+            const THREE = globalState.THREE;
+            const maxLength = "z" === ridgeDirection ? depth : width;
+            const actualRidgeLength = Math.max(.1, Math.min(maxLength, null == ridgeLength ? maxLength : Number(ridgeLength) || maxLength));
+            const y0 = -height / 2;
+            const y1 = height / 2;
+            const vertices = "x" === ridgeDirection ? [
+                [-width / 2, y0, -depth / 2],
+                [width / 2, y0, -depth / 2],
+                [width / 2, y0, depth / 2],
+                [-width / 2, y0, depth / 2],
+                [-actualRidgeLength / 2, y1, 0],
+                [actualRidgeLength / 2, y1, 0]
+            ] : [
+                [-width / 2, y0, -depth / 2],
+                [width / 2, y0, -depth / 2],
+                [width / 2, y0, depth / 2],
+                [-width / 2, y0, depth / 2],
+                [0, y1, -actualRidgeLength / 2],
+                [0, y1, actualRidgeLength / 2]
+            ];
+            const indices = "x" === ridgeDirection ? [0, 1, 4, 1, 5, 4, 3, 4, 2, 2, 4, 5, 0, 4, 3, 1, 2, 5] : [0, 4, 1, 1, 4, 5, 3, 2, 5, 3, 5, 4, 0, 3, 4, 1, 5, 2];
+            const geometry = new THREE.BufferGeometry;
+            geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices.flat(),3));
+            geometry.setIndex(indices);
+            geometry.computeVertexNormals();
+            return geometry;
+        }
+
+        function createFrustumRoofGeometry(width, height, depth, topScale) {
+            const THREE = globalState.THREE;
+            const topWidth = Math.max(.2, width * Math.max(.05, Number(topScale) || .3));
+            const topDepth = Math.max(.2, depth * Math.max(.05, Number(topScale) || .3));
+            const bottom = [[-width / 2, -height / 2, -depth / 2], [width / 2, -height / 2, -depth / 2], [width / 2, -height / 2, depth / 2], [-width / 2, -height / 2, depth / 2]];
+            const top = [[-topWidth / 2, height / 2, -topDepth / 2], [topWidth / 2, height / 2, -topDepth / 2], [topWidth / 2, height / 2, topDepth / 2], [-topWidth / 2, height / 2, topDepth / 2]];
+            const geometry = new THREE.BufferGeometry;
+            geometry.setAttribute("position", new THREE.Float32BufferAttribute([...bottom, ...top].flat(),3));
+            geometry.setIndex([0, 1, 4, 1, 5, 4, 1, 2, 5, 2, 6, 5, 2, 3, 6, 3, 7, 6, 3, 0, 7, 0, 4, 7, 4, 5, 6, 4, 6, 7]);
+            geometry.computeVertexNormals();
+            return geometry;
+        }
+
+        function createShedRoofGeometry(detail) {
+            const THREE = globalState.THREE;
+            const size = getDetailSize(detail, [4, 2, 4]);
+            const width = Math.max(.05, size[0]);
+            const height = Math.max(.05, size[1]);
+            const depth = Math.max(.05, size[2]);
+            const leftHigh = String(detail.slopeDirection || "left").toLowerCase() !== "right";
+            const topLeft = leftHigh ? height / 2 : -height / 2;
+            const topRight = leftHigh ? -height / 2 : height / 2;
+            const vertices = [
+                [-width / 2, topLeft, -depth / 2],
+                [width / 2, topRight, -depth / 2],
+                [width / 2, -height / 2, -depth / 2],
+                [-width / 2, -height / 2, -depth / 2],
+                [-width / 2, topLeft, depth / 2],
+                [width / 2, topRight, depth / 2],
+                [width / 2, -height / 2, depth / 2],
+                [-width / 2, -height / 2, depth / 2]
+            ];
+            const geometry = new THREE.BufferGeometry;
+            geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices.flat(),3));
+            geometry.setIndex([0, 1, 3, 1, 2, 3, 4, 7, 5, 5, 7, 6, 0, 4, 1, 1, 4, 5, 1, 5, 2, 2, 5, 6, 2, 6, 3, 3, 6, 7, 0, 3, 4, 3, 7, 4]);
+            geometry.computeVertexNormals();
+            return geometry;
+        }
+
+        function createRoundRoofGeometry(detail) {
+            const THREE = globalState.THREE;
+            const size = getDetailSize(detail, [4, 2, 4]);
+            const width = Math.max(.1, size[0]);
+            const height = Math.max(.1, size[1]);
+            const depth = Math.max(.1, size[2]);
+            const geometry = new THREE.CylinderGeometry(1, 1, width, 20, 1, !1, 0, Math.PI);
+            geometry.rotateZ(Math.PI / 2);
+            geometry.scale(1, height, depth / 2);
+            return geometry;
+        }
+
         function createPolygonPoints(width, depth, sides, sideScales) {
             if (4 === sides)
                 return [[-width / 2, -depth / 2], [width / 2, -depth / 2], [width / 2, depth / 2], [-width / 2, depth / 2]].map(((point, index) => {
@@ -6683,7 +6983,8 @@
             const THREE = globalState.THREE;
             const ridgeDirection = "z" === detail.ridgeDirection ? "z" : "x";
             const corners = createPolygonPoints(width, depth, 4, sideScales);
-            const ridgeLength = Math.max(.1, Math.min("x" === ridgeDirection ? width : depth, Number(detail.ridgeLength) || ("x" === ridgeDirection ? width : depth) * .5));
+            const ridgeMaxLength = "x" === ridgeDirection ? width : depth;
+            const ridgeLength = Math.max(.1, Math.min(ridgeMaxLength, Number(detail.ridgeLength) || ridgeMaxLength));
             const y0 = -height / 2;
             const y1 = height / 2;
             const vertices = "x" === ridgeDirection ? [
@@ -6717,9 +7018,9 @@
             const indices = [];
             for (const point of bottom)
                 positions.push(point[0], -height / 2, point[1]);
-            const topSize = Array.isArray(detail.topSize) ? detail.topSize : null;
-            const topScale = "flat" === topMode ? Math.max(.02, Number(detail.topScale) || .35) : Math.max(0, Number(detail.topScale) || 0);
-            if (topScale > 0 || topSize) {
+            if ("flat" === topMode) {
+                const topSize = Array.isArray(detail.topSize) ? detail.topSize : null;
+                const topScale = Math.max(.02, Number(detail.topScale) || .35);
                 const topWidth = Math.max(.02, Number(topSize && topSize[0]) || width * topScale);
                 const topDepth = Math.max(.02, Number(topSize && topSize[1]) || depth * topScale);
                 const top = createPolygonPoints(topWidth, topDepth, sides, []);
@@ -6892,48 +7193,159 @@
             return group;
         }
 
+        function createFurnitureDetailObject(detail, anchorPoint) {
+            if (!globalState.THREE || !detail)
+                return null;
+            const THREE = globalState.THREE;
+            const type = String(detail.type || "").toLowerCase();
+            const size = getDetailSize(detail, [1, 1, 1]);
+            const width = Math.max(.2, size[0]);
+            const height = Math.max(.2, size[1]);
+            const depth = Math.max(.2, size[2]);
+            const group = new THREE.Group;
+            group.name = `__tmCustomBuildingFurniture:${type}`;
+            const material = createDetailMaterial(detail);
+            const metalMaterial = createDetailStandardMaterial(Object.assign({}, detail, {
+                materialKind: "metal",
+                opacity: 1
+            }), {
+                color: shadeDetailColor(null != detail.color ? detail.color : 0x8b634a, -.18),
+                materialKind: "metal",
+                transparent: !1,
+                opacity: 1
+            });
+            const addLegs = (topY, legHeight, inset=.08, legWidth=.08) => {
+                const x = width / 2 - inset - legWidth / 2;
+                const z = depth / 2 - inset - legWidth / 2;
+                for (const sx of [-1, 1])
+                    for (const sz of [-1, 1])
+                        group.add(createRuntimeBox([legWidth, legHeight, legWidth], metalMaterial, [sx * x, topY - legHeight / 2, sz * z]));
+            };
+
+            if ("chair" === type) {
+                group.add(createRuntimeBox([width, height * .18, depth], material, [0, -.1, 0]));
+                group.add(createRuntimeBox([width, height * .5, depth * .18], material, [0, height * .25, -depth / 2 + depth * .09]));
+                addLegs(-.1, height * .55, .08, Math.max(.05, width * .08));
+            } else if ("table" === type) {
+                group.add(createRuntimeBox([width, height * .14, depth], material, [0, height * .42, 0]));
+                addLegs(height * .35, height * .82, .1, Math.max(.05, width * .06));
+            } else if ("sofa" === type) {
+                group.add(createRuntimeBox([width, height * .28, depth * .75], material, [0, -.08, depth * .06]));
+                group.add(createRuntimeBox([width, height * .46, depth * .2], material, [0, height * .2, -depth / 2 + depth * .1]));
+                group.add(createRuntimeBox([width * .13, height * .34, depth * .72], material, [-width / 2 + width * .065, .02, depth * .03]));
+                group.add(createRuntimeBox([width * .13, height * .34, depth * .72], material, [width / 2 - width * .065, .02, depth * .03]));
+            } else if ("bed" === type) {
+                group.add(createRuntimeBox([width, height * .28, depth], material, [0, -.1, 0]));
+                group.add(createRuntimeBox([width * .94, height * .2, depth * .92], createDetailStandardMaterial(Object.assign({}, detail, {
+                    color: 0xddd5c8,
+                    materialKind: "plaster"
+                }), {
+                    color: 0xddd5c8
+                }), [0, height * .08, 0]));
+                group.add(createRuntimeBox([width, height * .52, depth * .08], material, [0, height * .2, -depth / 2 + depth * .04]));
+            } else if ("cabinet" === type) {
+                group.add(createRuntimeBox([width, height, depth], material, [0, 0, 0]));
+                group.add(createRuntimeBox([width * .02, height * .8, depth * .12], metalMaterial, [0, 0, depth / 2 + depth * .02]));
+            } else if ("counter" === type) {
+                group.add(createRuntimeBox([width, height * .86, depth], material, [0, -height * .05, 0]));
+                group.add(createRuntimeBox([width * 1.02, height * .12, depth * 1.04], createDetailStandardMaterial(Object.assign({}, detail, {
+                    color: 0xebe6de,
+                    materialKind: "concrete"
+                }), {
+                    color: 0xebe6de
+                }), [0, height * .42, 0]));
+            } else if ("shelf" === type) {
+                group.add(createRuntimeBox([width * .08, height, depth], material, [-width / 2 + width * .04, 0, 0]));
+                group.add(createRuntimeBox([width * .08, height, depth], material, [width / 2 - width * .04, 0, 0]));
+                for (let index = 0; index < 4; index++) {
+                    const y = -height / 2 + height * .12 + index * (height * .26);
+                    group.add(createRuntimeBox([width, height * .05, depth], material, [0, y, 0]));
+                }
+            } else if ("stove" === type) {
+                group.add(createRuntimeBox([width, height, depth], material, [0, 0, 0]));
+                group.add(createRuntimeBox([width * .92, height * .06, depth * .92], metalMaterial, [0, height / 2 + height * .03, 0]));
+                group.add(createRuntimeBox([width * .56, height * .36, depth * .04], metalMaterial, [0, -.05, depth / 2 + depth * .03]));
+            } else if ("chimney" === type) {
+                group.add(createRuntimeBox([width, height, depth], material, [0, 0, 0]));
+                group.add(createRuntimeBox([width * 1.25, height * .06, depth * 1.25], material, [0, height / 2 + height * .03, 0]));
+            } else {
+                group.add(createRuntimeBox([width, height, depth], material, [0, 0, 0]));
+            }
+            return positionDetailObject(group, detail, anchorPoint);
+        }
+
         function createPrimitiveDetailMesh(detail, anchorPoint) {
             if (!globalState.THREE || !detail || !detail.type)
                 return null;
             const type = String(detail.type || "").toLowerCase();
+            const THREE = globalState.THREE;
             let geometry = null;
             if ("window" === type)
                 return createWindowDetailObject(detail, anchorPoint);
             if (isDoorDetail(detail))
                 return createDoorDetailObject(detail, anchorPoint);
-            if ("box" === type || "wall" === type || "door" === type) {
-                const size = getDetailSize(detail);
-                geometry = new globalState.THREE.BoxGeometry(size[0], size[1], size[2]);
-            } else if ("panel" === type) {
-                const size = getDetailSize(detail, [1, 1, .04]);
-                geometry = new globalState.THREE.BoxGeometry(size[0], size[1], Math.max(.02, size[2]));
-            } else if ("cylinder" === type || "cone" === type) {
+            if (["chair", "table", "sofa", "bed", "cabinet", "counter", "shelf", "stove", "chimney"].includes(type))
+                return createFurnitureDetailObject(detail, anchorPoint);
+            if ("box" === type || "wall" === type || "floor" === type || "panel" === type || "roofpanel" === type) {
+                const fallback = "panel" === type || "roofpanel" === type ? [1, 1, .04] : [1, 1, .1];
+                const size = getDetailSize(detail, fallback);
+                const box = createDetailPatternBoxGroup(detail, [size[0], size[1], Math.max(.02, size[2])], "floor" === type ? "floor" : "roofpanel" === type ? "roof" : "wall");
+                return positionDetailObject(box, detail, anchorPoint);
+            }
+            if ("flatroof" === type) {
+                const size = getDetailSize(detail, [4, .18, 3]);
+                return positionDetailObject(createDetailPatternBoxGroup(detail, size, "roof"), detail, anchorPoint);
+            }
+            if ("trianglewall" === type || "trianglefill" === type)
+                geometry = createTriangleWallGeometry(detail);
+            else if ("wedgefill" === type)
+                geometry = createWedgeFillGeometry(detail);
+            else if ("cylinderwall" === type || "arcwall" === type)
+                geometry = createCylinderWallGeometry(detail);
+            else if ("fillcylinder" === type)
+                geometry = createFillCylinderGeometry(detail);
+            else if ("pyramid" === type || "pyramidroof" === type || "roofpyramid" === type || "frustumroof" === type)
+                geometry = createPyramidGeometry(detail);
+            else if ("gableroof" === type) {
+                const size = getDetailSize(detail, [4, 2, 4]);
+                geometry = createModelerRidgeGeometry(size[0], size[1], size[2], "z" === detail.ridgeDirection ? "z" : "x", Number(detail.ridgeLength) || size[0]);
+            } else if ("hiproof" === type) {
+                const size = getDetailSize(detail, [4, 2, 4]);
+                geometry = createFrustumRoofGeometry(size[0], size[1], size[2], Number(detail.topScale) || .22);
+            } else if ("shedroof" === type)
+                geometry = createShedRoofGeometry(detail);
+            else if ("mansardroof" === type) {
+                const size = getDetailSize(detail, [4, 2, 4]);
+                geometry = createFrustumRoofGeometry(size[0], size[1], size[2], Number(detail.topScale) || .55);
+            } else if ("domeroof" === type) {
+                const size = getDetailSize(detail, [4, 2, 4]);
+                geometry = new THREE.SphereGeometry(1, 20, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+                geometry.scale(size[0] / 2, size[1], size[2] / 2);
+            } else if ("roundroof" === type)
+                geometry = createRoundRoofGeometry(detail);
+            else if ("cone" === type) {
+                const size = getDetailSize(detail, [1, 2, 1]);
+                const radius = Math.max(.05, Number(detail.radius) || Number(detail.radiusBottom) || size[0]);
+                geometry = new THREE.CylinderGeometry(0, radius, Math.max(.1, Number(detail.height) || size[1]), Math.max(3, Math.round(Number(detail.segments) || 16)));
+                geometry.scale(1, 1, Math.max(.05, Number(detail.radiusZ) || size[2] || radius) / radius);
+            } else if ("cylinder" === type) {
                 const radius = Math.max(.05, Number(detail.radius) || Number(detail.a) || .25);
-                const radiusTop = "cone" === type ? 0 : null != detail.radiusTop ? Math.max(0, Number(detail.radiusTop) || 0) : radius;
+                const radiusTop = null != detail.radiusTop ? Math.max(0, Number(detail.radiusTop) || 0) : radius;
                 const radiusBottom = null != detail.radiusBottom ? Math.max(.05, Number(detail.radiusBottom) || .05) : radius;
-                geometry = new globalState.THREE.CylinderGeometry(radiusTop, radiusBottom, Math.max(.1, Number(detail.height) || Number(detail.b) || 1), Math.max(3, Number(detail.segments) || 16));
+                geometry = new THREE.CylinderGeometry(radiusTop, radiusBottom, Math.max(.1, Number(detail.height) || Number(detail.b) || 1), Math.max(3, Number(detail.segments) || 16));
                 if (detail.radiusX || detail.radiusZ || detail.c) {
                     const radiusX = Math.max(.05, Number(detail.radiusX) || radius);
                     const radiusZ = Math.max(.05, Number(detail.radiusZ) || Number(detail.c) || radius);
                     geometry.scale(radiusX / radius, 1, radiusZ / radius);
                 }
-            } else if ("sphere" === type) {
-                geometry = new globalState.THREE.SphereGeometry(Math.max(.05, Number(detail.radius) || .5), 12, 10);
-            } else if ("cylinderwall" === type || "arcwall" === type) {
-                geometry = createCylinderWallGeometry(detail);
-            } else if ("pyramid" === type || "pyramidroof" === type || "roofpyramid" === type || "frustumroof" === type) {
-                geometry = createPyramidGeometry(detail);
-            }
+            } else if ("sphere" === type)
+                geometry = new THREE.SphereGeometry(Math.max(.05, Number(detail.radius) || .5), 12, 10);
             if (!geometry)
                 return null;
-            const mesh = new globalState.THREE.Mesh(geometry, createDetailMaterial(detail));
-            const position = detail.position || [0, 0, 0];
-            const rotation = detail.rotation || [0, 0, 0];
-            const offsetX = detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.x) || 0;
-            const offsetZ = detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.z) || 0;
-            mesh.position.set(offsetX + (Number(position[0]) || 0), Number(position[1]) || 0, offsetZ + (Number(position[2]) || 0));
-            mesh.rotation.set((Number(rotation[0]) || 0) * Math.PI / 180, (Number(rotation[1]) || 0) * Math.PI / 180, (Number(rotation[2]) || 0) * Math.PI / 180);
-            return mesh;
+            const mesh = new THREE.Mesh(geometry, createDetailMaterial(detail));
+            mesh.castShadow = !0;
+            mesh.receiveShadow = !0;
+            return positionDetailObject(mesh, detail, anchorPoint);
         }
 
         function buildCustomBuildingObject(match) {
