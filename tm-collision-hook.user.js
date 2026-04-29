@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.1.6.1
+// @version      2.1.6.2
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -85,10 +85,11 @@
         }
     }
     const storedFeatures = readStoredFeatures();
+    const buildingTexturesEnabled = !0 === storedFeatures.buildingTextures;
     console.info("[Texture Hook] gestartet", {
-        buildingTextures: !1 !== storedFeatures.buildingTextures
+        buildingTextures: buildingTexturesEnabled
     });
-    if (!1 === storedFeatures.buildingTextures) {
+    if (!buildingTexturesEnabled) {
         console.info("[Texture Hook] per Einstellung deaktiviert");
         return;
     }
@@ -426,21 +427,21 @@
             police: !1,
             vehicleDamage: !1,
             hardStart: !1,
-            overlays: !0,
+            overlays: !1,
             birds: !1,
             bees: !1,
             aircraft: !1,
             shops: !1,
-            auto3dBuildings: !0,
+            auto3dBuildings: !1,
             customBuildings: !1,
-            buildingTextures: !0,
-            enhancedTerrain: !0,
-            enhancedRoads: !0,
+            buildingTextures: !1,
+            enhancedTerrain: !1,
+            enhancedRoads: !1,
             enhancedTrees: !1,
-            enhancedVehicles: !0,
+            enhancedVehicles: !1,
             townSigns: !1,
-            customMissions: !0,
-            vehicleTuning: !0
+            customMissions: !1,
+            vehicleTuning: !1
         });
 
         function loadFeatureStateFromCookies() {
@@ -526,21 +527,21 @@
             police: !1,
             vehicleDamage: !1,
             hardStart: !1,
-            overlays: !0,
+            overlays: !1,
             birds: !1,
             bees: !1,
             aircraft: !1,
             shops: !1,
-            auto3dBuildings: !0,
+            auto3dBuildings: !1,
             customBuildings: !1,
-            buildingTextures: !0,
-            enhancedTerrain: !0,
-            enhancedRoads: !0,
+            buildingTextures: !1,
+            enhancedTerrain: !1,
+            enhancedRoads: !1,
             enhancedTrees: !1,
-            enhancedVehicles: !0,
+            enhancedVehicles: !1,
             townSigns: !1,
-            customMissions: !0,
-            vehicleTuning: !0
+            customMissions: !1,
+            vehicleTuning: !1
         }))
             "boolean" == typeof featureState[key] || (featureState[key] = value);
         vehicleTuningState.active = !!featureState.vehicleTuning && !!vehicleTuningState.active;
@@ -7526,15 +7527,38 @@
             return geometry;
         }
 
+        function getDetailRotationRadians(detail) {
+            const raw = Array.isArray(detail && detail.rotation) ? detail.rotation : [0, 0, 0];
+            const values = [
+                Number(raw[0]) || 0,
+                Number(raw[1]) || 0,
+                Number(raw[2]) || 0
+            ];
+            const unit = String(detail && (detail.rotationUnit || detail.rotationUnits || detail.rotationMode || "") || "").toLowerCase();
+            const maxAbs = Math.max(Math.abs(values[0]), Math.abs(values[1]), Math.abs(values[2]));
+            const explicitlyRadians = unit.includes("rad");
+            const explicitlyDegrees = unit.includes("deg") || unit.includes("grad");
+            const probablyRadians = !explicitlyDegrees && maxAbs <= Math.PI * 2 + .001 && values.some(value => {
+                const abs = Math.abs(value);
+                if (abs < .001)
+                    return !1;
+                const quarterTurns = abs / (Math.PI / 2);
+                return Math.abs(quarterTurns - Math.round(quarterTurns)) < .02;
+            });
+            if (explicitlyRadians || probablyRadians)
+                return values;
+            return values.map(value => value * Math.PI / 180);
+        }
+
         function positionDetailObject(object, detail, anchorPoint) {
             if (!object || !detail)
                 return object;
             const position = detail.position || [0, 0, 0];
-            const rotation = detail.rotation || [0, 0, 0];
+            const rotation = getDetailRotationRadians(detail);
             const offsetX = detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.x) || 0;
             const offsetZ = detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.z) || 0;
             object.position.set(offsetX + (Number(position[0]) || 0), Number(position[1]) || 0, offsetZ + (Number(position[2]) || 0));
-            object.rotation.set((Number(rotation[0]) || 0) * Math.PI / 180, (Number(rotation[1]) || 0) * Math.PI / 180, (Number(rotation[2]) || 0) * Math.PI / 180);
+            object.rotation.set(rotation[0], rotation[1], rotation[2]);
             return object;
         }
 
@@ -7640,13 +7664,10 @@
                 return positionDetailObject(group, detail, anchorPoint);
             }
             const position = detail.position || [0, 0, 0];
-            const rotation = detail.rotation || [0, 0, 0];
             const offsetX = detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.x) || 0;
             const offsetZ = detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.z) || 0;
             const center = new THREE.Vector3(offsetX + (Number(position[0]) || 0), Number(position[1]) || 0, offsetZ + (Number(position[2]) || 0));
-            const rx = (Number(rotation[0]) || 0) * Math.PI / 180;
-            const ry = (Number(rotation[1]) || 0) * Math.PI / 180;
-            const rz = (Number(rotation[2]) || 0) * Math.PI / 180;
+            const [rx, ry, rz] = getDetailRotationRadians(detail);
             const hingeRight = "right" === String(detail.hinge || detail.hingeSide || "").toLowerCase();
             const openOut = !1 !== detail.openOut;
             const sideSign = hingeRight ? -1 : 1;
