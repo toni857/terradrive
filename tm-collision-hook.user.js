@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.1.6.5
+// @version      2.1.6.6
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -198,7 +198,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.1.6.5",
+            version: "2.1.6.6",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -220,6 +220,16 @@
             signSideOffset: 1.5,
             signDedupDistance: 9,
             signNearbyDedupDistance: 18
+        };
+        const STARTING_MONEY = 500;
+        const BUILDING_FIT_CONFIG = {
+            foundationMinHeight: .32,
+            groundClearance: .42,
+            regularRoadClearance: 1.8,
+            addressRoadClearance: 4.8,
+            regularOverlapPadding: .85,
+            addressOverlapPadding: 2.8,
+            minimumRegularScale: .76
         };
         const townSignsState = globalState.townSigns || (globalState.townSigns = {
             roadModule: null,
@@ -408,7 +418,8 @@
             moduleDisables: {},
             moduleFaults: {},
             startMenuFeatureWatcherInstalled: !1,
-            playerMoney: 250,
+            startMoneyGranted: !1,
+            playerMoney: STARTING_MONEY,
             input: {
                 slowLeft: !1,
                 slowRight: !1,
@@ -549,7 +560,8 @@
                 lastNoticeAt: 0,
                 lastLinkNoticeAt: 0
             }, runtimeState.autopilot || {}),
-            playerMoney: Number.isFinite(Number(runtimeState.playerMoney)) ? Number(runtimeState.playerMoney) : 250,
+            startMoneyGranted: !!runtimeState.startMoneyGranted,
+            playerMoney: Number.isFinite(Number(runtimeState.playerMoney)) ? Number(runtimeState.playerMoney) : STARTING_MONEY,
             input: runtimeState.input || {
                 slowLeft: !1,
                 slowRight: !1,
@@ -3466,16 +3478,19 @@
         function applyExtendedVehicleControls(car, dtSeconds) {
             if (!car)
                 return;
-            const handlingBoost = featureState.vehicleTuning && vehicleTuningState.active ? 1.25 : 1;
-            const leftStrength = ((runtimeState.input.slowLeft ? .45 : 0) + (runtimeState.input.fastLeft ? 1.8 : 0)) * handlingBoost;
-            const rightStrength = ((runtimeState.input.slowRight ? .45 : 0) + (runtimeState.input.fastRight ? 1.8 : 0)) * handlingBoost;
+            const tuningActive = featureState.vehicleTuning && vehicleTuningState.active;
+            const handlingBoost = tuningActive ? 1.85 : 1;
+            const leftStrength = ((runtimeState.input.slowLeft ? .65 : 0) + (runtimeState.input.fastLeft ? 2.8 : 0)) * handlingBoost;
+            const rightStrength = ((runtimeState.input.slowRight ? .65 : 0) + (runtimeState.input.fastRight ? 2.8 : 0)) * handlingBoost;
             const steer = Math.sign(leftStrength - rightStrength);
             if (steer) {
-                car.delayMode = Math.max(featureState.vehicleTuning && vehicleTuningState.active ? .05 : .12, Math.min(featureState.vehicleTuning && vehicleTuningState.active ? 1.35 : 2.2, Math.abs(leftStrength - rightStrength)));
+                const maxAngle = Number(car.mcs && car.mcs.maxSteeringAngle) || .5;
+                car.delayMode = Math.max(tuningActive ? .025 : .12, Math.min(tuningActive ? 2.2 : 2.2, Math.abs(leftStrength - rightStrength)));
                 if (typeof car.setSteeringTarget === "function")
-                    car.setSteeringTarget(steer * (featureState.vehicleTuning && vehicleTuningState.active ? 1.25 : 1));
+                    car.setSteeringTarget(steer * (tuningActive ? 2.2 : 1));
                 else
-                    car.steeringTarget = steer * (car.mcs && car.mcs.maxSteeringAngle || .5) * (featureState.vehicleTuning && vehicleTuningState.active ? 1.35 : 1);
+                    car.steeringTarget = steer * maxAngle * (tuningActive ? 2.25 : 1);
+                tuningActive && "number" == typeof car.steeringAngle && (car.steeringAngle = clamp(Number(car.steeringAngle) + steer * (Number(dtSeconds) || .016) * maxAngle * 4.8, -maxAngle * 2.15, maxAngle * 2.15));
             }
             if (runtimeState.input.fullBrake) {
                 if (typeof car.toBreak === "function")
@@ -3493,11 +3508,13 @@
             if (!car || !featureState.vehicleTuning || !vehicleTuningState.active || !car.cameraGroup)
                 return;
             const dt = Math.max(1e-3, Number(dtSeconds) || 0);
-            const steerInput = Math.sign(Number(car.steeringTarget) || Number(car.steeringAngle) || 0);
+            const steeringValue = Number(car.steeringTarget) || Number(car.steeringAngle) || 0;
+            const steerInput = Math.sign(steeringValue);
+            const steerMagnitude = clamp(Math.abs(steeringValue) / Math.max(.2, Number(car.mcs && car.mcs.maxSteeringAngle) || .5), 0, 1.8);
             const speedRatio = clamp(speedAbs(car.speed) / Math.max(12, getVehicleTuningMaxSpeedMs() * .42), 0, 1.6);
             if (steerInput)
-                car.cameraGroup.rotation.y = normalizeAngleRad(car.cameraGroup.rotation.y + steerInput * (.22 + .38 * speedRatio) * dt);
-            car.group && (car.group.rotation.z *= Math.pow(.05, dt));
+                car.cameraGroup.rotation.y = normalizeAngleRad(car.cameraGroup.rotation.y + steerInput * (.42 + .92 * speedRatio) * Math.max(.45, steerMagnitude) * dt);
+            car.group && (car.group.rotation.z *= Math.pow(.012, dt));
         }
 
         function applyVehicleTuning(car, dtSeconds, previousSpeed) {
@@ -4466,6 +4483,24 @@
             return wallet && "object" == typeof wallet ? wallet : null;
         }
 
+        function ensureStartingMoney(game=runtimeState.game) {
+            if (runtimeState.startMoneyGranted || featureState.hardStart)
+                return;
+            const wallet = getGameWallet();
+            const savedGame = game && game.gameEnvironment && game.gameEnvironment.savedGame;
+            if (!wallet)
+                return;
+            if (savedGame) {
+                runtimeState.startMoneyGranted = !0;
+                return;
+            }
+            const current = Number(wallet.amount);
+            if (!Number.isFinite(current))
+                return;
+            current < STARTING_MONEY && setPlayerMoney(STARTING_MONEY);
+            runtimeState.startMoneyGranted = !0;
+        }
+
         function getPlayerMoney() {
             const wallet = getGameWallet();
             return wallet && Number.isFinite(Number(wallet.amount)) ? Number(wallet.amount) : Number(runtimeState.playerMoney) || 0;
@@ -4706,20 +4741,26 @@
         }
 
         function findStartMenuTarget() {
-            const excludedSelector = "#game_menu,#content_menu,#__tmFeatureMenuSection,#__tmFeatureStartMenuSection";
+            const explicitTarget = document.getElementById("start_menu") || document.getElementById("startMenu") || document.querySelector(".start-menu,.startMenu");
+            if (explicitTarget)
+                return explicitTarget;
+            const excludedSelector = "#game_menu,#content_menu,#missionContainer,#menu-container,#special-container,#__tmFeatureMenuSection,#__tmFeatureStartMenuSection";
             const buttons = Array.from(document.querySelectorAll('button,a,[role="button"],input[type="button"],input[type="submit"]'));
-            const openMapButton = buttons.find(element => !element.closest(excludedSelector) && /\b(open\s*map|open\s*world|start|play)\b/i.test(getElementLabelText(element)));
+            const openMapButton = buttons.find(element => !element.closest(excludedSelector) && /\b(open\s*map|open\s*world|play)\b/i.test(getElementLabelText(element)));
             if (openMapButton)
                 return openMapButton.closest(".main-buttons,.buttons,.start-menu,.startMenu,.menu,.modal,.dialog,.card,section,main") || openMapButton.parentElement;
-            return document.getElementById("start_menu") || document.getElementById("startMenu") || document.querySelector(".start-menu,.startMenu");
+            return null;
         }
 
         function ensureStartFeatureMenu() {
             if (!document.body)
                 return;
+            const existingPanel = document.getElementById("__tmFeatureStartMenuSection");
             const target = findStartMenuTarget();
-            if (!target)
+            if (!target) {
+                existingPanel && existingPanel.closest("#missionContainer,#game_menu,#content_menu") && existingPanel.remove();
                 return;
+            }
             const panel = createFeatureMenuPanel("__tmFeatureStartMenuSection", "TM Gameplay vor Start");
             if (target.matches && target.matches(".main-buttons,.buttons") && target.parentNode) {
                 if (panel.previousElementSibling !== target)
@@ -4754,7 +4795,7 @@
             ensureStartFeatureMenu();
             const oldFloatingPanel = document.getElementById("__tmFeaturePanel");
             oldFloatingPanel && oldFloatingPanel.remove();
-            const target = document.getElementById("game_menu");
+            const target = document.getElementById("content_menu") || document.getElementById("game_menu");
             if (!target)
                 return;
             const panel = createFeatureMenuPanel("__tmFeatureMenuSection", "TM Gameplay");
@@ -4886,38 +4927,14 @@
             const THREE = globalState.THREE;
             const group = new THREE.Group;
             group.name = "__tmPoliceCar";
-            const makeMat = (color, extra={}) => THREE.MeshStandardMaterial ? new THREE.MeshStandardMaterial(Object.assign({
-                color,
-                roughness: .55,
-                metalness: .28
-            }, extra)) : new THREE.MeshLambertMaterial({
-                color
-            });
-            const paintDark = makeMat(0x0c1621, {
-                metalness: .46,
-                roughness: .36
-            });
-            const paintWhite = makeMat(0xf5f8fb, {
-                metalness: .18,
-                roughness: .44
-            });
-            const paintBlue = makeMat(0x214fba, {
-                metalness: .24,
-                roughness: .42
-            });
-            const paintRed = makeMat(0xc32337, {
-                metalness: .24,
-                roughness: .42
-            });
-            const trim = makeMat(0x1b1f24, {
-                metalness: .62,
-                roughness: .34
-            });
-            const glass = makeMat(0x83b8d8, {
+            const makeMat = (color, extra={}) => createFlatMaterial(color, extra);
+            const paintWhite = makeMat(0xf5f8fb);
+            const paintBlue = makeMat(0x1d5fc8);
+            const paintRed = makeMat(0xc63242);
+            const trim = makeMat(0x1b1d22);
+            const glass = makeMat(0x8ec6e8, {
                 transparent: !0,
-                opacity: .72,
-                metalness: .08,
-                roughness: .12
+                opacity: .62
             });
             const lightRed = new THREE.MeshBasicMaterial({
                 color: 0xff2030
@@ -4925,89 +4942,101 @@
             const lightBlue = new THREE.MeshBasicMaterial({
                 color: 0x2f77ff
             });
-            group.add(createEllipsoid([6.1, 1.15, 2.34], 0x0c1621, [0, .92, 0], paintDark));
-            group.add(createEllipsoid([3.25, 1.02, 1.92], 0xf5f8fb, [-.18, 1.54, 0], paintWhite));
-            group.add(createEllipsoid([1.9, .54, 1.84], 0x0f1f33, [1.95, 1.06, 0], trim));
-            group.add(createEllipsoid([1.52, .5, 1.72], 0x0f1f33, [-2.12, 1.06, 0], trim));
-            const hoodStripe = createBox([1.8, .05, 1.2], 0x214fba, [1.78, 1.3, 0]);
-            hoodStripe.material = paintBlue;
-            group.add(hoodStripe);
-            const doorPanelLeft = createBox([2.38, .66, .08], 0xf5f8fb, [-.1, 1.16, -1.01]);
-            const doorPanelRight = createBox([2.38, .66, .08], 0xf5f8fb, [-.1, 1.16, 1.01]);
-            doorPanelLeft.material = paintWhite;
-            doorPanelRight.material = paintWhite;
-            group.add(doorPanelLeft, doorPanelRight);
-            const sideBlueLeft = createBox([2.95, .18, .05], 0x214fba, [-.05, .96, -1.12]);
-            const sideBlueRight = createBox([2.95, .18, .05], 0x214fba, [-.05, .96, 1.12]);
-            const sideRedLeft = createBox([1.18, .16, .05], 0xc32337, [-1.55, 1.02, -1.12]);
-            const sideRedRight = createBox([1.18, .16, .05], 0xc32337, [-1.55, 1.02, 1.12]);
+            group.add(createEllipsoid([6.35, .92, 2.34], 0xf5f8fb, [0, .82, 0], paintWhite));
+            group.add(createEllipsoid([2.95, .72, 1.78], 0xf5f8fb, [-.08, 1.34, 0], paintWhite));
+            group.add(createEllipsoid([2.15, .28, 1.56], 0x1d5fc8, [1.86, 1.04, 0], paintBlue));
+            group.add(createEllipsoid([1.76, .24, 1.42], 0x1d5fc8, [-1.92, 1.03, 0], paintBlue));
+            const frontLip = createBox([5.8, .18, 2.08], 0x1b1d22, [.18, .48, 0]);
+            frontLip.material = trim;
+            const rearValance = createBox([4.3, .16, 2.02], 0x1b1d22, [-1.85, .5, 0]);
+            rearValance.material = trim;
+            group.add(frontLip, rearValance);
+            const sidePanelLeft = createBox([3.12, .58, .08], 0xf5f8fb, [-.1, 1.06, -1.04]);
+            const sidePanelRight = createBox([3.12, .58, .08], 0xf5f8fb, [-.1, 1.06, 1.04]);
+            sidePanelLeft.material = paintWhite;
+            sidePanelRight.material = paintWhite;
+            group.add(sidePanelLeft, sidePanelRight);
+            const sideBlueLeft = createBox([3.5, .22, .05], 0x1d5fc8, [.06, .95, -1.16]);
+            const sideBlueRight = createBox([3.5, .22, .05], 0x1d5fc8, [.06, .95, 1.16]);
+            const sideRedLeft = createBox([1.18, .16, .05], 0xc63242, [-1.72, 1.05, -1.16]);
+            const sideRedRight = createBox([1.18, .16, .05], 0xc63242, [-1.72, 1.05, 1.16]);
             sideBlueLeft.material = paintBlue;
             sideBlueRight.material = paintBlue;
             sideRedLeft.material = paintRed;
             sideRedRight.material = paintRed;
             group.add(sideBlueLeft, sideBlueRight, sideRedLeft, sideRedRight);
-            group.add(createBox([.08, .42, 1.54], 0xffffff, [.08, 1.53, 0]));
-            group.add(createBox([.08, .42, 1.54], 0xffffff, [-1.18, 1.53, 0]));
-            const windshield = createBox([.12, .58, 1.52], 0x83b8d8, [1.16, 1.6, 0]);
+            const roofBlue = createBox([1.24, .08, 1.44], 0x1d5fc8, [-.18, 1.76, 0]);
+            roofBlue.material = paintBlue;
+            group.add(roofBlue);
+            group.add(createBox([.08, .38, 1.48], 0xffffff, [.18, 1.42, 0]));
+            group.add(createBox([.08, .36, 1.42], 0xffffff, [-1.02, 1.42, 0]));
+            const windshield = createBox([.12, .56, 1.48], 0x8ec6e8, [1.1, 1.52, 0]);
             windshield.material = glass;
             group.add(windshield);
-            const rearWindow = createBox([.12, .5, 1.42], 0x83b8d8, [-1.55, 1.56, 0]);
+            const rearWindow = createBox([.12, .44, 1.28], 0x8ec6e8, [-1.5, 1.48, 0]);
             rearWindow.material = glass;
             group.add(rearWindow);
-            const sideWindowL = createBox([1.7, .42, .06], 0x83b8d8, [-.2, 1.56, -1.01]);
-            const sideWindowR = createBox([1.7, .42, .06], 0x83b8d8, [-.2, 1.56, 1.01]);
+            const sideWindowL = createBox([1.92, .36, .06], 0x8ec6e8, [-.12, 1.48, -1.01]);
+            const sideWindowR = createBox([1.92, .36, .06], 0x8ec6e8, [-.12, 1.48, 1.01]);
             sideWindowL.material = glass;
             sideWindowR.material = glass;
             group.add(sideWindowL, sideWindowR);
             const lightbar = new THREE.Group;
             lightbar.name = "__tmPoliceLightbar";
-            const lightbarBase = createBox([1.28, .12, .52], 0x171a1f, [-.35, 1.94, 0]);
+            const lightbarBase = createBox([1.34, .12, .54], 0x171a1f, [-.28, 1.92, 0]);
             lightbarBase.material = trim;
-            const lightbarGlass = createBox([1.3, .22, .58], 0xb5d4ff, [-.35, 2, 0]);
+            const lightbarGlass = createBox([1.36, .22, .62], 0xb5d4ff, [-.28, 1.98, 0]);
             lightbarGlass.material = makeMat(0xb5d4ff, {
                 transparent: !0,
-                opacity: .38,
-                metalness: .08,
-                roughness: .14
+                opacity: .34
             });
-            const red = createBox([.52, .15, .24], 0xff2030, [-.62, 2, -.14]);
+            const red = createBox([.56, .15, .24], 0xff2030, [-.6, 1.98, -.14]);
             red.material = lightRed;
-            const blue = createBox([.52, .15, .24], 0x2f77ff, [-.08, 2, .14]);
+            const blue = createBox([.56, .15, .24], 0x2f77ff, [.02, 1.98, .14]);
             blue.material = lightBlue;
-            const siren = createBox([.3, .08, .18], 0xf4f4f4, [-.35, 1.94, 0]);
+            const siren = createBox([.3, .08, .18], 0xf4f4f4, [-.28, 1.92, 0]);
             lightbar.add(lightbarBase, lightbarGlass, red, blue, siren);
             group.add(lightbar);
-            const pushBar = createBox([.18, .82, 1.42], 0x161b20, [2.98, .9, 0]);
+            const pushBar = createBox([.16, .76, 1.36], 0x161b20, [3.02, .86, 0]);
             pushBar.material = trim;
             group.add(pushBar);
-            const headLeft = createBox([.08, .24, .52], 0xfff2a8, [2.94, .86, -.58]);
-            const headRight = createBox([.08, .24, .52], 0xfff2a8, [2.94, .86, .58]);
+            const grille = createBox([.16, .42, 1.1], 0x111317, [2.92, .8, 0]);
+            grille.material = trim;
+            group.add(grille);
+            const headLeft = createBox([.08, .22, .5], 0xfff2a8, [2.96, .86, -.58]);
+            const headRight = createBox([.08, .22, .5], 0xfff2a8, [2.96, .86, .58]);
             headLeft.material = new THREE.MeshBasicMaterial({
                 color: 0xfff2a8
             });
             headRight.material = headLeft.material;
             group.add(headLeft, headRight);
-            const tailLeft = createBox([.08, .22, .48], 0xb60e1b, [-2.96, .9, -.56]);
-            const tailRight = createBox([.08, .22, .48], 0xb60e1b, [-2.96, .9, .56]);
+            const tailLeft = createBox([.08, .2, .44], 0xb60e1b, [-3.04, .88, -.56]);
+            const tailRight = createBox([.08, .2, .44], 0xb60e1b, [-3.04, .88, .56]);
             tailLeft.material = new THREE.MeshBasicMaterial({
                 color: 0xb60e1b
             });
             tailRight.material = tailLeft.material;
             group.add(tailLeft, tailRight);
+            const spoiler = createBox([.9, .08, 1.12], 0x1b1d22, [-2.7, 1.28, 0]);
+            spoiler.material = trim;
+            group.add(spoiler);
             const wheels = [];
-            for (const x of [-1.62, 1.62])
-                for (const z of [-1.12, 1.12]) {
-                    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(.42, .42, .32, 20), new THREE.MeshLambertMaterial({
-                        color: 0x111111
-                    }));
+            const wheelMaterial = makeMat(0x111111);
+            for (const x of [-1.72, 1.74])
+                for (const z of [-1.1, 1.1]) {
+                    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(.42, .42, .34, 20), wheelMaterial);
                     wheel.rotation.x = Math.PI / 2;
                     wheel.position.set(x, .42, z);
                     group.add(wheel);
                     wheels.push(wheel);
                 }
-            const antenna = createBox([.03, .68, .03], 0x1f252c, [-2.05, 2.26, .22]);
+            const antenna = createBox([.03, .62, .03], 0x1f252c, [-2.12, 2.18, .22]);
             antenna.material = trim;
-            group.add(antenna);
+            const mirrorLeft = createBox([.18, .12, .08], 0x1b1d22, [.74, 1.32, -1.12]);
+            const mirrorRight = createBox([.18, .12, .08], 0x1b1d22, [.74, 1.32, 1.12]);
+            mirrorLeft.material = trim;
+            mirrorRight.material = trim;
+            group.add(antenna, mirrorLeft, mirrorRight);
             group.userData.wheels = wheels;
             group.userData.wheelRadius = .42;
             group.userData.lightRed = red;
@@ -5668,15 +5697,34 @@
             return runtimeState.trafficResolver || globalThis.__tmCollisionHookDebug && globalThis.__tmCollisionHookDebug.resolver || null;
         }
 
-        function getNearestStealableAiCar(maxDistance=9, maxSpeed=7) {
+        function getTrafficResolverEntries(resolver) {
+            const entries = [];
+            if (!resolver)
+                return entries;
+            const carMaps = resolver.carMaps;
+            if (carMaps && "function" == typeof carMaps.entries)
+                for (const entry of carMaps.entries())
+                    entries.push(entry);
+            else if (Array.isArray(carMaps))
+                for (let index = 0; index < carMaps.length; index++)
+                    entries.push([index, carMaps[index]]);
+            else if (carMaps && "object" == typeof carMaps)
+                for (const [key, value] of Object.entries(carMaps))
+                    entries.push([key, value]);
+            return entries;
+        }
+
+        function getNearestStealableAiCar(maxDistance=12, maxSpeed=11) {
             const resolver = getTrafficResolver();
             const playerPos = getControlPosition() || getPlayerPosition();
-            if (!resolver || !resolver.carMaps || !playerPos)
+            if (!resolver || !playerPos)
                 return null;
             let best = null;
-            let bestDistance = Math.max(2, Number(maxDistance) || 9);
-            for (const [aiId, aiCar] of resolver.carMaps) {
-                if (!aiCar || resolver.actives && !resolver.actives[aiId] || resolver.carReady && !resolver.carReady[aiId])
+            let bestDistance = Math.max(2, Number(maxDistance) || 12);
+            for (const [aiId, aiCar] of getTrafficResolverEntries(resolver)) {
+                if (!aiCar)
+                    continue;
+                if (resolver.actives && null != resolver.actives[aiId] && !resolver.actives[aiId])
                     continue;
                 const position = aiCar.getPosition && aiCar.getPosition();
                 if (!position)
@@ -5713,14 +5761,21 @@
                 const oldPosition = car.getPosition && car.getPosition();
                 const oldYaw = car.cameraGroup && car.cameraGroup.rotation ? car.cameraGroup.rotation.y : 0;
                 const aiYaw = candidate.aiCar.cameraGroup && candidate.aiCar.cameraGroup.rotation ? candidate.aiCar.cameraGroup.rotation.y : oldYaw;
+                const targetPosition = cloneVector3(position) || position.clone && position.clone() || position;
+                targetPosition && (targetPosition.y = getTerrainYWorld(targetPosition, targetPosition.y || 0));
                 stopAi(candidate.resolver, candidate.aiId, candidate.aiCar, 120, 5);
                 if ("function" == typeof candidate.resolver.requestDelete)
                     candidate.resolver.requestDelete(candidate.aiId);
                 spawnFleeingDriver(position.clone ? position.clone() : position, aiYaw);
                 oldPosition && spawnTowRecoveryScene(oldPosition.clone ? oldPosition.clone() : oldPosition, oldYaw);
-                car.cameraGroup.position.copy(position);
+                "function" == typeof car.setPosition ? car.setPosition(targetPosition.clone ? targetPosition.clone() : targetPosition) : car.cameraGroup.position.copy(targetPosition);
+                car.group && car.group.position && car.group.position.copy(targetPosition);
+                car.cameraGroup.position.copy(targetPosition);
                 car.cameraGroup.rotation.set(0, aiYaw, 0);
-                car.group && (car.group.rotation.z = 0);
+                car.group && (car.group.rotation.y = aiYaw,
+                car.group.rotation.z = 0);
+                car.steeringTarget = 0;
+                "number" == typeof car.steeringAngle && (car.steeringAngle = 0);
                 car.__tmDamage = 0;
                 car.__tmBrokenDown = !1;
                 car.engineRunning = !0;
@@ -5845,32 +5900,17 @@
             const THREE = globalState.THREE;
             const group = new THREE.Group;
             group.name = `__tmAircraft:${type}`;
-            const makeMat = (color, extra={}) => THREE.MeshStandardMaterial ? new THREE.MeshStandardMaterial(Object.assign({
-                color,
-                roughness: .48,
-                metalness: .26
-            }, extra)) : new THREE.MeshLambertMaterial({
-                color
-            });
+            const makeMat = (color, extra={}) => createFlatMaterial(color, extra);
             const white = makeMat("helicopter" === type ? 0xe7efe7 : 0xf0f4fa, {
-                roughness: .4,
-                metalness: .22
+                transparent: !1
             });
-            const dark = makeMat(0x1f2833, {
-                roughness: .5,
-                metalness: .45
-            });
+            const dark = makeMat(0x1f2833);
             const glass = makeMat(0x89c2dc, {
                 transparent: !0,
-                opacity: .7,
-                roughness: .08,
-                metalness: .04
+                opacity: .7
             });
             const accentColor = "helicopter" === type ? 0x2c855c : "jet" === type ? 0xd84545 : "passenger" === type ? 0x2e6fc6 : 0xf0b73f;
-            const accent = makeMat(accentColor, {
-                roughness: .42,
-                metalness: .24
-            });
+            const accent = makeMat(accentColor);
             const lightRed = new THREE.MeshBasicMaterial({
                 color: 0xff2935
             });
@@ -5943,10 +5983,7 @@
             } else {
                 const wingSpan = "passenger" === type ? 78 : "jet" === type ? 20 : 16;
                 const wing = createBox([length * .26, .28, wingSpan], 0xd7dde8, [length * .02, 0, 0]);
-                wing.material = makeMat(0xd7dde8, {
-                    roughness: .4,
-                    metalness: .22
-                });
+                wing.material = makeMat(0xd7dde8);
                 wing.rotation.x = .04;
                 group.add(wing);
                 const tailWing = createBox([length * .12, .2, wingSpan * .28], 0xd7dde8, [-length * .46, bodyRadius * .45, 0]);
@@ -6005,10 +6042,7 @@
                         group.add(wheel);
                         wheels.push(wheel);
                         const strut = createBox([.08, bodyRadius * .82, .08], 0xb8c2ce, [x, -bodyRadius * .58, z]);
-                        strut.material = makeMat(0xb8c2ce, {
-                            roughness: .34,
-                            metalness: .78
-                        });
+                        strut.material = makeMat(0xb8c2ce);
                         group.add(strut);
                     }
                 const noseGear = new THREE.Mesh(new THREE.CylinderGeometry(bodyRadius * .16, bodyRadius * .16, bodyRadius * .14, 12), dark);
@@ -6017,10 +6051,7 @@
                 group.add(noseGear);
                 wheels.push(noseGear);
                 const noseStrut = createBox([.07, bodyRadius * .72, .07], 0xb8c2ce, [length * .38, -bodyRadius * .56, 0]);
-                noseStrut.material = makeMat(0xb8c2ce, {
-                    roughness: .34,
-                    metalness: .78
-                });
+                noseStrut.material = makeMat(0xb8c2ce);
                 group.add(noseStrut);
                 const leftLight = createBox([.22, .18, .22], 0xff2935, [length * .02, .08, -wingSpan / 2]);
                 leftLight.material = lightRed;
@@ -6349,23 +6380,9 @@
             const THREE = globalState.THREE;
             const group = new THREE.Group;
             group.name = "__tmBirdFlock";
-            const bodyMat = THREE.MeshStandardMaterial ? new THREE.MeshStandardMaterial({
-                color: 0x3d454d,
-                roughness: .76,
-                metalness: .02
-            }) : new THREE.MeshLambertMaterial({
-                color: 0x3d454d
-            });
-            const wingMat = THREE.MeshStandardMaterial ? new THREE.MeshStandardMaterial({
-                color: 0x222a31,
-                roughness: .82,
-                metalness: .01
-            }) : new THREE.MeshLambertMaterial({
-                color: 0x222a31
-            });
-            const beakMat = new THREE.MeshLambertMaterial({
-                color: 0xd39d4b
-            });
+            const bodyMat = createFlatMaterial(0x3d454d);
+            const wingMat = createFlatMaterial(0x222a31);
+            const beakMat = createFlatMaterial(0xd39d4b);
             for (let i = 0; i < 9; i++) {
                 const bird = new THREE.Group;
                 bird.position.set(Math.sin(i) * 8, Math.cos(i * 1.7) * 2, Math.cos(i) * 7);
@@ -6393,24 +6410,11 @@
             const THREE = globalState.THREE;
             const group = new THREE.Group;
             group.name = "__tmBeeSwarm";
-            const yellow = THREE.MeshStandardMaterial ? new THREE.MeshStandardMaterial({
-                color: 0xf4c42c,
-                roughness: .5,
-                metalness: .04
-            }) : new THREE.MeshLambertMaterial({
-                color: 0xf4c42c
-            });
-            const black = new THREE.MeshLambertMaterial({
-                color: 0x181b1f
-            });
-            const wingMat = THREE.MeshStandardMaterial ? new THREE.MeshStandardMaterial({
-                color: 0xd8efff,
+            const yellow = createFlatMaterial(0xf4c42c);
+            const black = createFlatMaterial(0x181b1f);
+            const wingMat = createFlatMaterial(0xd8efff, {
                 transparent: !0,
-                opacity: .42,
-                roughness: .06,
-                metalness: .02
-            }) : new THREE.MeshLambertMaterial({
-                color: 0xd8efff
+                opacity: .42
             });
             for (let i = 0; i < 16; i++) {
                 const bee = new THREE.Group;
@@ -6608,6 +6612,22 @@
                 null != value && color.set(value);
             } catch (colorError) {}
             return color;
+        }
+
+        function createFlatMaterial(colorValue, options={}) {
+            const THREE = globalState.THREE;
+            if (!THREE)
+                return null;
+            const baseOptions = {
+                color: toThreeColor(colorValue, 0xffffff),
+                transparent: !!options.transparent,
+                opacity: null != options.opacity ? clamp(Number(options.opacity) || 0, .02, 1) : 1,
+                side: null != options.side ? options.side : THREE.DoubleSide
+            };
+            return THREE.MeshBasicMaterial ? new THREE.MeshBasicMaterial(baseOptions) : THREE.MeshLambertMaterial ? new THREE.MeshLambertMaterial(baseOptions) : new THREE.MeshStandardMaterial(Object.assign({
+                roughness: .6,
+                metalness: .1
+            }, baseOptions));
         }
 
         function setTextureQuality(texture) {
@@ -7542,6 +7562,393 @@
             };
         }
 
+        function getFootprintCenter(points) {
+            if (!Array.isArray(points) || !points.length)
+                return {
+                    x: 0,
+                    z: 0
+                };
+            const center = points.reduce(((acc, point) => ({
+                x: acc.x + (Number(point.x) || 0),
+                z: acc.z + (Number(point.z) || 0)
+            })), {
+                x: 0,
+                z: 0
+            });
+            center.x /= points.length;
+            center.z /= points.length;
+            return center;
+        }
+
+        function moveFootprint(points, offsetX, offsetZ) {
+            return toSafeArray(points).map((point => ({
+                x: (Number(point.x) || 0) + (Number(offsetX) || 0),
+                z: (Number(point.z) || 0) + (Number(offsetZ) || 0)
+            })));
+        }
+
+        function scaleFootprint(points, scale, centerPoint) {
+            const center = centerPoint || getFootprintCenter(points);
+            const factor = Math.max(.1, Number(scale) || 1);
+            return toSafeArray(points).map((point => ({
+                x: center.x + ((Number(point.x) || 0) - center.x) * factor,
+                z: center.z + ((Number(point.z) || 0) - center.z) * factor
+            })));
+        }
+
+        function getFootprintBounds(points) {
+            const bounds = {
+                minX: 1 / 0,
+                maxX: -1 / 0,
+                minZ: 1 / 0,
+                maxZ: -1 / 0
+            };
+            for (const point of toSafeArray(points)) {
+                const x = Number(point.x) || 0;
+                const z = Number(point.z) || 0;
+                bounds.minX = Math.min(bounds.minX, x);
+                bounds.maxX = Math.max(bounds.maxX, x);
+                bounds.minZ = Math.min(bounds.minZ, z);
+                bounds.maxZ = Math.max(bounds.maxZ, z);
+            }
+            return Number.isFinite(bounds.minX) ? bounds : {
+                minX: 0,
+                maxX: 0,
+                minZ: 0,
+                maxZ: 0
+            };
+        }
+
+        function boundsOverlap(a, b) {
+            return !!a && !!b && a.minX <= b.maxX && a.maxX >= b.minX && a.minZ <= b.maxZ && a.maxZ >= b.minZ;
+        }
+
+        function isPointInsideFootprint(point, points) {
+            if (!point || !Array.isArray(points) || points.length < 3)
+                return !1;
+            let inside = !1;
+            for (let index = 0, prev = points.length - 1; index < points.length; prev = index++) {
+                const xi = Number(points[index].x) || 0;
+                const zi = Number(points[index].z) || 0;
+                const xj = Number(points[prev].x) || 0;
+                const zj = Number(points[prev].z) || 0;
+                const intersects = zi > point.z != zj > point.z && point.x < (xj - xi) * (point.z - zi) / ((zj - zi) || 1e-6) + xi;
+                intersects && (inside = !inside);
+            }
+            return inside;
+        }
+
+        function getFootprintSamplePoints(points) {
+            const samples = [];
+            const center = getFootprintCenter(points);
+            for (const point of toSafeArray(points))
+                samples.push({
+                    x: Number(point.x) || 0,
+                    z: Number(point.z) || 0
+                });
+            for (let index = 0; index < points.length; index++) {
+                const current = points[index];
+                const next = points[(index + 1) % points.length];
+                samples.push({
+                    x: ((Number(current.x) || 0) + (Number(next.x) || 0)) / 2,
+                    z: ((Number(current.z) || 0) + (Number(next.z) || 0)) / 2
+                });
+            }
+            samples.push(center);
+            const bounds = getFootprintBounds(points);
+            const stepX = Math.max(.1, (bounds.maxX - bounds.minX) / 2);
+            const stepZ = Math.max(.1, (bounds.maxZ - bounds.minZ) / 2);
+            for (let gx = 0; gx < 3; gx++)
+                for (let gz = 0; gz < 3; gz++) {
+                    const probe = {
+                        x: bounds.minX + stepX * gx,
+                        z: bounds.minZ + stepZ * gz
+                    };
+                    isPointInsideFootprint(probe, points) && samples.push(probe);
+                }
+            return samples;
+        }
+
+        function closestPointOnSegment2D(point, a, b) {
+            if (!point || !a || !b)
+                return null;
+            const dx = (Number(b.x) || 0) - (Number(a.x) || 0);
+            const dz = (Number(b.z) || 0) - (Number(a.z) || 0);
+            const lenSq = dx * dx + dz * dz;
+            if (lenSq < 1e-6)
+                return {
+                    x: Number(a.x) || 0,
+                    z: Number(a.z) || 0
+                };
+            const t = clamp((((Number(point.x) || 0) - (Number(a.x) || 0)) * dx + ((Number(point.z) || 0) - (Number(a.z) || 0)) * dz) / lenSq, 0, 1);
+            return {
+                x: (Number(a.x) || 0) + dx * t,
+                z: (Number(a.z) || 0) + dz * t
+            };
+        }
+
+        function iterateChunkRoadSegments(chunk, visitor) {
+            if (!chunk || "function" != typeof visitor)
+                return;
+            for (const edge of toSafeArray(chunk.newRoadGraph && chunk.newRoadGraph.edges)) {
+                const points = toSafeArray(edge && edge.points);
+                for (let index = 0; index < points.length - 1; index++)
+                    visitor(edge, points[index], points[index + 1]);
+            }
+        }
+
+        function getNearestRoadConflict(points, chunk, extraClearance=0) {
+            if (!chunk || !Array.isArray(points) || points.length < 3)
+                return null;
+            const samples = getFootprintSamplePoints(points);
+            const center = getFootprintCenter(points);
+            let best = null;
+            iterateChunkRoadSegments(chunk, ((edge, start, end) => {
+                const required = Math.max(3.2, Number(edge && edge.width) || 8) / 2 + Math.max(0, Number(extraClearance) || 0);
+                for (const sample of samples) {
+                    const closest = closestPointOnSegment2D(sample, start, end);
+                    if (!closest)
+                        continue;
+                    const distance = Math.hypot(sample.x - closest.x, sample.z - closest.z);
+                    if (best && distance >= best.distance)
+                        continue;
+                    let pushX = center.x - closest.x;
+                    let pushZ = center.z - closest.z;
+                    let pushLength = Math.hypot(pushX, pushZ);
+                    if (pushLength < 1e-4) {
+                        pushX = -((Number(end.z) || 0) - (Number(start.z) || 0));
+                        pushZ = (Number(end.x) || 0) - (Number(start.x) || 0);
+                        pushLength = Math.hypot(pushX, pushZ) || 1;
+                    }
+                    best = {
+                        distance,
+                        required,
+                        penetration: required - distance,
+                        pushX: pushX / pushLength,
+                        pushZ: pushZ / pushLength
+                    };
+                }
+            }
+            ));
+            return best;
+        }
+
+        function getFootprintOverlap(points, chunk, excludeBuilding, padding=0) {
+            if (!chunk || !Array.isArray(points) || points.length < 3)
+                return null;
+            const center = getFootprintCenter(points);
+            const bounds = getFootprintBounds(points);
+            const expanded = {
+                minX: bounds.minX - padding,
+                maxX: bounds.maxX + padding,
+                minZ: bounds.minZ - padding,
+                maxZ: bounds.maxZ + padding
+            };
+            let count = 0;
+            let pushX = 0;
+            let pushZ = 0;
+            for (const building of toSafeArray(chunk.__tmOriginalBuildings || chunk.buildings)) {
+                if (!building || building === excludeBuilding || !Array.isArray(building.points) || building.points.length < 3)
+                    continue;
+                const otherPoints = building.points.map((point => ({
+                    x: Number(Array.isArray(point) ? point[0] : point.x) || 0,
+                    z: Number(Array.isArray(point) ? point[1] : point.z) || 0
+                })));
+                const otherBounds = getFootprintBounds(otherPoints);
+                const otherExpanded = {
+                    minX: otherBounds.minX - padding,
+                    maxX: otherBounds.maxX + padding,
+                    minZ: otherBounds.minZ - padding,
+                    maxZ: otherBounds.maxZ + padding
+                };
+                if (!boundsOverlap(expanded, otherExpanded))
+                    continue;
+                count += 1;
+                const otherCenter = getFootprintCenter(otherPoints);
+                const dx = center.x - otherCenter.x;
+                const dz = center.z - otherCenter.z;
+                const distance = Math.hypot(dx, dz) || 1;
+                pushX += dx / distance;
+                pushZ += dz / distance;
+            }
+            if (!count)
+                return null;
+            const pushLength = Math.hypot(pushX, pushZ) || 1;
+            return {
+                count,
+                pushX: pushX / pushLength,
+                pushZ: pushZ / pushLength
+            };
+        }
+
+        function evaluateFootprintPlacement(points, chunk, excludeBuilding, options={}) {
+            const roadConflict = getNearestRoadConflict(points, chunk, Number(options.roadClearance) || 0);
+            const overlap = getFootprintOverlap(points, chunk, excludeBuilding, Math.max(0, Number(options.overlapPadding) || 0));
+            let penalty = 0;
+            roadConflict && roadConflict.penetration > 0 && (penalty += 5e3 + 320 * roadConflict.penetration);
+            overlap && (penalty += 7e3 * overlap.count);
+            if (options.keepInsideChunk && chunk) {
+                const bounds = getFootprintBounds(points);
+                const halfWidth = (Number(chunk.width) || 512) / 2 - 4;
+                const halfHeight = (Number(chunk.height) || 512) / 2 - 4;
+                const outsideX = Math.max(0, bounds.maxX - halfWidth, -halfWidth - bounds.minX);
+                const outsideZ = Math.max(0, bounds.maxZ - halfHeight, -halfHeight - bounds.minZ);
+                penalty += 9e3 * (outsideX + outsideZ);
+            }
+            return {
+                penalty,
+                roadConflict,
+                overlap
+            };
+        }
+
+        function rotateVector2D(x, z, angleRad) {
+            const cos = Math.cos(angleRad);
+            const sin = Math.sin(angleRad);
+            return {
+                x: x * cos - z * sin,
+                z: x * sin + z * cos
+            };
+        }
+
+        function fitAddressHouseFootprint(points, chunk, excludeBuilding) {
+            if (!chunk || !Array.isArray(points) || points.length < 3)
+                return points;
+            const baseEval = evaluateFootprintPlacement(points, chunk, excludeBuilding, {
+                roadClearance: BUILDING_FIT_CONFIG.addressRoadClearance,
+                overlapPadding: BUILDING_FIT_CONFIG.addressOverlapPadding,
+                keepInsideChunk: !0
+            });
+            if (baseEval.penalty <= 0)
+                return points;
+            let bestPoints = points;
+            let bestScore = baseEval.penalty;
+            const directions = [];
+            baseEval.roadConflict && directions.push({
+                x: baseEval.roadConflict.pushX,
+                z: baseEval.roadConflict.pushZ
+            });
+            baseEval.overlap && directions.push({
+                x: baseEval.overlap.pushX,
+                z: baseEval.overlap.pushZ
+            });
+            if (!directions.length)
+                directions.push({
+                    x: 1,
+                    z: 0
+                });
+            const expanded = [];
+            for (const direction of directions) {
+                const length = Math.hypot(direction.x, direction.z) || 1;
+                const normalized = {
+                    x: direction.x / length,
+                    z: direction.z / length
+                };
+                expanded.push(normalized, rotateVector2D(normalized.x, normalized.z, Math.PI / 4), rotateVector2D(normalized.x, normalized.z, -Math.PI / 4));
+            }
+            expanded.push({
+                x: 1,
+                z: 0
+            }, {
+                x: -1,
+                z: 0
+            }, {
+                x: 0,
+                z: 1
+            }, {
+                x: 0,
+                z: -1
+            });
+            for (const direction of expanded) {
+                const length = Math.hypot(direction.x, direction.z) || 1;
+                const dir = {
+                    x: direction.x / length,
+                    z: direction.z / length
+                };
+                for (const distance of [4, 8, 12, 16, 20, 26]) {
+                    const candidate = moveFootprint(points, dir.x * distance, dir.z * distance);
+                    const evaluation = evaluateFootprintPlacement(candidate, chunk, excludeBuilding, {
+                        roadClearance: BUILDING_FIT_CONFIG.addressRoadClearance,
+                        overlapPadding: BUILDING_FIT_CONFIG.addressOverlapPadding,
+                        keepInsideChunk: !0
+                    });
+                    const score = evaluation.penalty + distance * 4;
+                    if (score >= bestScore)
+                        continue;
+                    bestScore = score;
+                    bestPoints = candidate;
+                    if (evaluation.penalty <= 0)
+                        return bestPoints;
+                }
+            }
+            return bestPoints;
+        }
+
+        function fitRegularBuildingFootprint(points, chunk, excludeBuilding) {
+            if (!chunk || !Array.isArray(points) || points.length < 3)
+                return points;
+            const center = getFootprintCenter(points);
+            const baseEval = evaluateFootprintPlacement(points, chunk, excludeBuilding, {
+                roadClearance: BUILDING_FIT_CONFIG.regularRoadClearance,
+                overlapPadding: BUILDING_FIT_CONFIG.regularOverlapPadding
+            });
+            if (baseEval.penalty <= 0)
+                return points;
+            let bestPoints = points;
+            let bestScore = baseEval.penalty;
+            for (const scale of [1, .97, .94, .91, .88, .85, .82, .79, BUILDING_FIT_CONFIG.minimumRegularScale]) {
+                const scaled = 1 === scale ? points : scaleFootprint(points, scale, center);
+                const evaluation = evaluateFootprintPlacement(scaled, chunk, excludeBuilding, {
+                    roadClearance: BUILDING_FIT_CONFIG.regularRoadClearance,
+                    overlapPadding: BUILDING_FIT_CONFIG.regularOverlapPadding
+                });
+                const score = evaluation.penalty + (1 - scale) * 1800;
+                if (score >= bestScore)
+                    continue;
+                bestScore = score;
+                bestPoints = scaled;
+                if (evaluation.penalty <= 0)
+                    return bestPoints;
+            }
+            return bestPoints;
+        }
+
+        function fitBuildingFootprintToEnvironment(points, match) {
+            const chunk = match && match.chunk;
+            const building = match && match.building;
+            if (!chunk || !building)
+                return points;
+            return building.__tmStandaloneAddressBuilding ? fitAddressHouseFootprint(points, chunk, building) : fitRegularBuildingFootprint(points, chunk, building);
+        }
+
+        function getFootprintTerrainExtents(points, baseY, spec) {
+            if (!globalState.THREE || !Array.isArray(points) || !points.length)
+                return {
+                    minY: Number(baseY) || 0,
+                    maxY: Number(baseY) || 0
+                };
+            const worldOffset = getCustomBuildingWorldOffset(spec);
+            let minY = Number(baseY) || 0;
+            let maxY = Number(baseY) || 0;
+            for (const sample of getFootprintSamplePoints(points)) {
+                const worldX = worldOffset.x + (Number(sample.x) || 0);
+                const worldZ = worldOffset.z + (Number(sample.z) || 0);
+                const terrainY = getTerrainYWorld(new globalState.THREE.Vector3(worldX, baseY, worldZ), baseY);
+                minY = Math.min(minY, terrainY);
+                maxY = Math.max(maxY, terrainY);
+            }
+            return {
+                minY,
+                maxY
+            };
+        }
+
+        function getRaisedCustomBuildingBaseY(points, baseY, spec) {
+            const terrain = getFootprintTerrainExtents(points, baseY, spec);
+            const clearance = Math.max(BUILDING_FIT_CONFIG.groundClearance, Number(spec && spec.base && spec.base.groundClearance) || 0);
+            return Math.max(Number(baseY) || 0, terrain.maxY + clearance);
+        }
+
         function createStandaloneAddressBuilding(entry, chunk, index) {
             const position = getAddressMatchPosition(entry);
             if (!position || !isWorldPositionInsideChunk(position, chunk, Number(entry && entry.match && entry.match.radius) || 45))
@@ -7559,6 +7966,27 @@
                     y = getTerrainYWorld(position, 0);
             } catch (terrainError) {}
             const half = getStandaloneBuildingHalfSize(entry);
+            const initialPoints = [{
+                x: localX - half.x,
+                z: localZ - half.z
+            }, {
+                x: localX + half.x,
+                z: localZ - half.z
+            }, {
+                x: localX + half.x,
+                z: localZ + half.z
+            }, {
+                x: localX - half.x,
+                z: localZ + half.z
+            }];
+            const points = fitAddressHouseFootprint(initialPoints, chunk, null);
+            const center = getFootprintCenter(points);
+            try {
+                if (chunk && "function" == typeof chunk.getTerrainYLoc) {
+                    const shiftedTerrainY = chunk.getTerrainYLoc(center.x, center.z);
+                    Number.isFinite(shiftedTerrainY) && shiftedTerrainY > -999 && (y = shiftedTerrainY);
+                }
+            } catch (shiftedTerrainError) {}
             const THREE = globalState.THREE;
             return {
                 __tmStandaloneAddressBuilding: !0,
@@ -7567,9 +7995,9 @@
                 type: 9,
                 y,
                 chunkCenter: new THREE.Vector3(cx,0,cz),
-                houseCenterLocal: new THREE.Vector3(localX,y,localZ),
-                houseCenter: new THREE.Vector3(position.x,y,position.z),
-                points: [[localX - half.x, localZ - half.z], [localX + half.x, localZ - half.z], [localX + half.x, localZ + half.z], [localX - half.x, localZ + half.z]]
+                houseCenterLocal: new THREE.Vector3(center.x,y,center.z),
+                houseCenter: new THREE.Vector3(cx + center.x,y,cz + center.z),
+                points: points.map((point => [point.x, point.z]))
             };
         }
 
@@ -7980,30 +8408,14 @@
         }
 
         function getFootprintMinTerrainY(points, baseY, spec) {
-            if (!globalState.THREE || !Array.isArray(points) || !points.length)
-                return Number(baseY) || 0;
-            const worldOffset = getCustomBuildingWorldOffset(spec);
-            let minY = Number(baseY) || 0;
-            for (let index = 0; index < points.length; index++) {
-                const current = points[index];
-                const next = points[(index + 1) % points.length];
-                for (const sample of [current, {
-                    x: (current.x + next.x) / 2,
-                    z: (current.z + next.z) / 2
-                }]) {
-                    const worldX = worldOffset.x + (Number(sample.x) || 0);
-                    const worldZ = worldOffset.z + (Number(sample.z) || 0);
-                    minY = Math.min(minY, getTerrainYWorld(new globalState.THREE.Vector3(worldX, baseY, worldZ), baseY));
-                }
-            }
-            return minY;
+            return getFootprintTerrainExtents(points, baseY, spec).minY;
         }
 
         function createCustomBuildingFoundation(points, baseY, foundationY, colorValue, spec) {
             const height = Math.max(0, Number(baseY) - Number(foundationY));
-            if (height < .35)
+            if (height < BUILDING_FIT_CONFIG.foundationMinHeight)
                 return null;
-            return createCustomBuildingBody(points, foundationY, height, shadeDetailColor(null != colorValue ? colorValue : 14540253, -.16), deepMergeConfig(spec || {}, {
+            return createCustomBuildingBody(points, foundationY, height, null != colorValue ? colorValue : 14540253, deepMergeConfig(spec || {}, {
                 windows: {
                     enabled: !1,
                     cutHoles: !1
@@ -8329,13 +8741,18 @@
                     roughness: .08,
                     metalness: .05
                 });
-                const frameDepth = Math.max(.035, Number(sideSpec.frameDepth) || .08);
+                const wallDepth = Math.max(.05, Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .12);
+                const frameDepth = clamp(Number(sideSpec.frameDepth) || Math.max(.04, wallDepth * .72), .03, Math.max(.05, wallDepth * .92));
+                const frameNormalOffset = Math.max(.01, Math.min(.035, wallDepth * .18));
+                const glassNormalOffset = Math.max(.005, Math.min(.02, wallDepth * .08));
                 for (const rect of layout.rects) {
                     if (!isWindowRectClearOfTerrain(rect, frame, baseY, spec))
                         continue;
                     const width = rect.width;
                     const height = rect.height;
                     const frameThickness = null != sideSpec.frameThickness ? Math.max(.04, Number(sideSpec.frameThickness) || .04) : Math.max(.04, Math.min(width, height) * .09);
+                    if (width <= frameThickness * 2 + .08 || height <= frameThickness * 2 + .08)
+                        continue;
                     const along = rect.centerU - edgeLength / 2;
                     const basePointX = midX + dx * along;
                     const basePointZ = midZ + dz * along;
@@ -8346,11 +8763,11 @@
                         mesh.rotation.y = frame.rotationY;
                         group.add(mesh);
                     };
-                    addWindowPart([width, frameThickness, frameDepth], 0, height / 2 - frameThickness / 2, frameMaterial, .055);
-                    addWindowPart([width, frameThickness, frameDepth], 0, -height / 2 + frameThickness / 2, frameMaterial, .055);
-                    addWindowPart([frameThickness, Math.max(.08, height - 2 * frameThickness), frameDepth], -width / 2 + frameThickness / 2, 0, frameMaterial, .055);
-                    addWindowPart([frameThickness, Math.max(.08, height - 2 * frameThickness), frameDepth], width / 2 - frameThickness / 2, 0, frameMaterial, .055);
-                    addWindowPart([Math.max(.1, width - 2 * frameThickness), Math.max(.1, height - 2 * frameThickness), Math.max(.03, frameDepth * .45)], 0, 0, glassMaterial, .09);
+                    addWindowPart([width, frameThickness, frameDepth], 0, height / 2 - frameThickness / 2, frameMaterial, frameNormalOffset);
+                    addWindowPart([width, frameThickness, frameDepth], 0, -height / 2 + frameThickness / 2, frameMaterial, frameNormalOffset);
+                    addWindowPart([frameThickness, Math.max(.08, height - 2 * frameThickness), frameDepth], -width / 2 + frameThickness / 2, 0, frameMaterial, frameNormalOffset);
+                    addWindowPart([frameThickness, Math.max(.08, height - 2 * frameThickness), frameDepth], width / 2 - frameThickness / 2, 0, frameMaterial, frameNormalOffset);
+                    addWindowPart([Math.max(.1, width - 2 * frameThickness), Math.max(.1, height - 2 * frameThickness), Math.max(.03, Math.min(frameDepth * .45, wallDepth * .4))], 0, 0, glassMaterial, glassNormalOffset);
                 }
             }
         }
@@ -8979,6 +9396,10 @@
             return thickness <= .25 && width >= .65 && width <= 4.2 && size[1] >= 1.55 && size[1] <= 4.25 && bottom >= -.18 && bottom <= .48;
         }
 
+        function specHasDoorPart(spec) {
+            return toSafeArray(spec && spec.parts).some((part => isDoorDetail(part)));
+        }
+
         function createDoorDetailObject(detail, anchorPoint) {
             if (!globalState.THREE || !detail)
                 return null;
@@ -9060,6 +9481,36 @@
             };
             group.userData.tmDynamicDoor = !0;
             return group;
+        }
+
+        function createFallbackDoorForFootprint(points, baseY, bodyHeight, spec, anchorPoint) {
+            if (!Array.isArray(points) || points.length < 3 || !anchorPoint || bodyHeight < 2.15)
+                return null;
+            const center = getFootprintCenter(points);
+            let bestFrame = null;
+            for (let index = 0; index < points.length; index++) {
+                const frame = getWallEdgeFrame(points[index], points[(index + 1) % points.length], center);
+                if (!frame || frame.length < 1.4)
+                    continue;
+                if (!bestFrame || frame.length > bestFrame.length)
+                    bestFrame = frame;
+            }
+            if (!bestFrame)
+                return null;
+            const wallDepth = Math.max(.06, Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .12);
+            const detail = {
+                type: "door",
+                size: [1.08, Math.min(2.25, Math.max(1.95, bodyHeight - .35)), Math.max(.06, wallDepth * .78)],
+                position: [bestFrame.midX - (Number(anchorPoint.x) || 0) + bestFrame.normalX * Math.max(.015, wallDepth * .05), Math.max(1.05, Math.min(1.22, bodyHeight * .28)), bestFrame.midZ - (Number(anchorPoint.z) || 0) + bestFrame.normalZ * Math.max(.015, wallDepth * .05)],
+                rotation: [0, bestFrame.rotationY, 0],
+                rotationUnit: "rad",
+                color: 0x6f4327,
+                frameColor: 0xe9dbc4,
+                materialKind: "wood",
+                hingeSide: "left",
+                openAngle: 88
+            };
+            return createDoorDetailObject(detail, anchorPoint);
         }
 
         function createFurnitureDetailObject(detail, anchorPoint) {
@@ -9256,9 +9707,11 @@
             };
             const group = new globalState.THREE.Group;
             group.name = `tmCustomBuilding:${match.id}`;
-            const points = getBuildingFootprint(match.building, spec);
-            const baseY = Number(spec.base && spec.base.y) || Number(match.building.y) || 0;
+            const rawPoints = getBuildingFootprint(match.building, spec);
+            const points = fitBuildingFootprintToEnvironment(rawPoints, match);
+            const originalBaseY = Number(spec.base && spec.base.y) || Number(match.building.y) || 0;
             const bodyHeight = Math.max(1.4, Number(spec.base && spec.base.height) || Math.max(1, Number(spec.base && spec.base.floors) || 2) * Math.max(2.4, Number(spec.base && spec.base.floorHeight) || 3));
+            const baseY = getRaisedCustomBuildingBaseY(points, originalBaseY, spec);
             const baseEnabled = !(spec.base && !1 === spec.base.enabled);
             if (baseEnabled) {
                 const foundation = createCustomBuildingFoundation(points, baseY, getFootprintMinTerrainY(points, baseY, spec), spec.base && spec.base.color, spec);
@@ -9281,6 +9734,10 @@
             for (const part of toSafeArray(spec.parts)) {
                 const detailMesh = createPrimitiveDetailMesh(part, anchorPoint);
                 detailMesh && group.add(detailMesh);
+            }
+            if (!specHasDoorPart(spec)) {
+                const fallbackDoor = createFallbackDoorForFootprint(points, baseY, bodyHeight, spec, anchorPoint);
+                fallbackDoor && group.add(fallbackDoor);
             }
             return group;
         }
@@ -9313,7 +9770,8 @@
                 matched.push({
                     id,
                     entry,
-                    building
+                    building,
+                    chunk
                 });
                 options.standalone || suppressions.push({
                     id,
@@ -9536,6 +9994,7 @@
             townSignsState.chunkManager = game.chunkManager || townSignsState.chunkManager;
             patchMissionManagerRuntime(game.missionManager);
             ensureFeatureMenu(game);
+            ensureStartingMoney(game);
             ensureVehicleTuningHotkey();
             ensureRuntimeInputHandlers();
             if (!game.__tmRuntimeInitialized) {
