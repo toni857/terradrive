@@ -1,6 +1,36 @@
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js";
 import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/controls/OrbitControls.js";
 
+/*
+ * TM Building Modeler
+ * This file is intentionally UI-heavy: it owns the DOM panels, the Three.js preview,
+ * the editing tools, and the final buildings.js export format.
+ */
+const MODEL_DEBUG_PREFIX = "[TM Building Modeler]";
+const MODEL_VERBOSE_LOGS = true;
+
+function modelLog(...args) {
+    MODEL_VERBOSE_LOGS && console.log(MODEL_DEBUG_PREFIX, ...args);
+}
+
+function modelWarn(...args) {
+    console.warn(MODEL_DEBUG_PREFIX, ...args);
+}
+
+function modelError(...args) {
+    console.error(MODEL_DEBUG_PREFIX, ...args);
+}
+
+// Catch browser/runtime errors early so modeler problems show up next to the startup health table.
+window.addEventListener("error", event => {
+    modelError("Window error", event.message, event.error || event);
+});
+
+window.addEventListener("unhandledrejection", event => {
+    modelError("Unhandled promise rejection", event.reason || event);
+});
+
+// DOM handles: every tool below reads from these nodes instead of repeatedly querying the document.
 const viewport = document.getElementById("viewport");
 const elementList = document.getElementById("elementList");
 const palette = document.getElementById("palette");
@@ -18,6 +48,7 @@ const codeOutput = document.getElementById("codeOutput");
 const tabButtons = Array.from(document.querySelectorAll(".tab-button"));
 const tabPanels = Array.from(document.querySelectorAll(".tab-panel"));
 
+// Three.js scene setup: preview-only, separate from the in-game Terradrive renderer.
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x101316);
 
@@ -293,8 +324,162 @@ const modelSettings = {
     windowsEnabled: false
 };
 
+// Diagnostic map: printed at startup so a broken editor shows which editor functions are still available.
+function getModelerFunctionMap() {
+    return {
+        setStatus,
+        clamp,
+        roundNumber,
+        normalizeDegrees,
+        degToRad,
+        colorToNumber,
+        hexLiteral,
+        cloneData,
+        validIdentifier,
+        serializeJs,
+        defaultPatternForMaterial,
+        defaultMaterialKind,
+        createMirrorGroupId,
+        createId,
+        createDefaultElement,
+        getElement,
+        getSelectedElement,
+        getSourceElement,
+        materialPreset,
+        colorShade,
+        createMaterial,
+        createBox,
+        createCylinderWallGeometry,
+        createFillCylinderGeometry,
+        createTriangleWallGeometry,
+        createTriangleFillGeometry,
+        createWedgeFillGeometry,
+        createRidgeGeometry,
+        createFrustumRoofGeometry,
+        createShedGeometry,
+        createRoundRoofGeometry,
+        createPyramidGeometry,
+        addBoxPattern,
+        markElementObject,
+        createPatternBoxGroup,
+        createWindowObject,
+        createDoorObject,
+        createFurnitureObject,
+        createElementObject,
+        rebuildMeshes,
+        updateSelectionBox,
+        getListableElements,
+        renderElementList,
+        fieldHtml,
+        selectHtml,
+        checkboxHtml,
+        getDimensionLabels,
+        syncAllMirrors,
+        syncAllLinkedElements,
+        applyAllSync,
+        commitScene,
+        renderInspector,
+        selectElement,
+        setActiveTab,
+        renderPalette,
+        getMirrorVariants,
+        mirrorHingeSide,
+        mirrorSlopeDirection,
+        applyMirrorVariant,
+        createBundle,
+        addBundleWithMirrors,
+        duplicateSelected,
+        deleteSelected,
+        getElementExtent,
+        getFootprint,
+        rangesOverlap,
+        snapPosition,
+        pointerToGround,
+        getElementIdFromObject,
+        getRaycastHit,
+        syncInspectorInputs,
+        beginDrag,
+        updateDrag,
+        endDrag,
+        composeMatrixForElement,
+        getLocalBoxCorners,
+        getCutterBoundsInHostLocal,
+        cloneExportStyle,
+        createPieceFromLocal,
+        createBakedMirrors,
+        cutOpening,
+        runCutTool,
+        edgeLength,
+        midpointDistance2D,
+        getElementWorldBounds,
+        findClosestEdgePair,
+        copyVisualSettings,
+        runFillTool,
+        getFootprintPoints,
+        distancePointToSegment2D,
+        getEdgesForElement,
+        pickNearestEdge,
+        toggleEdgeSnapMode,
+        handleEdgeSnapHit,
+        handleToolHit,
+        onViewportPointerDown,
+        exportCommonPart,
+        partForExport,
+        buildMatchConfig,
+        exportEntry,
+        formatCode,
+        refreshCode,
+        copyCode,
+        renderSettings,
+        resize,
+        animate,
+        setActiveTool
+    };
+}
+
+function getModelerHealthRows() {
+    const domRows = [
+        ["DOM viewport", !!viewport],
+        ["DOM elementList", !!elementList],
+        ["DOM palette", !!palette],
+        ["DOM inspector", !!inspector],
+        ["DOM settingsPanel", !!settingsPanel],
+        ["DOM codeOutput", !!codeOutput],
+        ["Three scene", !!scene],
+        ["Three camera", !!camera],
+        ["Three renderer", !!renderer],
+        ["Orbit controls", !!controls]
+    ].map(([name, ok]) => ({
+        typ: "system",
+        name,
+        funktioniert: !!ok
+    }));
+    const functionRows = Object.entries(getModelerFunctionMap()).map(([name, fn]) => ({
+        typ: "function",
+        name,
+        funktioniert: typeof fn === "function"
+    }));
+    return domRows.concat(functionRows);
+}
+
+function printModelerHealthTable(reason = "manual") {
+    const rows = getModelerHealthRows();
+    console.groupCollapsed(`${MODEL_DEBUG_PREFIX} Funktionsstatus (${reason})`);
+    console.table(rows);
+    console.groupEnd();
+    return rows;
+}
+
+window.__tmBuildingModelerDebug = {
+    printHealthTable: printModelerHealthTable,
+    getHealthRows: getModelerHealthRows,
+    getElements: () => elements,
+    getSettings: () => modelSettings
+};
+
 function setStatus(text) {
     statusText.textContent = text;
+    modelLog("Status", text);
 }
 
 function clamp(value, min, max) {
@@ -1360,6 +1545,9 @@ function createElementObject(element) {
 }
 
 function rebuildMeshes() {
+    modelLog("Rebuild meshes start", {
+        elementCount: elements.length
+    });
     for (const child of [...elementGroup.children]) {
         child.traverse(current => {
             current.geometry && current.geometry.dispose();
@@ -1377,6 +1565,9 @@ function rebuildMeshes() {
         elementGroup.add(mesh);
     }
     updateSelectionBox();
+    modelLog("Rebuild meshes done", {
+        meshCount: meshById.size
+    });
 }
 
 function updateSelectionBox() {
@@ -1474,6 +1665,11 @@ function applyAllSync() {
 }
 
 function commitScene(reason = "Aktualisiert") {
+    modelLog("Commit scene", {
+        reason,
+        elementCount: elements.length,
+        selectedId
+    });
     applyAllSync();
     rebuildMeshes();
     renderElementList();
@@ -1616,6 +1812,10 @@ function renderInspector() {
 function selectElement(id) {
     const resolved = getSourceElement(getElement(id));
     selectedId = resolved ? resolved.id : null;
+    modelLog("Select element", {
+        requested: id,
+        selectedId
+    });
     renderElementList();
     renderInspector();
     updateSelectionBox();
@@ -1725,6 +1925,11 @@ function createBundle(type, position) {
 }
 
 function addBundleWithMirrors(type, position) {
+    modelLog("Add bundle", {
+        type,
+        position,
+        mirrorMode: mirrorModeSelect.value || "off"
+    });
     const sources = createBundle(type, position);
     const mode = mirrorModeSelect.value || "off";
     const created = [...sources];
@@ -1759,6 +1964,7 @@ function duplicateSelected() {
     const selected = getSourceElement(getSelectedElement());
     if (!selected)
         return;
+    modelLog("Duplicate selected", selected.id);
     const related = [selected];
     if (selected.type === "stove")
         for (const element of elements)
@@ -1791,6 +1997,7 @@ function deleteSelected() {
     const selected = getSourceElement(getSelectedElement());
     if (!selected)
         return;
+    modelLog("Delete selected", selected.id);
     const removeIds = new Set([selected.id]);
     if (selected.mirrorGroupId)
         for (const element of elements)
@@ -2160,6 +2367,10 @@ function runCutTool(host, cutter) {
     const sourceHost = getSourceElement(host);
     if (!sourceHost || !cutter)
         return;
+    modelLog("Cut tool start", {
+        host: sourceHost.id,
+        cutter: cutter.id
+    });
     const pieces = cutOpening(sourceHost, cutter);
     if (!pieces.length) {
         setStatus("Kein gueltiger Ausschnitt moeglich");
@@ -2174,6 +2385,10 @@ function runCutTool(host, cutter) {
     elements.push(...pieces, ...bakedMirrors);
     selectedId = pieces[0] ? pieces[0].id : null;
     toolSelection = [];
+    modelLog("Cut tool done", {
+        createdPieces: pieces.length,
+        bakedMirrors: bakedMirrors.length
+    });
     commitScene("Ausschnitt erstellt");
 }
 
@@ -2240,6 +2455,10 @@ function runFillTool(first, second) {
         setStatus("Fuellen braucht zwei verschiedene Objekte");
         return;
     }
+    modelLog("Fill tool start", {
+        first: a.id,
+        second: b.id
+    });
     const pair = findClosestEdgePair(a, b);
     if (!pair) {
         setStatus("Keine passenden Kanten zum Fuellen gefunden");
@@ -2272,6 +2491,11 @@ function runFillTool(first, second) {
     elements.push(fill);
     selectedId = fill.id;
     toolSelection = [];
+    modelLog("Fill tool done", {
+        fillId: fill.id,
+        height,
+        thickness
+    });
     commitScene("Dreiecksluecke gefuellt");
 }
 
@@ -2593,12 +2817,18 @@ function refreshCode() {
 }
 
 async function copyCode() {
+    modelLog("Copy/export code start", {
+        exportMode: modelSettings.exportMode,
+        elementCount: elements.length
+    });
     refreshCode();
     codeOutput.select();
     try {
         await navigator.clipboard.writeText(codeOutput.value);
         setStatus("Code konvertiert und kopiert");
+        modelLog("Copy/export code copied via Clipboard API");
     } catch (error) {
+        modelWarn("Clipboard API failed, fallback to execCommand", error);
         document.execCommand("copy");
         setStatus("Code konvertiert und markiert");
     }
@@ -2684,6 +2914,10 @@ function animate() {
 
 function setActiveTool(name) {
     activeTool = activeTool === name ? "" : name;
+    modelLog("Active tool changed", {
+        requested: name,
+        activeTool
+    });
     edgeSnapMode = false;
     edgeSnapSelection = null;
     toolSelection = [];
@@ -2769,8 +3003,9 @@ window.addEventListener("keyup", event => {
     }
 });
 
+// Boot sequence: build the side panels, seed a tiny default house, then print the health table once.
 window.addEventListener("resize", resize);
-
+modelLog("Startup begin");
 renderPalette();
 renderSettings();
 addBundleWithMirrors("wall", {
@@ -2799,4 +3034,8 @@ addBundleWithMirrors("pyramidRoof", {
 selectElement(getListableElements()[0] ? getListableElements()[0].id : null);
 resize();
 refreshCode();
+printModelerHealthTable("startup");
+modelLog("Startup complete", {
+    elementCount: elements.length
+});
 animate();

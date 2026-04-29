@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.1.6.7
+// @version      2.1.6.9
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -199,7 +199,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.1.6.7",
+            version: "2.1.6.9",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -226,11 +226,11 @@
         const BUILDING_FIT_CONFIG = {
             foundationMinHeight: .32,
             groundClearance: .42,
-            regularRoadClearance: 4.2,
-            addressRoadClearance: 10,
-            regularOverlapPadding: 1.4,
-            addressOverlapPadding: 4,
-            minimumRegularScale: .48
+            regularRoadClearance: 7,
+            addressRoadClearance: 16,
+            regularOverlapPadding: 1.8,
+            addressOverlapPadding: 5,
+            minimumRegularScale: .4
         };
         const townSignsState = globalState.townSigns || (globalState.townSigns = {
             roadModule: null,
@@ -288,6 +288,7 @@
             value: "tmRingRoadRun",
             label: "Ring Road Run"
         }];
+        // User-facing feature switches. Only these entries belong in the ESC/start feature menu.
         const FEATURE_MENU_ITEMS = [{
             feature: "buildingTextures",
             label: "Building textures"
@@ -355,6 +356,7 @@
             feature: "shops",
             label: "Shops + Navi POIs"
         }];
+        // Dependency rules: if a base feature fails or is switched off, dependent features are disabled too.
         const FEATURE_DEPENDENCIES = {
             hardStart: ["survival", "police", "vehicleDamage"],
             bees: ["shops"]
@@ -378,6 +380,7 @@
             type: "town",
             label: "Ort"
         }];
+        // Runtime state is kept on globalThis so Tampermonkey reloads do not lose panels, caches, or debug data.
         const runtimeState = globalState.runtime || (globalState.runtime = {
             game: null,
             terrainModule: null,
@@ -453,6 +456,7 @@
             maxSpeedKmh: 999,
             accelerationPerSecond: 50
         });
+        // Persistent feature state. Cookie loading below overwrites these defaults when the user changed settings.
         const featureState = globalThis.__tmFeatureState || (globalThis.__tmFeatureState = {
             survival: !1,
             police: !1,
@@ -694,6 +698,52 @@
             console.error(PREFIX, ...args);
         }
 
+        // Central health output: one compact console.table is much easier to read than hundreds of scattered startup logs.
+        function getFeatureDiagnosticRows() {
+            return FEATURE_MENU_ITEMS.map(item => {
+                const fault = getFeatureFault(item.feature);
+                const moduleFault = getInternalModuleFaultForFeature(item.feature);
+                const dependencies = toSafeArray(FEATURE_DEPENDENCIES[item.feature]);
+                const missingDependencies = dependencies.filter(dependency => !featureState[dependency]);
+                const active = !!featureState[item.feature];
+                const ok = active && !fault && !moduleFault && !missingDependencies.length;
+                return {
+                    typ: "feature",
+                    name: item.feature,
+                    label: item.label,
+                    aktiv: active,
+                    funktioniert: ok,
+                    abhaengigkeiten: dependencies.join(", ") || "-",
+                    fehler: fault && fault.message || moduleFault && moduleFault.message || missingDependencies.length && `Dependency aus: ${missingDependencies.join(", ")}` || ""
+                };
+            });
+        }
+
+        function getInternalDiagnosticRows() {
+            return Object.entries(INTERNAL_MODULES).map(([name, meta]) => {
+                const fault = getInternalModuleFault(name);
+                const featureActive = meta.feature ? !!featureState[meta.feature] : !0;
+                const enabled = isInternalModuleEnabled(name);
+                return {
+                    typ: "internal",
+                    name,
+                    label: meta.label,
+                    aktiv: enabled && featureActive,
+                    funktioniert: enabled && featureActive && !fault,
+                    abhaengigkeiten: meta.feature || "-",
+                    fehler: fault && fault.message || ""
+                };
+            });
+        }
+
+        function printFunctionHealthTable(reason="manual") {
+            const rows = getFeatureDiagnosticRows().concat(getInternalDiagnosticRows());
+            console.groupCollapsed(`${PREFIX} Funktionsstatus (${reason})`);
+            console.table(rows);
+            console.groupEnd();
+            return rows;
+        }
+
         function getInternalModuleMeta(name) {
             return INTERNAL_MODULES[name] || {
                 label: name,
@@ -742,6 +792,7 @@
                 at: Date.now()
             };
             warn(`Teilfunktion automatisch deaktiviert: ${meta.label}${context ? ` (${context})` : ""}:`, failure);
+            printFunctionHealthTable(`module_fault:${name}`);
             notifyRuntime(`${meta.label} wurde wegen einem Fehler deaktiviert.`, "error");
             syncFeatureMenu();
         }
@@ -750,6 +801,7 @@
             if (!isInternalModuleEnabled(name))
                 return fallback;
             try {
+                globalThis.__tmCollisionHookVerbose && console.log(PREFIX, "Internal module start", name, context || "");
                 return callback();
             } catch (moduleError) {
                 markInternalModuleFault(name, moduleError, context);
@@ -761,6 +813,7 @@
             if (featureName && !featureState[featureName])
                 return fallback;
             try {
+                globalThis.__tmCollisionHookVerbose && console.log(PREFIX, "Feature module start", featureName || "(internal)", context || "");
                 return callback();
             } catch (featureError) {
                 featureName ? markFeatureFault(featureName, featureError, context) : error(`${context || "Feature step"} fehlgeschlagen:`, featureError);
@@ -4767,6 +4820,7 @@
             saveFeatureFaultStateToCookies();
             wasActive && applyFeatureSideEffects(name);
             warn(`Feature automatisch deaktiviert: ${name}${context ? ` (${context})` : ""}:`, failure);
+            printFunctionHealthTable(`feature_fault:${name}`);
             notifyRuntime(`${name} wurde wegen einem Fehler deaktiviert.`, "error");
             syncFeatureMenu();
         }
@@ -6672,9 +6726,11 @@
                 return;
             const doorDt = Math.min(.12, runtimeState.customBuildingDoorAccumulator);
             runtimeState.customBuildingDoorAccumulator = 0;
-            const playerPos = getPlayerPosition();
-            if (!playerPos || !globalState.THREE)
+            if (!globalState.THREE)
                 return;
+            const manager = getControlManager();
+            const playerIsOnFoot = !!(manager && !manager.inCar);
+            const playerPos = playerIsOnFoot ? getControlPosition() : null;
             const worldPosition = new globalState.THREE.Vector3;
             for (let index = runtimeState.customBuildingDoorItems.length - 1; index >= 0; index--) {
                 const item = runtimeState.customBuildingDoorItems[index];
@@ -6685,7 +6741,7 @@
                     continue;
                 }
                 group.getWorldPosition(worldPosition);
-                const target = getDistance2D(playerPos, worldPosition) <= state.radius ? 1 : 0;
+                const target = playerPos && getDistance2D(playerPos, worldPosition) <= state.radius ? 1 : 0;
                 const delta = doorDt * state.speed;
                 state.current += (target - state.current) * Math.min(1, delta);
                 const eased = state.current * state.current * (3 - 2 * state.current);
@@ -6959,6 +7015,7 @@
         }
 
         async function createEnhancedWaterMesh(waterData, material, chunk, fallback, context) {
+            // Replaces the original high water-wall mesh with a flatter surface and building cutouts.
             if (!globalState.THREE || !Array.isArray(waterData))
                 return "function" == typeof fallback ? fallback.call(context, waterData, material, chunk) : null;
             const THREE = globalState.THREE;
@@ -8186,7 +8243,7 @@
                     x: direction.x / length,
                     z: direction.z / length
                 };
-                for (const distance of [4, 8, 12, 16, 20, 26]) {
+                for (const distance of [6, 12, 18, 24, 32, 40, 50]) {
                     const candidate = moveFootprint(points, dir.x * distance, dir.z * distance);
                     const evaluation = evaluateFootprintPlacement(candidate, chunk, excludeBuilding, {
                         roadClearance: BUILDING_FIT_CONFIG.addressRoadClearance,
@@ -8217,7 +8274,7 @@
                 return points;
             let bestPoints = points;
             let bestScore = baseEval.penalty;
-            for (const scale of [1, .97, .94, .91, .88, .85, .82, .79, .73, .67, .6, .54, BUILDING_FIT_CONFIG.minimumRegularScale]) {
+            for (const scale of [1, .97, .94, .91, .88, .85, .82, .79, .73, .67, .6, .54, .48, .44, BUILDING_FIT_CONFIG.minimumRegularScale]) {
                 const scaled = 1 === scale ? points : scaleFootprint(points, scale, center);
                 const evaluation = evaluateFootprintPlacement(scaled, chunk, excludeBuilding, {
                     roadClearance: BUILDING_FIT_CONFIG.regularRoadClearance,
@@ -8445,17 +8502,7 @@
                 hingeSide: seed % 2 ? "right" : "left",
                 openAngle: 0,
                 isOpen: !1,
-                staticDoor: !0
             }];
-            if (shopLike)
-                parts.push({
-                    type: "panel",
-                    size: [5.5, .85, .08],
-                    position: [0, 3.05, -4.1],
-                    rotation: [0, 0, 0],
-                    color: 0x2a8f55,
-                    materialKind: "metal"
-                });
             if (highRise)
                 parts.push({
                     type: "box",
@@ -8513,7 +8560,7 @@
                     frameColor: style.frame,
                     glassColor: style.glass,
                     opacity: .55,
-                    cutHoles: !1
+                    cutHoles: !0
                 },
                 parts
             };
@@ -8536,7 +8583,7 @@
             return deepMergeConfig(resolved, {
                 __tmAuto3d: !0,
                 windows: {
-                    cutHoles: !1
+                    cutHoles: !0
                 }
             });
         }
@@ -8741,6 +8788,186 @@
             return !0;
         }
 
+        // Door/window placement pipeline:
+        // 1. Snap custom details to the closest real wall edge.
+        // 2. Store the same rectangles for wall cutouts and layout-window avoidance.
+        // 3. Render the visible door/window meshes at that snapped position.
+        function rectsOverlap2D(a, b, padding=0) {
+            if (!a || !b)
+                return !1;
+            return a.x1 < b.x2 + padding && a.x2 > b.x1 - padding && a.y1 < b.y2 + padding && a.y2 > b.y1 - padding;
+        }
+
+        function getWallOpenings(spec, kind, edgeIndex) {
+            const store = spec && spec.__tmWallOpenings || {};
+            return toSafeArray(store[kind]).filter(opening => opening && opening.edgeIndex === edgeIndex);
+        }
+
+        function isRectClearOfWallOpenings(rect, openings, padding=.08) {
+            return !toSafeArray(openings).some(opening => rectsOverlap2D(rect, opening.rect || opening, padding));
+        }
+
+        function getWallFrames(points) {
+            if (!Array.isArray(points) || points.length < 3)
+                return [];
+            const center = getFootprintCenter(points);
+            const frames = [];
+            for (let index = 0; index < points.length; index++) {
+                const start = points[index];
+                const end = points[(index + 1) % points.length];
+                const frame = getWallEdgeFrame(start, end, center);
+                frame && frames.push(Object.assign({
+                    index,
+                    start,
+                    end
+                }, frame));
+            }
+            return frames;
+        }
+
+        function projectPointToWallFrame(point, frame) {
+            const dx = (Number(frame.end.x) || 0) - (Number(frame.start.x) || 0);
+            const dz = (Number(frame.end.z) || 0) - (Number(frame.start.z) || 0);
+            const lengthSq = dx * dx + dz * dz || 1;
+            return clamp((((Number(point.x) || 0) - (Number(frame.start.x) || 0)) * dx + ((Number(point.z) || 0) - (Number(frame.start.z) || 0)) * dz) / lengthSq, 0, 1);
+        }
+
+        function findWallFrameForDetail(points, desiredPoint, detail) {
+            const frames = getWallFrames(points);
+            if (!frames.length)
+                return null;
+            const requestedIndex = Number(detail && (detail.wallIndex ?? detail.edgeIndex ?? detail.sideIndex));
+            if (Number.isInteger(requestedIndex)) {
+                const requested = frames.find(frame => frame.index === requestedIndex);
+                if (requested)
+                    return requested;
+            }
+            let best = null;
+            for (const frame of frames) {
+                const t = projectPointToWallFrame(desiredPoint, frame);
+                const closest = {
+                    x: (Number(frame.start.x) || 0) + ((Number(frame.end.x) || 0) - (Number(frame.start.x) || 0)) * t,
+                    z: (Number(frame.start.z) || 0) + ((Number(frame.end.z) || 0) - (Number(frame.start.z) || 0)) * t
+                };
+                const distance = Math.hypot((Number(desiredPoint.x) || 0) - closest.x, (Number(desiredPoint.z) || 0) - closest.z);
+                if (!best || distance < best.distance)
+                    best = {
+                        frame,
+                        distance
+                    };
+            }
+            return best && best.frame;
+        }
+
+        function computeWallDetailPlacement(points, baseY, bodyHeight, spec, anchorPoint, detail, size, kind) {
+            // Most exported parts are relative to the house center; this converts them to an actual wall-local opening.
+            if (!Array.isArray(points) || points.length < 3 || !anchorPoint || detail && detail.absolute)
+                return null;
+            const position = detail && detail.position || [0, 0, 0];
+            const anchorX = Number(anchorPoint.x) || 0;
+            const anchorZ = Number(anchorPoint.z) || 0;
+            const desired = {
+                x: anchorX + (Number(position[0]) || 0),
+                z: anchorZ + (Number(position[2]) || 0)
+            };
+            const frame = findWallFrameForDetail(points, desired, detail);
+            if (!frame)
+                return null;
+            const width = Math.max(.2, Number(size && size[0]) || 1);
+            const height = Math.max(.2, Number(size && size[1]) || 1);
+            const wallDepth = Math.max(.05, Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .12);
+            const margin = Math.min(frame.length / 2, width / 2 + .18);
+            const projected = projectPointToWallFrame(desired, frame);
+            const centerU = clamp(projected * frame.length, margin, Math.max(margin, frame.length - margin));
+            const localX = (Number(frame.start.x) || 0) + frame.alongX * centerU + frame.normalX * Math.max(.025, wallDepth * .55);
+            const localZ = (Number(frame.start.z) || 0) + frame.alongZ * centerU + frame.normalZ * Math.max(.025, wallDepth * .55);
+            const rawCenterY = (Number(anchorPoint.y) || 0) + (Number(position[1]) || 0);
+            const grounded = "door" === kind;
+            const minCenterY = baseY + height / 2 + .015;
+            const maxCenterY = baseY + Math.max(height / 2 + .02, bodyHeight - height / 2 - .08);
+            const centerY = grounded ? minCenterY : clamp(rawCenterY || baseY + 1.25 + height / 2, minCenterY + .45, maxCenterY);
+            const y1 = grounded ? .025 : Math.max(.025, centerY - baseY - height / 2 - .05);
+            const y2 = Math.min(bodyHeight - .025, centerY - baseY + height / 2 + .05);
+            return {
+                edgeIndex: frame.index,
+                position: [localX, centerY, localZ],
+                rotationY: frame.rotationY,
+                rect: {
+                    x1: Math.max(.025, centerU - width / 2 - .08),
+                    x2: Math.min(frame.length - .025, centerU + width / 2 + .08),
+                    y1,
+                    y2
+                }
+            };
+        }
+
+        function createFallbackDoorDetailForFootprint(points, baseY, bodyHeight, spec, anchorPoint) {
+            if (!Array.isArray(points) || points.length < 3 || !anchorPoint || bodyHeight < 2.05)
+                return null;
+            const frames = getWallFrames(points).filter(frame => frame.length >= 1.4);
+            const bestFrame = frames.sort((a, b) => b.length - a.length)[0];
+            if (!bestFrame)
+                return null;
+            const wallDepth = Math.max(.06, Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .12);
+            return {
+                type: "door",
+                wallIndex: bestFrame.index,
+                size: [1.08, Math.min(2.25, Math.max(1.95, bodyHeight - .35)), Math.max(.06, wallDepth * .78)],
+                position: [bestFrame.midX - (Number(anchorPoint.x) || 0), 1.1, bestFrame.midZ - (Number(anchorPoint.z) || 0)],
+                rotation: [0, bestFrame.rotationY, 0],
+                rotationUnit: "rad",
+                color: 0x6f4327,
+                frameColor: 0xe9dbc4,
+                materialKind: "wood",
+                hingeSide: "left",
+                openAngle: 88
+            };
+        }
+
+        function prepareWallOpeningsForSpec(points, baseY, bodyHeight, spec, anchorPoint) {
+            // This is the shared source of truth for wall holes and visible door/window meshes.
+            if (!spec || !Array.isArray(points) || points.length < 3)
+                return;
+            const openings = {
+                doors: [],
+                windows: []
+            };
+            let hasDoor = !1;
+            for (const part of toSafeArray(spec.parts)) {
+                const type = String(part && part.type || "").toLowerCase();
+                const isDoor = isDoorDetail(part);
+                const isWindow = "window" === type;
+                if (!isDoor && !isWindow)
+                    continue;
+                const size = getDetailSize(part, isDoor ? [1.05, 2.25, .1] : [1.2, 1.4, .16]);
+                const placement = computeWallDetailPlacement(points, baseY, bodyHeight, spec, anchorPoint, part, size, isDoor ? "door" : "window");
+                if (!placement)
+                    continue;
+                part.__tmWallPlacement = placement;
+                openings[isDoor ? "doors" : "windows"].push({
+                    edgeIndex: placement.edgeIndex,
+                    rect: placement.rect
+                });
+                hasDoor || (hasDoor = isDoor);
+            }
+            if (!hasDoor) {
+                const fallback = createFallbackDoorDetailForFootprint(points, baseY, bodyHeight, spec, anchorPoint);
+                if (fallback) {
+                    const size = getDetailSize(fallback, [1.05, 2.25, .1]);
+                    const placement = computeWallDetailPlacement(points, baseY, bodyHeight, spec, anchorPoint, fallback, size, "door");
+                    if (placement) {
+                        fallback.__tmWallPlacement = placement;
+                        spec.__tmFallbackDoorDetail = fallback;
+                        openings.doors.push({
+                            edgeIndex: placement.edgeIndex,
+                            rect: placement.rect
+                        });
+                    }
+                }
+            }
+            spec.__tmWallOpenings = openings;
+        }
+
         function getFootprintMinTerrainY(points, baseY, spec) {
             return getFootprintTerrainExtents(points, baseY, spec).minY;
         }
@@ -8815,9 +9042,24 @@
                 shape.lineTo(edgeLength, bodyHeight);
                 shape.lineTo(0, bodyHeight);
                 shape.lineTo(0, 0);
+                for (const opening of getWallOpenings(spec, "doors", index).concat(getWallOpenings(spec, "windows", index))) {
+                    const rect = opening.rect || opening;
+                    if (!rect || rect.x2 - rect.x1 <= .05 || rect.y2 - rect.y1 <= .05)
+                        continue;
+                    const hole = new THREE.Path;
+                    hole.moveTo(rect.x1, rect.y1);
+                    hole.lineTo(rect.x1, rect.y2);
+                    hole.lineTo(rect.x2, rect.y2);
+                    hole.lineTo(rect.x2, rect.y1);
+                    hole.lineTo(rect.x1, rect.y1);
+                    shape.holes.push(hole);
+                }
+                const reservedOpenings = getWallOpenings(spec, "doors", index).concat(getWallOpenings(spec, "windows", index));
                 if (!1 !== sideSpec.enabled && !1 !== sideSpec.cutHoles)
                     for (const rect of layout.rects) {
                         if (!isWindowRectClearOfTerrain(rect, edgeFrame, baseY, spec))
+                            continue;
+                        if (!isRectClearOfWallOpenings(rect, reservedOpenings, .16))
                             continue;
                         const hole = new THREE.Path;
                         hole.moveTo(rect.x1, rect.y1);
@@ -8839,7 +9081,8 @@
         function createCustomBuildingBody(points, baseY, bodyHeight, colorValue, spec) {
             if (!globalState.THREE || points.length < 3)
                 return null;
-            const shouldCutWindows = spec && spec.windows && !1 !== spec.windows.enabled && !(spec.base && !0 === spec.base.solid) && !1 !== spec.windows.cutHoles;
+            const hasWallOpenings = !!(spec && spec.__tmWallOpenings && (toSafeArray(spec.__tmWallOpenings.doors).length || toSafeArray(spec.__tmWallOpenings.windows).length));
+            const shouldCutWindows = spec && !(spec.base && !0 === spec.base.solid) && (hasWallOpenings || spec.windows && !1 !== spec.windows.enabled && !1 !== spec.windows.cutHoles);
             if (shouldCutWindows) {
                 const windowBody = createCustomBuildingWallBody(points, baseY, bodyHeight, colorValue, spec);
                 if (windowBody)
@@ -8923,6 +9166,7 @@
         }
 
         function createFlatCustomRoof(points, baseY, bodyHeight, colorValue) {
+            // Irregular footprints use an exact footprint roof so L-shaped houses do not get a floating rectangle.
             const shape = createShapeFromFootprint(points);
             if (!shape)
                 return null;
@@ -8936,6 +9180,7 @@
         }
 
         function shouldUseFootprintRoof(points) {
+            // Bounding-box roofs only look safe on simple rectangles; complex shapes need footprint roofs.
             if (!Array.isArray(points) || points.length > 4)
                 return !0;
             const bounds = getFootprintBounds(points);
@@ -9090,8 +9335,11 @@
                 const frameDepth = clamp(Number(sideSpec.frameDepth) || Math.max(.04, wallDepth * .72), .03, Math.max(.05, wallDepth * .92));
                 const frameNormalOffset = Math.max(.01, Math.min(.035, wallDepth * .18));
                 const glassNormalOffset = Math.max(.005, Math.min(.02, wallDepth * .08));
+                const reservedOpenings = getWallOpenings(spec, "doors", index).concat(getWallOpenings(spec, "windows", index));
                 for (const rect of layout.rects) {
                     if (!isWindowRectClearOfTerrain(rect, frame, baseY, spec))
+                        continue;
+                    if (!isRectClearOfWallOpenings(rect, reservedOpenings, .16))
                         continue;
                     const width = rect.width;
                     const height = rect.height;
@@ -9718,6 +9966,12 @@
             const glass = createRuntimeBox([Math.max(.1, width - frameThickness * 2), Math.max(.1, height - frameThickness * 2), Math.max(.03, depth * .45)], glassMaterial, [0, 0, 0]);
             glass.renderOrder = 20;
             group.add(glass);
+            if (detail.__tmWallPlacement) {
+                const placement = detail.__tmWallPlacement;
+                group.position.set(placement.position[0], placement.position[1], placement.position[2]);
+                group.rotation.set(0, placement.rotationY, 0);
+                return group;
+            }
             return positionDetailObject(group, detail, anchorPoint);
         }
 
@@ -9793,6 +10047,12 @@
                     pivot.userData.tmDynamicDoor = !0;
                 }
                 group.add(pivot);
+                if (detail.__tmWallPlacement) {
+                    const placement = detail.__tmWallPlacement;
+                    group.position.set(placement.position[0], placement.position[1], placement.position[2]);
+                    group.rotation.set(0, placement.rotationY, 0);
+                    return group;
+                }
                 return positionDetailObject(group, detail, anchorPoint);
             }
             const position = detail.position || [0, 0, 0];
@@ -9829,32 +10089,7 @@
         }
 
         function createFallbackDoorForFootprint(points, baseY, bodyHeight, spec, anchorPoint) {
-            if (!Array.isArray(points) || points.length < 3 || !anchorPoint || bodyHeight < 2.15)
-                return null;
-            const center = getFootprintCenter(points);
-            let bestFrame = null;
-            for (let index = 0; index < points.length; index++) {
-                const frame = getWallEdgeFrame(points[index], points[(index + 1) % points.length], center);
-                if (!frame || frame.length < 1.4)
-                    continue;
-                if (!bestFrame || frame.length > bestFrame.length)
-                    bestFrame = frame;
-            }
-            if (!bestFrame)
-                return null;
-            const wallDepth = Math.max(.06, Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .12);
-            const detail = {
-                type: "door",
-                size: [1.08, Math.min(2.25, Math.max(1.95, bodyHeight - .35)), Math.max(.06, wallDepth * .78)],
-                position: [bestFrame.midX - (Number(anchorPoint.x) || 0) + bestFrame.normalX * Math.max(.015, wallDepth * .05), Math.max(1.05, Math.min(1.22, bodyHeight * .28)), bestFrame.midZ - (Number(anchorPoint.z) || 0) + bestFrame.normalZ * Math.max(.015, wallDepth * .05)],
-                rotation: [0, bestFrame.rotationY, 0],
-                rotationUnit: "rad",
-                color: 0x6f4327,
-                frameColor: 0xe9dbc4,
-                materialKind: "wood",
-                hingeSide: "left",
-                openAngle: 88
-            };
+            const detail = spec && spec.__tmFallbackDoorDetail || createFallbackDoorDetailForFootprint(points, baseY, bodyHeight, spec, anchorPoint);
             return createDoorDetailObject(detail, anchorPoint);
         }
 
@@ -10042,10 +10277,9 @@
                 },
                 parts: []
             }, match.entry || {});
-            const entryIsAuto3d = !!(match.entry && match.entry.__tmAuto3d || spec.__tmAuto3d);
-            entryIsAuto3d || (spec.windows = deepMergeConfig(spec.windows || {}, {
+            spec.windows = deepMergeConfig(spec.windows || {}, {
                 cutHoles: !0
-            }));
+            });
             spec.__tmWorldOffset = match.building.chunkCenter || {
                 x: 0,
                 z: 0
@@ -10057,6 +10291,14 @@
             const originalBaseY = Number(spec.base && spec.base.y) || Number(match.building.y) || 0;
             const bodyHeight = Math.max(1.4, Number(spec.base && spec.base.height) || Math.max(1, Number(spec.base && spec.base.floors) || 2) * Math.max(2.4, Number(spec.base && spec.base.floorHeight) || 3));
             const baseY = getRaisedCustomBuildingBaseY(points, originalBaseY, spec);
+            // Door/window openings must be prepared before the body mesh is built, otherwise the wall has no holes.
+            const anchorPoint = Object.assign({
+                y: baseY
+            }, match.building.houseCenterLocal || {
+                x: match.building.houseCenter ? match.building.houseCenter.x - (match.building.chunkCenter && match.building.chunkCenter.x || 0) : 0,
+                z: match.building.houseCenter ? match.building.houseCenter.z - (match.building.chunkCenter && match.building.chunkCenter.z || 0) : 0
+            });
+            prepareWallOpeningsForSpec(points, baseY, bodyHeight, spec, anchorPoint);
             const baseEnabled = !(spec.base && !1 === spec.base.enabled);
             if (baseEnabled) {
                 const foundation = createCustomBuildingFoundation(points, baseY, getFootprintMinTerrainY(points, baseY, spec), spec.base && spec.base.color, spec);
@@ -10070,12 +10312,6 @@
                     __tmWorldOffset: spec.__tmWorldOffset
                 }));
             }
-            const anchorPoint = Object.assign({
-                y: baseY
-            }, match.building.houseCenterLocal || {
-                x: match.building.houseCenter ? match.building.houseCenter.x - (match.building.chunkCenter && match.building.chunkCenter.x || 0) : 0,
-                z: match.building.houseCenter ? match.building.houseCenter.z - (match.building.chunkCenter && match.building.chunkCenter.z || 0) : 0
-            });
             for (const part of toSafeArray(spec.parts)) {
                 const detailMesh = createPrimitiveDetailMesh(part, anchorPoint);
                 detailMesh && group.add(detailMesh);
@@ -10777,10 +11013,13 @@
                 globalThis.__tmCollisionHookDebug.customTasks = CUSTOM_TASK_OPTIONS.slice();
                 globalThis.__tmCollisionHookDebug.features = featureState;
                 globalThis.__tmCollisionHookDebug.runtime = runtimeState;
+                globalThis.__tmCollisionHookDebug.printHealthTable = printFunctionHealthTable;
+                globalThis.__tmCollisionHookDebug.getHealthRows = () => getFeatureDiagnosticRows().concat(getInternalDiagnosticRows());
                 globalThis.__tmTownSignsDebug = globalThis.__tmCollisionHookDebug.townSigns;
                 refreshCustomBuildingDebug();
                 globalThis.__tmCollisionHookDebug.game && captureTownSignsGame(globalThis.__tmCollisionHookDebug.game);
                 isAny3dBuildingFeatureEnabled() && prepareCustomBuildingsForChunks(getLoadedChunks(), "bundle_patch");
+                printFunctionHealthTable("bundle_patch");
                 log("Hook erfolgreich installiert.");
                 log("Debug-Objekt verfuegbar unter window.__tmCollisionHookDebug");
                 log("Tuning-Objekt verfuegbar unter window.__tmCollisionHookConfig");
@@ -11057,6 +11296,7 @@
 
         ensureStartMenuFeatureWatcher();
         log("Bootstrap gestartet.", "readyState=", document.readyState, "realm=page", "href=", location.href);
+        printFunctionHealthTable("bootstrap");
         installBundleSourceHook();
         installRequireSniffer();
     }

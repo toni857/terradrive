@@ -7,7 +7,9 @@
     <link rel="stylesheet" href="building-modeler.css">
 </head>
 <body>
+    <!-- Main application shell: three columns, with the 3D viewport in the center. -->
     <div class="app">
+        <!-- Left sidebar: generated list of placed building parts. -->
         <aside class="sidebar sidebar-left">
             <div class="brand">
                 <div class="brand-title">Building Modeler</div>
@@ -17,6 +19,7 @@
             <div id="elementList" class="element-list"></div>
         </aside>
 
+        <!-- Center workspace: tool buttons, Three.js canvas target, and generated export code. -->
         <main class="workspace">
             <div class="toolbar">
                 <button id="moveTool" class="tool-button" type="button">Move</button>
@@ -28,6 +31,7 @@
                 <span id="statusText" class="status">Bereit</span>
             </div>
             <div id="viewport" class="viewport">
+                <!-- Static hint overlays stay inside the viewport so they move with this panel visually. -->
                 <div class="viewport-hint">Shift = Drag-Snap, V = Kanten-Modus</div>
                 <div class="mirror-panel">
                     <label for="mirrorMode">Spiegelmodus</label>
@@ -44,6 +48,7 @@
             <textarea id="codeOutput" class="code-output" spellcheck="false" readonly></textarea>
         </main>
 
+        <!-- Right sidebar: palette, inspector, and export/settings forms are rendered by building-modeler.js. -->
         <aside class="sidebar sidebar-right">
             <div class="tab-bar">
                 <button type="button" class="tab-button active" data-tab="palette">Bauteile</button>
@@ -62,6 +67,7 @@
         </aside>
     </div>
 
+    <!-- Import map keeps browser module imports short and aligned with the Three.js CDN version. -->
     <script type="importmap">
         {
             "imports": {
@@ -70,6 +76,7 @@
             }
         }
     </script>
+    <!-- Main editor logic: diagnostics, scene setup, tools, export generation. -->
     <script type="module" src="building-modeler.js"></script>
 </body>
 </html>
