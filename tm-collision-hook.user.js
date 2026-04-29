@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.1.3.0
+// @version      2.1.4.0
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -158,7 +158,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.1.3.0",
+            version: "2.1.4.0",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -1747,14 +1747,7 @@
             const east = Math.max(Number(chunk.bbox[1]) || 0, Number(chunk.bbox[3]) || 0);
             const placeFilter = '["place"~"^(city|town|village|hamlet|suburb|quarter|neighbourhood|locality)$"]';
             const query = `[out:json][timeout:8];(node${placeFilter}(${south},${west},${north},${east});way${placeFilter}(${south},${west},${north},${east});relation${placeFilter}(${south},${west},${north},${east}););out center tags;`;
-            fetch("https://overpass-api.de/api/interpreter", {
-                method: "POST",
-                body: query
-            }).then(response => {
-                if (!response.ok)
-                    throw new Error(`Overpass HTTP ${response.status}`);
-                return response.json();
-            }).then(data => {
+            fetchOverpassJson(query).then(data => {
                 townSignsState.placeFetchFailures = 0;
                 townSignsState.placeFetchBackoffUntil = 0;
                 const places = [];
@@ -4454,8 +4447,37 @@
             return `${Math.round(Number(chunk && chunk.cx) || 0)}:${Math.round(Number(chunk && chunk.cz) || 0)}`;
         }
 
+        function fetchOverpassJson(query) {
+            return fetch("https://overpass-api.de/api/interpreter", {
+                method: "POST",
+                body: query
+            }).then((async response => {
+                if (!response.ok) {
+                    let text = "";
+                    try {
+                        text = await response.text();
+                    } catch (textError) {}
+                    throw new Error(`Overpass HTTP ${response.status}${text ? `: ${text.slice(0, 90)}` : ""}`);
+                }
+                const contentType = response.headers && response.headers.get("content-type") || "";
+                if (contentType && !/json/i.test(contentType)) {
+                    let text = "";
+                    try {
+                        text = await response.text();
+                    } catch (textError) {}
+                    throw new Error(`Overpass lieferte kein JSON${text ? `: ${text.slice(0, 90)}` : ""}`);
+                }
+                return response.json();
+            }));
+        }
+
         function queuePoiFetch(chunk) {
             if (!chunk || !chunk.bbox || !runtimeState.geoModule)
+                return;
+            const now = Date.now();
+            if (runtimeState.poiFetchBackoffUntil && now < runtimeState.poiFetchBackoffUntil)
+                return;
+            if (runtimeState.poiRequestQueue.size >= 1)
                 return;
             const key = chunkPoiKey(chunk);
             if (runtimeState.poiCache.has(key) || runtimeState.poiRequestQueue.has(key))
@@ -4466,10 +4488,9 @@
             const west = Math.min(Number(chunk.bbox[1]) || 0, Number(chunk.bbox[3]) || 0);
             const east = Math.max(Number(chunk.bbox[1]) || 0, Number(chunk.bbox[3]) || 0);
             const query = `[out:json][timeout:8];(node["shop"="supermarket"](${south},${west},${north},${east});way["shop"="supermarket"](${south},${west},${north},${east});node["shop"="car"](${south},${west},${north},${east});way["shop"="car"](${south},${west},${north},${east});node["craft"="beekeeper"](${south},${west},${north},${east});node["man_made"="apiary"](${south},${west},${north},${east}););out center tags;`;
-            fetch("https://overpass-api.de/api/interpreter", {
-                method: "POST",
-                body: query
-            }).then(response => response.json()).then(data => {
+            fetchOverpassJson(query).then(data => {
+                runtimeState.poiFetchFailures = 0;
+                runtimeState.poiFetchBackoffUntil = 0;
                 const pois = [];
                 for (const element of toSafeArray(data && data.elements)) {
                     const lat = Number(element.lat || element.center && element.center.lat);
@@ -4494,7 +4515,13 @@
                 runtimeState.poiCache.set(key, pois);
             }).catch((poiError => {
                 runtimeState.poiCache.set(key, []);
-                warn("POI fetch failed:", poiError);
+                const failedAt = Date.now();
+                runtimeState.poiFetchFailures = Math.min(8, (Number(runtimeState.poiFetchFailures) || 0) + 1);
+                runtimeState.poiFetchBackoffUntil = failedAt + Math.min(10 * 60 * 1000, 30 * 1000 * Math.pow(2, runtimeState.poiFetchFailures - 1));
+                if (failedAt - (Number(runtimeState.poiFetchWarnedAt) || 0) > 60 * 1000) {
+                    runtimeState.poiFetchWarnedAt = failedAt;
+                    warn("POI-Daten momentan nicht erreichbar; externe Overpass-Abfragen pausieren kurz.", poiError);
+                }
             })).finally((() => runtimeState.poiRequestQueue.delete(key)));
         }
 
@@ -6033,21 +6060,157 @@
             ], templates);
         }
 
+        function createGeneratedAuto3dBuildingEntry(building, chunk, id) {
+            const level = Math.max(1, Math.round(Number(building && building.level) || 2));
+            const points = getBuildingFootprint(building, {
+                base: {
+                    inset: 0
+                }
+            });
+            const area = getFootprintArea(points);
+            const seed = Math.abs(Math.round((Number(chunk && chunk.cx) || 0) * .13 + (Number(chunk && chunk.cz) || 0) * .17 + (Number(building && building.index) || 0) * 31));
+            const highRise = level >= 5;
+            const largeFootprint = area > 520;
+            const shopLike = area > 260 && level <= 2;
+            const styles = [{
+                wall: 0xd7c2a2,
+                roof: 0x7f3128,
+                frame: 0xf6efe4,
+                glass: 0x8bc7df,
+                roofType: "gable",
+                inset: .08
+            }, {
+                wall: 0xe9ece8,
+                roof: 0x535a60,
+                frame: 0x20252a,
+                glass: 0x91bed2,
+                roofType: "flat",
+                inset: .02
+            }, {
+                wall: 0xcfc1aa,
+                roof: 0x69645d,
+                frame: 0xf4eee6,
+                glass: 0xa5d7ff,
+                roofType: "flat",
+                inset: 0
+            }, {
+                wall: 0xc89072,
+                roof: 0x6b2f2a,
+                frame: 0xf3eadc,
+                glass: 0x8ebbd0,
+                roofType: "gable",
+                inset: 0
+            }, {
+                wall: 0xaeb7bd,
+                roof: 0x59636b,
+                frame: 0xe7eef2,
+                glass: 0x8fbdd0,
+                roofType: "flat",
+                inset: 0
+            }];
+            const style = styles[seed % styles.length];
+            const floors = highRise ? Math.max(5, level) : largeFootprint ? Math.max(1, Math.min(level, 2)) : Math.max(1, Math.min(level, 4));
+            const floorHeight = highRise ? 2.9 : largeFootprint ? 4.2 : 2.9;
+            const flatRoof = highRise || largeFootprint || shopLike || "flat" === style.roofType;
+            const rows = highRise ? floors : largeFootprint ? 1 : Math.max(1, floors);
+            const windowsEnabled = !largeFootprint || shopLike;
+            const parts = [{
+                type: "door",
+                size: [1.15, 2.15, .14],
+                position: [0, 1.1, -4.25],
+                rotation: [0, 0, 0],
+                color: highRise ? 0x2e3438 : 0x6d3f24,
+                materialKind: "wood",
+                frameColor: 0xece0cb,
+                hingeSide: seed % 2 ? "right" : "left",
+                openAngle: 82,
+                isOpen: !1
+            }];
+            if (shopLike)
+                parts.push({
+                    type: "panel",
+                    size: [5.5, .85, .08],
+                    position: [0, 3.05, -4.1],
+                    rotation: [0, 0, 0],
+                    color: 0x2a8f55,
+                    materialKind: "metal"
+                });
+            if (highRise)
+                parts.push({
+                    type: "box",
+                    size: [2.5, 1.2, 2.5],
+                    position: [2.9, floors * floorHeight + .8, 2.2],
+                    rotation: [0, 0, 0],
+                    color: 0x3b4650,
+                    materialKind: "metal"
+                });
+            if (largeFootprint && !shopLike)
+                parts.push({
+                    type: "box",
+                    size: [3.6, 3.6, .16],
+                    position: [-2.5, 2.05, -4.45],
+                    rotation: [0, 0, 0],
+                    color: 0x3f4850,
+                    materialKind: "metal"
+                }, {
+                    type: "box",
+                    size: [3.6, 3.6, .16],
+                    position: [2.5, 2.05, -4.45],
+                    rotation: [0, 0, 0],
+                    color: 0x3f4850,
+                    materialKind: "metal"
+                });
+            return {
+                id,
+                match: {
+                    id: getBuildingDebugId(chunk, building)
+                },
+                __tmAuto3d: !0,
+                base: {
+                    enabled: !0,
+                    floors,
+                    floorHeight,
+                    color: style.wall,
+                    inset: style.inset
+                },
+                roof: {
+                    enabled: !0,
+                    type: flatRoof ? "flat" : "gable",
+                    color: style.roof,
+                    height: flatRoof ? .25 : 2.3 + .25 * Math.min(4, floors),
+                    overhang: flatRoof ? 0 : .45,
+                    ridgeDirection: "longest"
+                },
+                windows: {
+                    enabled: windowsEnabled,
+                    width: highRise ? 1 : shopLike ? 1.55 : .9,
+                    height: highRise ? 1.25 : shopLike ? 1.5 : 1.1,
+                    rows,
+                    gap: highRise ? .38 : shopLike ? .2 : .65,
+                    margin: highRise ? .45 : .65,
+                    sill: 1.1,
+                    frameColor: style.frame,
+                    glassColor: style.glass,
+                    opacity: .55,
+                    cutHoles: !0
+                },
+                parts
+            };
+        }
+
         function createAuto3dBuildingEntry(building, chunk, catalog) {
             if (!building || !building.houseCenter || !Array.isArray(building.points) || building.points.length < 3)
                 return null;
             const templateName = pickAutoBuildingTemplate(building, chunk, catalog && catalog.templates);
-            if (!templateName)
-                return null;
             const id = `auto3d_${getBuildingDebugId(chunk, building)}`;
-            const entry = {
+            const entry = templateName ? {
                 id,
                 template: templateName,
                 match: {
                     id: getBuildingDebugId(chunk, building)
                 },
                 __tmAuto3d: !0
-            };
+            } : createGeneratedAuto3dBuildingEntry(building, chunk, id);
             return resolveBuildingTemplate(entry, catalog && catalog.templates);
         }
 
@@ -7403,6 +7566,50 @@
             return group;
         }
 
+        function prepareCustomBuildingMatchesForChunk(chunk, catalog) {
+            if (!chunk)
+                return [];
+            chunk.__tmOriginalCustomBuildings || (chunk.__tmOriginalCustomBuildings = cloneJson(toSafeArray(chunk.custome_buildings), []));
+            const matched = [];
+            const suppressions = [];
+            const matchedBuildings = new Set;
+            const addCustomBuildingMatch = (id, entry, building) => {
+                if (!building || matchedBuildings.has(building))
+                    return;
+                matchedBuildings.add(building);
+                matched.push({
+                    id,
+                    entry,
+                    building
+                });
+                suppressions.push({
+                    id,
+                    naa: cloneJson(building.points, []),
+                    list: cloneJson(toSafeArray(entry && entry.bundleParts), [])
+                });
+            };
+            for (const rawEntry of toSafeArray(catalog && catalog.buildings)) {
+                const resolved = resolveBuildingTemplate(rawEntry, catalog && catalog.templates);
+                for (const building of toSafeArray(chunk.buildings))
+                    if (building && building.houseCenter && matchBuildingEntry(resolved, chunk, building)) {
+                        const id = resolved.id || getBuildingDebugId(chunk, building);
+                        addCustomBuildingMatch(id, resolved, building);
+                    }
+            }
+            if (isAuto3dCatalogEnabled(catalog))
+                for (const building of toSafeArray(chunk.buildings)) {
+                    if (!building || !building.houseCenter || matchedBuildings.has(building))
+                        continue;
+                    const autoEntry = createAuto3dBuildingEntry(building, chunk, catalog || {});
+                    autoEntry && addCustomBuildingMatch(autoEntry.id || getBuildingDebugId(chunk, building), autoEntry, building);
+                }
+            chunk.custome_buildings = toSafeArray(chunk.__tmOriginalCustomBuildings).concat(suppressions);
+            chunk.__tmMatchedCustomBuildings = matched;
+            chunk.__tmCustomBuildingsPrepared = !0;
+            runtimeState.customBuildingEntriesByChunk.set(chunk, matched);
+            return matched;
+        }
+
         async function ensureChunkCustomBuildingsPrepared(chunk) {
             if (!chunk)
                 return [];
@@ -7410,47 +7617,7 @@
                 return chunk.__tmMatchedCustomBuildings || [];
             if (chunk.__tmCustomBuildingsPreparePromise)
                 return chunk.__tmCustomBuildingsPreparePromise;
-            chunk.__tmOriginalCustomBuildings || (chunk.__tmOriginalCustomBuildings = cloneJson(toSafeArray(chunk.custome_buildings), []));
-            chunk.__tmCustomBuildingsPreparePromise = ensureBuildingCatalogLoaded().then((catalog => {
-                const matched = [];
-                const suppressions = [];
-                const matchedBuildings = new Set;
-                const addCustomBuildingMatch = (id, entry, building) => {
-                    if (!building || matchedBuildings.has(building))
-                        return;
-                    matchedBuildings.add(building);
-                    matched.push({
-                        id,
-                        entry,
-                        building
-                    });
-                    suppressions.push({
-                        id,
-                        naa: cloneJson(building.points, []),
-                        list: cloneJson(toSafeArray(entry && entry.bundleParts), [])
-                    });
-                };
-                for (const rawEntry of toSafeArray(catalog && catalog.buildings)) {
-                    const resolved = resolveBuildingTemplate(rawEntry, catalog.templates);
-                    for (const building of toSafeArray(chunk.buildings))
-                        if (building && building.houseCenter && matchBuildingEntry(resolved, chunk, building)) {
-                            const id = resolved.id || getBuildingDebugId(chunk, building);
-                            addCustomBuildingMatch(id, resolved, building);
-                        }
-                }
-                if (isAuto3dCatalogEnabled(catalog))
-                    for (const building of toSafeArray(chunk.buildings)) {
-                        if (!building || !building.houseCenter || matchedBuildings.has(building))
-                            continue;
-                        const autoEntry = createAuto3dBuildingEntry(building, chunk, catalog);
-                        autoEntry && addCustomBuildingMatch(autoEntry.id || getBuildingDebugId(chunk, building), autoEntry, building);
-                    }
-                chunk.custome_buildings = toSafeArray(chunk.__tmOriginalCustomBuildings).concat(suppressions);
-                chunk.__tmMatchedCustomBuildings = matched;
-                chunk.__tmCustomBuildingsPrepared = !0;
-                runtimeState.customBuildingEntriesByChunk.set(chunk, matched);
-                return matched;
-            })).finally((() => {
+            chunk.__tmCustomBuildingsPreparePromise = ensureBuildingCatalogLoaded().then((catalog => prepareCustomBuildingMatchesForChunk(chunk, catalog))).finally((() => {
                 chunk.__tmCustomBuildingsPreparePromise = null;
             }));
             return chunk.__tmCustomBuildingsPreparePromise;
@@ -7656,6 +7823,7 @@
                         THREE
                     }
                 };
+                ensureBuildingCatalogLoaded().catch((catalogWarmupError => warn("Custom-Building-Katalog konnte beim Start nicht vorgeladen werden:", catalogWarmupError)));
 
                 if (terrainProto && !terrainProto.__tmTerrainVisualPatched) {
                     const originalCreateTerrainMesh = terrainProto.createTerrainMesh;
@@ -7761,6 +7929,12 @@
                     const originalBuild = chunkProto.build;
                     chunkProto.build = function(...args) {
                         suppressRunwayBuildings(this);
+                        if (!this.__tmCustomBuildingsPrepared && runtimeState.buildingConfig)
+                            try {
+                                prepareCustomBuildingMatchesForChunk(this, runtimeState.buildingConfig);
+                            } catch (syncCustomBuildingError) {
+                                warn(`Custom-Building-Vorbereitung vor Build fehlgeschlagen fuer Chunk ${this.cx}/${this.cz}:`, syncCustomBuildingError);
+                            }
                         const result = originalBuild.apply(this, args);
                         refreshCustomBuildingDebug();
                         queueTownRebuild("chunk_build");
