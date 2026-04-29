@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.1.6.0
+// @version      2.1.6.1
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -76,7 +76,6 @@
     "use strict";
     const DEBUG_TEXTURE_HOOK = !1;
     const textureLog = (...args) => DEBUG_TEXTURE_HOOK && console.log(...args);
-    textureLog("[Texture Hook] gestartet");
     function readStoredFeatures() {
         try {
             const cookie = document.cookie.split(";").map((part => part.trim())).find((part => part.startsWith("tmFeatures=")));
@@ -85,8 +84,12 @@
             return {};
         }
     }
-    if (!1 === readStoredFeatures().buildingTextures) {
-        textureLog("[Texture Hook] per Einstellung deaktiviert");
+    const storedFeatures = readStoredFeatures();
+    console.info("[Texture Hook] gestartet", {
+        buildingTextures: !1 !== storedFeatures.buildingTextures
+    });
+    if (!1 === storedFeatures.buildingTextures) {
+        console.info("[Texture Hook] per Einstellung deaktiviert");
         return;
     }
 
@@ -194,7 +197,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.1.6.0",
+            version: "2.1.6.1",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -291,6 +294,9 @@
         }, {
             feature: "townSigns",
             label: "Town signs"
+        }, {
+            feature: "auto3dBuildings",
+            label: "3D standard houses"
         }, {
             feature: "customBuildings",
             label: "3D custom houses"
@@ -425,6 +431,7 @@
             bees: !1,
             aircraft: !1,
             shops: !1,
+            auto3dBuildings: !0,
             customBuildings: !1,
             buildingTextures: !0,
             enhancedTerrain: !0,
@@ -524,6 +531,7 @@
             bees: !1,
             aircraft: !1,
             shops: !1,
+            auto3dBuildings: !0,
             customBuildings: !1,
             buildingTextures: !0,
             enhancedTerrain: !0,
@@ -550,7 +558,9 @@
         };
 
         function log(...args) {
-            globalThis.__tmCollisionHookVerbose && console.log(PREFIX, ...args);
+            const first = String(args[0] || "");
+            if (globalThis.__tmCollisionHookVerbose || /Bootstrap|Hook erfolgreich|Debug-Objekt|Tuning-Objekt|GameSessionOpenWorld|AiTrafficResolver|Bundle|Node-Insert|Mutation|Require-Callback|Versteckter|3D-Haeuser|Custom-Building|Feature/i.test(first))
+                console.info(PREFIX, ...args);
         }
 
         function warn(...args) {
@@ -4051,14 +4061,7 @@
                     clearCustomBuildingOverlayChildren(overlay);
                     overlay.userData.tmBuildSignature = "";
                 }
-                if (chunk && chunk.__tmOriginalCustomBuildings)
-                    chunk.custome_buildings = cloneJson(chunk.__tmOriginalCustomBuildings, []);
-                if (chunk) {
-                    chunk.__tmCustomBuildingsPrepared = !1;
-                    chunk.__tmCustomBuildingsPreparePromise = null;
-                    chunk.__tmMatchedCustomBuildings = [];
-                }
-                runtimeState.customBuildingEntriesByChunk.delete(chunk);
+                resetCustomBuildingPreparationForChunk(chunk);
             }
             runtimeState.customBuildingDoorItems = runtimeState.customBuildingDoorItems.filter(item => item && !loadedSet.has(item.chunk));
         }
@@ -4076,8 +4079,10 @@
                 runtimeState.hardStartLocked = !0;
             }
             if (oldValue !== featureState[name]) {
-                if ("customBuildings" === name) {
-                    if (featureState.customBuildings)
+                if ("customBuildings" === name || "auto3dBuildings" === name) {
+                    for (const chunk of getLoadedChunks())
+                        resetCustomBuildingPreparationForChunk(chunk);
+                    if (isAny3dBuildingFeatureEnabled())
                         prepareCustomBuildingsForChunks(getLoadedChunks(), "feature_toggle");
                     else
                         clearCustomBuildingVisualsForLoadedChunks();
@@ -5679,7 +5684,7 @@
                 try {
                     enhanceTerrainMesh(chunk);
                     enhanceRoadMeshes(chunk);
-                    featureState.customBuildings ? rebuildCustomBuildingsForChunk(chunk) : cleanupChunkCustomVisuals(chunk);
+                    isAny3dBuildingFeatureEnabled() ? rebuildCustomBuildingsForChunk(chunk) : cleanupChunkCustomVisuals(chunk);
                 } catch (visualError) {
                     error(`Fehler beim Visual-Refresh fuer Chunk ${chunk.cx}/${chunk.cz}:`, visualError);
                 }
@@ -6224,12 +6229,46 @@
             runtimeState.buildingConfigPromise = null;
             runtimeState.buildingConfig = null;
             for (const chunk of getLoadedChunks()) {
-                chunk.__tmCustomBuildingsPrepared = !1;
-                chunk.__tmCustomBuildingsPreparePromise = null;
-                chunk.__tmMatchedCustomBuildings = [];
+                resetCustomBuildingPreparationForChunk(chunk);
                 queueChunkVisualRefresh(chunk, "custom_building_reload");
             }
             return ensureBuildingCatalogLoaded();
+        }
+
+        function isAny3dBuildingFeatureEnabled() {
+            return !!(featureState.auto3dBuildings || featureState.customBuildings);
+        }
+
+        function resetCustomBuildingPreparationForChunk(chunk) {
+            if (!chunk)
+                return;
+            if (chunk.__tmOriginalCustomBuildings)
+                chunk.custome_buildings = cloneJson(chunk.__tmOriginalCustomBuildings, []);
+            if (Array.isArray(chunk.__tmOriginalBuildings))
+                chunk.buildings = chunk.__tmOriginalBuildings.slice();
+            syncBuildingFactoryBuildingSources(chunk, !0);
+            chunk.__tmCustomBuildingsPrepared = !1;
+            chunk.__tmCustomBuildingsPreparePromise = null;
+            chunk.__tmMatchedCustomBuildings = [];
+            runtimeState.customBuildingEntriesByChunk.delete(chunk);
+        }
+
+        function syncBuildingFactoryBuildingSources(chunk, resetPartialBuild) {
+            const factory = chunk && chunk.buildingFactory;
+            if (!factory || factory.loaded)
+                return;
+            Array.isArray(chunk.buildings) && (factory.buildings = chunk.buildings);
+            Array.isArray(chunk.custome_buildings) && (factory.custome_buildings = chunk.custome_buildings);
+            if (!resetPartialBuild || !factory.loadedStarted)
+                return;
+            factory.lastIndex = 0;
+            factory.loadedStarted = !1;
+            Array.isArray(factory.allHouses) && (factory.allHouses = factory.allHouses.map((() => [])));
+            Array.isArray(factory.allRoofs) && (factory.allRoofs = []);
+            Array.isArray(factory.allBuildingWithouTex) && (factory.allBuildingWithouTex = []);
+            Array.isArray(factory.allBasements) && (factory.allBasements = []);
+            Array.isArray(factory.wallsLine) && (factory.wallsLine = []);
+            Array.isArray(factory.custome_building_meshes) && (factory.custome_building_meshes = []);
         }
 
         function resolveBuildingTemplate(entry, templates, chain) {
@@ -6265,6 +6304,8 @@
         }
 
         function isAuto3dCatalogEnabled(catalog) {
+            if (!featureState.auto3dBuildings)
+                return !1;
             if (!catalog)
                 return !0;
             if (!1 === catalog.auto3d || !1 === catalog.auto3D || catalog.settings && (!1 === catalog.settings.auto3d || !1 === catalog.settings.auto3D))
@@ -7847,9 +7888,21 @@
             if (!chunk)
                 return [];
             chunk.__tmOriginalCustomBuildings || (chunk.__tmOriginalCustomBuildings = cloneJson(toSafeArray(chunk.custome_buildings), []));
+            if (!Array.isArray(chunk.__tmOriginalBuildings))
+                chunk.__tmOriginalBuildings = Array.isArray(chunk.buildings) ? chunk.buildings.slice() : [];
+            const sourceBuildings = toSafeArray(chunk.__tmOriginalBuildings);
             const matched = [];
             const suppressions = [];
             const matchedBuildings = new Set;
+            if (!isAny3dBuildingFeatureEnabled()) {
+                chunk.buildings = sourceBuildings.slice();
+                chunk.custome_buildings = toSafeArray(chunk.__tmOriginalCustomBuildings);
+                syncBuildingFactoryBuildingSources(chunk, !0);
+                chunk.__tmMatchedCustomBuildings = matched;
+                chunk.__tmCustomBuildingsPrepared = !0;
+                runtimeState.customBuildingEntriesByChunk.set(chunk, matched);
+                return matched;
+            }
             const addCustomBuildingMatch = (id, entry, building) => {
                 if (!building || matchedBuildings.has(building))
                     return;
@@ -7865,32 +7918,36 @@
                     list: cloneJson(toSafeArray(entry && entry.bundleParts), [])
                 });
             };
-            for (const rawEntry of toSafeArray(catalog && catalog.buildings)) {
-                const resolved = resolveBuildingTemplate(rawEntry, catalog && catalog.templates);
-                for (const building of toSafeArray(chunk.buildings))
-                    if (building && building.houseCenter && matchBuildingEntry(resolved, chunk, building)) {
-                        const id = resolved.id || getBuildingDebugId(chunk, building);
-                        addCustomBuildingMatch(id, resolved, building);
-                    }
-            }
+            if (featureState.customBuildings)
+                for (const rawEntry of toSafeArray(catalog && catalog.buildings)) {
+                    const resolved = resolveBuildingTemplate(rawEntry, catalog && catalog.templates);
+                    for (const building of sourceBuildings)
+                        if (building && building.houseCenter && matchBuildingEntry(resolved, chunk, building)) {
+                            const id = resolved.id || getBuildingDebugId(chunk, building);
+                            addCustomBuildingMatch(id, resolved, building);
+                        }
+                }
             if (isAuto3dCatalogEnabled(catalog))
-                for (const building of toSafeArray(chunk.buildings)) {
+                for (const building of sourceBuildings) {
                     if (!building || !building.houseCenter || matchedBuildings.has(building))
                         continue;
                     const autoEntry = createAuto3dBuildingEntry(building, chunk, catalog || {});
                     autoEntry && addCustomBuildingMatch(autoEntry.id || getBuildingDebugId(chunk, building), autoEntry, building);
                 }
+            chunk.buildings = sourceBuildings.filter((building => !matchedBuildings.has(building)));
             chunk.custome_buildings = toSafeArray(chunk.__tmOriginalCustomBuildings).concat(suppressions);
+            syncBuildingFactoryBuildingSources(chunk, !0);
             chunk.__tmMatchedCustomBuildings = matched;
             chunk.__tmCustomBuildingsPrepared = !0;
             runtimeState.customBuildingEntriesByChunk.set(chunk, matched);
+            log(`3D-Haeuser vorbereitet fuer Chunk ${chunk.cx}/${chunk.cz}: ${matched.length} ersetzt, ${chunk.buildings.length} PNG-Haeuser bleiben.`);
             return matched;
         }
 
         async function ensureChunkCustomBuildingsPrepared(chunk) {
             if (!chunk)
                 return [];
-            if (!featureState.customBuildings)
+            if (!isAny3dBuildingFeatureEnabled())
                 return [];
             if (chunk.__tmCustomBuildingsPrepared)
                 return chunk.__tmMatchedCustomBuildings || [];
@@ -7928,25 +7985,26 @@
         }
 
         async function prepareCustomBuildingsForChunks(chunks, reason) {
-            if (!featureState.customBuildings) {
+            if (!isAny3dBuildingFeatureEnabled()) {
                 clearCustomBuildingVisualsForLoadedChunks();
                 return;
             }
             const unique = Array.from(new Set(toSafeArray(chunks).filter(Boolean)));
             if (!unique.length)
                 return;
+            const showProgress = featureState.customBuildings || "address" === reason;
             for (let index = 0; index < unique.length; index++) {
                 const chunk = unique[index];
-                setCustomBuildingProgress(index, unique.length, reason === "address" ? "Adress-Haeuser vorbereiten" : "3D-Haeuser optimieren");
+                showProgress && setCustomBuildingProgress(index, unique.length, reason === "address" ? "Adress-Haeuser vorbereiten" : "3D-Haeuser optimieren");
                 try {
                     await ensureChunkCustomBuildingsPrepared(chunk);
                     rebuildCustomBuildingsForChunk(chunk);
                 } catch (prepareError) {
                     warn(`Custom-Haeuser konnten fuer Chunk ${chunk && chunk.cx}/${chunk && chunk.cz} nicht vorbereitet werden:`, prepareError);
                 }
-                setCustomBuildingProgress(index + 1, unique.length, reason === "address" ? "Adress-Haeuser vorbereiten" : "3D-Haeuser optimieren");
+                showProgress && setCustomBuildingProgress(index + 1, unique.length, reason === "address" ? "Adress-Haeuser vorbereiten" : "3D-Haeuser optimieren");
             }
-            finishCustomBuildingProgress();
+            showProgress && finishCustomBuildingProgress();
         }
 
         function prepareCustomBuildingsNearPosition(position, reason) {
@@ -8005,7 +8063,7 @@
             runtimeState.customBuildingDoorItems = runtimeState.customBuildingDoorItems.filter((item => item && item.chunk !== chunk));
             clearCustomBuildingOverlayChildren(overlay);
             overlay.userData.tmBuildSignature = "";
-            if (!matches.length || !featureState.customBuildings) {
+            if (!matches.length || !isAny3dBuildingFeatureEnabled()) {
                 overlay.parent && overlay.parent.remove(overlay);
                 return;
             }
@@ -8026,14 +8084,8 @@
                 clearCustomBuildingOverlayChildren(overlay);
             }
             runtimeState.chunkCustomOverlayGroups.delete(chunk);
-            runtimeState.customBuildingEntriesByChunk.delete(chunk);
             runtimeState.customBuildingDoorItems = runtimeState.customBuildingDoorItems.filter((item => item && item.chunk !== chunk));
-            chunk && chunk.__tmOriginalCustomBuildings && (chunk.custome_buildings = cloneJson(chunk.__tmOriginalCustomBuildings, []));
-            if (chunk) {
-                chunk.__tmCustomBuildingsPrepared = !1;
-                chunk.__tmCustomBuildingsPreparePromise = null;
-                chunk.__tmMatchedCustomBuildings = [];
-            }
+            resetCustomBuildingPreparationForChunk(chunk);
         }
 
         function captureTownSignsGame(game) {
@@ -8053,7 +8105,7 @@
             if (!game.__tmRuntimeInitialized) {
                 game.__tmRuntimeInitialized = !0;
                 refreshCustomBuildingDebug();
-                featureState.customBuildings && prepareCustomBuildingsForChunks(getLoadedChunks(), "game_capture");
+                isAny3dBuildingFeatureEnabled() && prepareCustomBuildingsForChunks(getLoadedChunks(), "game_capture");
             }
             ensureTownOverlayGroup();
             if (previousGame !== game || previousScene !== townSignsState.scene || previousChunkManager !== townSignsState.chunkManager)
@@ -8132,7 +8184,7 @@
                         THREE
                     }
                 };
-                featureState.customBuildings && ensureBuildingCatalogLoaded().catch((catalogWarmupError => warn("Custom-Building-Katalog konnte beim Start nicht vorgeladen werden:", catalogWarmupError)));
+                isAny3dBuildingFeatureEnabled() && ensureBuildingCatalogLoaded().catch((catalogWarmupError => warn("Custom-Building-Katalog konnte beim Start nicht vorgeladen werden:", catalogWarmupError)));
 
                 if (terrainProto && !terrainProto.__tmTerrainVisualPatched) {
                     const originalCreateTerrainMesh = terrainProto.createTerrainMesh;
@@ -8246,7 +8298,7 @@
                     const originalBuild = chunkProto.build;
                     chunkProto.build = function(...args) {
                         suppressRunwayBuildings(this);
-                        if (featureState.customBuildings && !this.__tmCustomBuildingsPrepared && runtimeState.buildingConfig)
+                        if (isAny3dBuildingFeatureEnabled() && !this.__tmCustomBuildingsPrepared && runtimeState.buildingConfig)
                             try {
                                 prepareCustomBuildingMatchesForChunk(this, runtimeState.buildingConfig);
                             } catch (syncCustomBuildingError) {
@@ -8255,7 +8307,7 @@
                         const result = originalBuild.apply(this, args);
                         refreshCustomBuildingDebug();
                         queueTownRebuild("chunk_build");
-                        featureState.customBuildings ? ensureChunkCustomBuildingsPrepared(this).catch((customBuildingError => warn(`Custom-Building-Vorbereitung fehlgeschlagen fuer Chunk ${this.cx}/${this.cz}:`, customBuildingError))).finally((() => rebuildCustomBuildingsForChunk(this))) : cleanupChunkCustomVisuals(this);
+                        isAny3dBuildingFeatureEnabled() ? ensureChunkCustomBuildingsPrepared(this).catch((customBuildingError => warn(`Custom-Building-Vorbereitung fehlgeschlagen fuer Chunk ${this.cx}/${this.cz}:`, customBuildingError))).finally((() => rebuildCustomBuildingsForChunk(this))) : cleanupChunkCustomVisuals(this);
                         return result;
                     };
                     chunkProto.__tmTownSignsBuildPatched = !0;
@@ -8278,7 +8330,7 @@
                     chunkProto.checkLoaded = async function(...args) {
                         suppressRunwayBuildings(this);
                         const showProgress = featureState.customBuildings && (!this.__tmCustomBuildingsPrepared || isPriorityCustomBuildingChunk(this));
-                        if (featureState.customBuildings) {
+                        if (isAny3dBuildingFeatureEnabled()) {
                             showProgress && setCustomBuildingProgress(0, 2, isPriorityCustomBuildingChunk(this) ? "Adress-Haus vorbereiten" : "3D-Haeuser vorbereiten");
                             try {
                                 await ensureChunkCustomBuildingsPrepared(this);
@@ -8291,7 +8343,7 @@
                             const result = await originalCheckLoaded.apply(this, args);
                             refreshCustomBuildingDebug();
                             queueTownRebuild("chunk_check_loaded");
-                            featureState.customBuildings ? rebuildCustomBuildingsForChunk(this) : cleanupChunkCustomVisuals(this);
+                            isAny3dBuildingFeatureEnabled() ? rebuildCustomBuildingsForChunk(this) : cleanupChunkCustomVisuals(this);
                             showProgress && setCustomBuildingProgress(2, 2, isPriorityCustomBuildingChunk(this) ? "Adress-Haus vorbereiten" : "3D-Haeuser vorbereiten");
                             showProgress && finishCustomBuildingProgress();
                             return result;
@@ -8473,7 +8525,7 @@
                 globalThis.__tmTownSignsDebug = globalThis.__tmCollisionHookDebug.townSigns;
                 refreshCustomBuildingDebug();
                 globalThis.__tmCollisionHookDebug.game && captureTownSignsGame(globalThis.__tmCollisionHookDebug.game);
-                featureState.customBuildings && prepareCustomBuildingsForChunks(getLoadedChunks(), "bundle_patch");
+                isAny3dBuildingFeatureEnabled() && prepareCustomBuildingsForChunks(getLoadedChunks(), "bundle_patch");
                 log("Hook erfolgreich installiert.");
                 log("Debug-Objekt verfuegbar unter window.__tmCollisionHookDebug");
                 log("Tuning-Objekt verfuegbar unter window.__tmCollisionHookConfig");
