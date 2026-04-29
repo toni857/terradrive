@@ -288,6 +288,9 @@
         }, {
             feature: "shops",
             label: "Shops + Navi POIs"
+        }, {
+            feature: "customBuildings",
+            label: "Custom buildings"
         }];
         const NAV_PRESETS = [{
             type: "fuel",
@@ -385,8 +388,33 @@
             birds: !0,
             bees: !0,
             aircraft: !0,
-            shops: !0
+            shops: !0,
+            customBuildings: !1
         });
+
+        function loadFeatureStateFromCookies() {
+            try {
+                const cookieValue = document.cookie.split(';').find(c => c.trim().startsWith('tmFeatures='));
+                if (cookieValue) {
+                    const features = JSON.parse(decodeURIComponent(cookieValue.split('=')[1]));
+                    Object.assign(featureState, features);
+                }
+            } catch (e) {
+                console.warn('[TM] Failed to load feature state from cookies:', e);
+            }
+        }
+
+        function saveFeatureStateToCookies() {
+            try {
+                const expires = new Date();
+                expires.setFullYear(expires.getFullYear() + 1);
+                document.cookie = `tmFeatures=${encodeURIComponent(JSON.stringify(featureState))}; expires=${expires.toUTCString()}; path=/`;
+            } catch (e) {
+                console.warn('[TM] Failed to save feature state to cookies:', e);
+            }
+        }
+
+        loadFeatureStateFromCookies();
         Object.assign(runtimeState, {
             overlayItems: Array.isArray(runtimeState.overlayItems) ? runtimeState.overlayItems : [],
             overlayDispose: Array.isArray(runtimeState.overlayDispose) ? runtimeState.overlayDispose : [],
@@ -3877,6 +3905,7 @@
         }
 
         function setFeature(name, value) {
+            const oldValue = featureState[name];
             featureState[name] = !!value;
             if ("hardStart" === name && featureState.hardStart) {
                 featureState.survival = !0;
@@ -3885,6 +3914,17 @@
                 setPlayerMoney(0);
                 runtimeState.hardStartLocked = !0;
             }
+            if ("customBuildings" === name && oldValue !== featureState.customBuildings) {
+                // Toggle custom buildings visibility
+                for (const [chunk, overlay] of runtimeState.chunkCustomOverlayGroups) {
+                    if (featureState.customBuildings) {
+                        rebuildCustomBuildingsForChunk(chunk);
+                    } else {
+                        overlay.parent && overlay.parent.remove(overlay);
+                    }
+                }
+            }
+            saveFeatureStateToCookies();
             syncFeatureMenu();
         }
 
@@ -6354,7 +6394,7 @@
         }
 
         function createCustomBuildingMaterial(colorValue, spec) {
-            const material = new globalState.THREE.MeshLambertMaterial({
+            const material = new globalState.THREE.MeshBasicMaterial({
                 color: null != colorValue ? colorValue : 0xffffff,
                 side: globalState.THREE.DoubleSide
             });
@@ -7762,7 +7802,7 @@
             runtimeState.customBuildingDoorItems = runtimeState.customBuildingDoorItems.filter((item => item && item.chunk !== chunk));
             clearCustomBuildingOverlayChildren(overlay);
             overlay.userData.tmBuildSignature = "";
-            if (!matches.length) {
+            if (!matches.length || !featureState.customBuildings) {
                 overlay.parent && overlay.parent.remove(overlay);
                 return;
             }
