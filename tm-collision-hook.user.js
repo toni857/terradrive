@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.1.6.3
+// @version      2.1.6.4
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -302,6 +302,15 @@
             feature: "customBuildings",
             label: "3D custom houses"
         }, {
+            feature: "navigation",
+            label: "Navi panel"
+        }, {
+            feature: "autopilot",
+            label: "Autopilot"
+        }, {
+            feature: "collisionHook",
+            label: "Collision hook"
+        }, {
             feature: "customMissions",
             label: "Custom missions"
         }, {
@@ -441,7 +450,13 @@
             enhancedVehicles: !1,
             townSigns: !1,
             customMissions: !1,
-            vehicleTuning: !1
+            vehicleTuning: !1,
+            navigation: !1,
+            autopilot: !1,
+            collisionHook: !1
+        });
+        const featureFaultState = globalThis.__tmFeatureFaultState || (globalThis.__tmFeatureFaultState = {
+            faults: {}
         });
 
         function loadFeatureStateFromCookies() {
@@ -466,7 +481,30 @@
             }
         }
 
+        function loadFeatureFaultStateFromCookies() {
+            try {
+                const cookieValue = document.cookie.split(';').find(c => c.trim().startsWith('tmFeatureFaults='));
+                if (cookieValue) {
+                    const faults = JSON.parse(decodeURIComponent(cookieValue.split('=').slice(1).join('=')));
+                    featureFaultState.faults = faults && "object" == typeof faults ? faults : {};
+                }
+            } catch (e) {
+                console.warn('[TM] Failed to load feature fault state from cookies:', e);
+            }
+        }
+
+        function saveFeatureFaultStateToCookies() {
+            try {
+                const expires = new Date();
+                expires.setFullYear(expires.getFullYear() + 1);
+                document.cookie = `tmFeatureFaults=${encodeURIComponent(JSON.stringify(featureFaultState.faults || {}))}; expires=${expires.toUTCString()}; path=/`;
+            } catch (e) {
+                console.warn('[TM] Failed to save feature fault state to cookies:', e);
+            }
+        }
+
         loadFeatureStateFromCookies();
+        loadFeatureFaultStateFromCookies();
         Object.assign(runtimeState, {
             overlayItems: Array.isArray(runtimeState.overlayItems) ? runtimeState.overlayItems : [],
             overlayDispose: Array.isArray(runtimeState.overlayDispose) ? runtimeState.overlayDispose : [],
@@ -541,7 +579,10 @@
             enhancedVehicles: !1,
             townSigns: !1,
             customMissions: !1,
-            vehicleTuning: !1
+            vehicleTuning: !1,
+            navigation: !1,
+            autopilot: !1,
+            collisionHook: !1
         }))
             "boolean" == typeof featureState[key] || (featureState[key] = value);
         vehicleTuningState.active = !!featureState.vehicleTuning && !!vehicleTuningState.active;
@@ -3325,6 +3366,10 @@
         }
 
         function startAutopilotToMapTarget(source) {
+            if (!featureState.autopilot) {
+                notifyRuntime("Autopilot ist in den Extension-Einstellungen aus.", "error");
+                return !1;
+            }
             const target = getMapTargetWorldPosition();
             const signature = getMapTargetSignature();
             if (!target || !signature)
@@ -3343,6 +3388,10 @@
         }
 
         function startAutopilotToWorldPosition(position, label, source) {
+            if (!featureState.autopilot) {
+                notifyRuntime("Autopilot ist in den Extension-Einstellungen aus.", "error");
+                return !1;
+            }
             if (!position)
                 return !1;
             const target = cloneVector3(position);
@@ -3412,6 +3461,10 @@
         }
 
         function startNaviPreset(type) {
+            if (!featureState.navigation) {
+                notifyRuntime("Navi panel ist in den Extension-Einstellungen aus.", "error");
+                return !1;
+            }
             if (["supermarket", "autoshop", "apiary"].includes(type) && !featureState.shops) {
                 notifyRuntime("Shops + Navi POIs sind in den Extension-Einstellungen aus.", "error");
                 return !1;
@@ -3445,6 +3498,10 @@
         }
 
         function searchNaviAddress(query) {
+            if (!featureState.navigation) {
+                setNaviPanelStatus("Navi ist in den Extension-Einstellungen aus.", "error");
+                return;
+            }
             const text = normalizeTownLabel(query);
             if (!text)
                 return setNaviPanelStatus("Bitte Adresse eingeben.", "error");
@@ -3522,6 +3579,10 @@
         }
 
         function toggleNaviPanel(forceVisible) {
+            if (!featureState.navigation) {
+                notifyRuntime("Navi panel ist in den Extension-Einstellungen aus.", "error");
+                return;
+            }
             const panel = ensureNaviPanel();
             if (!panel)
                 return;
@@ -3535,6 +3596,10 @@
         }
 
         function handleAutopilotMapHotkey() {
+            if (!featureState.autopilot) {
+                notifyRuntime("Autopilot ist in den Extension-Einstellungen aus.", "error");
+                return;
+            }
             const state = getAutopilotState();
             if (isNoMapMissionActive()) {
                 notifyRuntime("Automatik kann diese Aufgabe nicht starten: Map ist fuer diese Mission gesperrt.", "error");
@@ -4067,11 +4132,83 @@
             runtimeState.customBuildingDoorItems = runtimeState.customBuildingDoorItems.filter(item => item && !loadedSet.has(item.chunk));
         }
 
+        function getFeatureFault(name) {
+            return featureFaultState.faults && featureFaultState.faults[name] || null;
+        }
+
+        function clearFeatureFault(name) {
+            if (!featureFaultState.faults || !featureFaultState.faults[name])
+                return;
+            delete featureFaultState.faults[name];
+            saveFeatureFaultStateToCookies();
+        }
+
+        function applyFeatureSideEffects(name) {
+            if ("customBuildings" === name || "auto3dBuildings" === name) {
+                for (const chunk of getLoadedChunks())
+                    resetCustomBuildingPreparationForChunk(chunk);
+                if (isAny3dBuildingFeatureEnabled())
+                    prepareCustomBuildingsForChunks(getLoadedChunks(), "feature_toggle");
+                else
+                    clearCustomBuildingVisualsForLoadedChunks();
+            } else if ("townSigns" === name) {
+                featureState.townSigns ? queueTownRebuild("feature_toggle") : clearTownSignsVisuals();
+            } else if ("shops" === name) {
+                featureState.shops ? rebuildPoiOverlays() : clearRuntimeOverlayItemsByKind(["poi", "bees"]);
+            } else if ("birds" === name && !featureState.birds) {
+                clearRuntimeOverlayItemsByKind(["birds"]);
+            } else if ("bees" === name && !featureState.bees) {
+                clearRuntimeOverlayItemsByKind(["bees"]);
+            } else if ("aircraft" === name && !featureState.aircraft) {
+                clearAircraftFeatureVisuals();
+            } else if ("customMissions" === name) {
+                syncRuntimeCustomMissionOptions();
+            } else if ("vehicleTuning" === name && !featureState.vehicleTuning) {
+                vehicleTuningState.active = !1;
+                vehicleTuningState.visible = !1;
+                vehicleTuningState.panel && (vehicleTuningState.panel.style.display = "none");
+                syncVehicleTuningPanel();
+            } else if ("autopilot" === name && !featureState.autopilot) {
+                stopAutopilot("Feature deaktiviert", !1);
+            } else if ("navigation" === name && !featureState.navigation) {
+                runtimeState.navPanel && (runtimeState.navPanel.style.display = "none");
+                runtimeState.navVisible = !1;
+            } else if ("buildingTextures" === name) {
+                notifyRuntime("Building textures werden nach dem naechsten Reload voll wirksam.");
+            } else if ("enhancedTrees" === name) {
+                notifyRuntime("Enhanced trees gelten fuer neue Chunks oder nach Reload.");
+            } else if ("enhancedTerrain" === name || "enhancedRoads" === name) {
+                for (const chunk of getLoadedChunks())
+                    queueChunkVisualRefresh(chunk, `feature_${name}`);
+            }
+        }
+
+        function markFeatureFault(name, failure, context) {
+            if (!(name in featureState))
+                return;
+            const message = failure && (failure.message || String(failure)) || "Unbekannter Fehler";
+            featureFaultState.faults || (featureFaultState.faults = {});
+            featureFaultState.faults[name] = {
+                message,
+                context: context || "",
+                at: Date.now()
+            };
+            const wasActive = !!featureState[name];
+            featureState[name] = !1;
+            saveFeatureStateToCookies();
+            saveFeatureFaultStateToCookies();
+            wasActive && applyFeatureSideEffects(name);
+            warn(`Feature automatisch deaktiviert: ${name}${context ? ` (${context})` : ""}:`, failure);
+            notifyRuntime(`${name} wurde wegen einem Fehler deaktiviert.`, "error");
+            syncFeatureMenu();
+        }
+
         function setFeature(name, value) {
             if (!(name in featureState))
                 return;
             const oldValue = featureState[name];
             featureState[name] = !!value;
+            featureState[name] && clearFeatureFault(name);
             if ("hardStart" === name && featureState.hardStart) {
                 featureState.survival = !0;
                 featureState.police = !0;
@@ -4079,48 +4216,27 @@
                 setPlayerMoney(0);
                 runtimeState.hardStartLocked = !0;
             }
-            if (oldValue !== featureState[name]) {
-                if ("customBuildings" === name || "auto3dBuildings" === name) {
-                    for (const chunk of getLoadedChunks())
-                        resetCustomBuildingPreparationForChunk(chunk);
-                    if (isAny3dBuildingFeatureEnabled())
-                        prepareCustomBuildingsForChunks(getLoadedChunks(), "feature_toggle");
-                    else
-                        clearCustomBuildingVisualsForLoadedChunks();
-                } else if ("townSigns" === name) {
-                    featureState.townSigns ? queueTownRebuild("feature_toggle") : clearTownSignsVisuals();
-                } else if ("shops" === name) {
-                    featureState.shops ? rebuildPoiOverlays() : clearRuntimeOverlayItemsByKind(["poi", "bees"]);
-                } else if ("birds" === name && !featureState.birds) {
-                    clearRuntimeOverlayItemsByKind(["birds"]);
-                } else if ("bees" === name && !featureState.bees) {
-                    clearRuntimeOverlayItemsByKind(["bees"]);
-                } else if ("aircraft" === name && !featureState.aircraft) {
-                    clearAircraftFeatureVisuals();
-                } else if ("customMissions" === name) {
-                    syncRuntimeCustomMissionOptions();
-                } else if ("vehicleTuning" === name && !featureState.vehicleTuning) {
-                    vehicleTuningState.active = !1;
-                    vehicleTuningState.visible = !1;
-                    vehicleTuningState.panel && (vehicleTuningState.panel.style.display = "none");
-                    syncVehicleTuningPanel();
-                } else if ("buildingTextures" === name) {
-                    notifyRuntime("Building textures werden nach dem naechsten Reload voll wirksam.");
-                } else if ("enhancedTrees" === name) {
-                    notifyRuntime("Enhanced trees gelten fuer neue Chunks oder nach Reload.");
-                } else if ("enhancedTerrain" === name || "enhancedRoads" === name) {
-                    for (const chunk of getLoadedChunks())
-                        queueChunkVisualRefresh(chunk, `feature_${name}`);
-                }
-            }
+            oldValue !== featureState[name] && applyFeatureSideEffects(name);
             saveFeatureStateToCookies();
             syncFeatureMenu();
         }
 
         function syncFeatureMenu() {
             for (const panel of document.querySelectorAll("#__tmFeatureMenuSection,#__tmFeatureStartMenuSection"))
-                for (const input of panel.querySelectorAll("input[data-feature]"))
+                for (const input of panel.querySelectorAll("input[data-feature]")) {
+                    const fault = getFeatureFault(input.dataset.feature);
+                    const row = input.closest("label");
                     input.checked = !!featureState[input.dataset.feature];
+                    input.title = fault ? `${fault.context || "Feature-Fehler"}: ${fault.message}` : "";
+                    if (row) {
+                        row.title = input.title;
+                        row.style.color = fault ? "#ff9f9f" : "";
+                        row.style.background = fault ? "rgba(120,0,0,.28)" : "";
+                        row.style.border = fault ? "1px solid rgba(255,95,95,.75)" : "1px solid transparent";
+                        row.style.borderRadius = "6px";
+                        row.style.padding = "3px 5px";
+                    }
+                }
         }
 
         function createFeatureMenuPanel(id, title) {
@@ -6238,7 +6354,11 @@
                 headers: {
                     Accept: "application/json"
                 }
-            }).then((response => response.json())).then((results => {
+            }).then((response => {
+                if (!response.ok)
+                    throw new Error(`HTTP ${response.status}`);
+                return response.json();
+            })).then((results => {
                 const result = Array.isArray(results) ? results[0] : null;
                 const lat = Number(result && result.lat);
                 const lon = Number(result && result.lon);
@@ -6272,13 +6392,16 @@
                 if (!addressText)
                     continue;
                 const position = await fetchCustomBuildingAddressPosition(addressText);
-                if (!position)
+                if (!position) {
+                    featureState.customBuildings && markFeatureFault("customBuildings", new Error(`Adresse nicht gefunden: ${addressText}`), "Adress-Haus");
                     continue;
+                }
                 rawEntry.match = deepMergeConfig(match, {
                     near: [position.x, position.z],
                     radius: Math.max(12, Number(match.radius || match.addressRadius) || 45),
                     __addressResolved: position.label || addressText
                 });
+                addCustomBuildingPriorityTarget(position, position.label || addressText);
             }
             return catalog;
         }
@@ -6290,6 +6413,7 @@
                 cache: "no-store"
             }).then((response => response.text())).then((text => normalizeBuildingCatalog(parseBuildingConfigText(text)))).then((catalog => hydrateCustomBuildingAddressMatches(catalog))).catch((catalogError => {
                 warn("Externe buildings.js konnte nicht geladen werden:", catalogError);
+                featureState.customBuildings && markFeatureFault("customBuildings", catalogError, "buildings.js laden");
                 return {
                     templates: {},
                     buildings: []
@@ -6322,7 +6446,7 @@
         }
 
         function shouldHideOriginalBuildingMeshesForChunk(chunk) {
-            return !!(isAny3dBuildingFeatureEnabled() && toSafeArray(chunk && chunk.__tmMatchedCustomBuildings).length);
+            return !!(isAny3dBuildingFeatureEnabled() && chunk && chunk.__tmCustomBuildingOverlayReady);
         }
 
         function applyOriginalBuildingMeshVisibilityForChunk(chunk) {
@@ -6395,6 +6519,7 @@
             chunk.__tmCustomBuildingsPrepared = !1;
             chunk.__tmCustomBuildingsPreparePromise = null;
             chunk.__tmMatchedCustomBuildings = [];
+            chunk.__tmCustomBuildingOverlayReady = !1;
             runtimeState.customBuildingEntriesByChunk.delete(chunk);
             applyOriginalBuildingMeshVisibilityForChunk(chunk);
         }
@@ -6435,6 +6560,8 @@
             if (!entry || !entry.match)
                 return !1;
             const match = entry.match;
+            if (getCustomBuildingAddressText(match) && !Array.isArray(match.near))
+                return !1;
             if (match.id && match.id !== getBuildingDebugId(chunk, building))
                 return !1;
             if (Array.isArray(match.chunk) && 2 === match.chunk.length)
@@ -6448,6 +6575,75 @@
                     return !1;
             }
             return !0;
+        }
+
+        function getAddressMatchPosition(entry) {
+            const match = entry && entry.match;
+            if (!match || !Array.isArray(match.near) || match.near.length < 2)
+                return null;
+            const x = Number(match.near[0]);
+            const z = Number(match.near[1]);
+            return Number.isFinite(x) && Number.isFinite(z) ? {
+                x,
+                z
+            } : null;
+        }
+
+        function isWorldPositionInsideChunk(position, chunk, padding=0) {
+            if (!position || !chunk)
+                return !1;
+            const cx = Number(chunk.cx) || 0;
+            const cz = Number(chunk.cz) || 0;
+            const halfWidth = (Number(chunk.width) || 512) / 2 + Math.max(0, Number(padding) || 0);
+            const halfHeight = (Number(chunk.height) || 512) / 2 + Math.max(0, Number(padding) || 0);
+            return Math.abs(position.x - cx) <= halfWidth && Math.abs(position.z - cz) <= halfHeight;
+        }
+
+        function getStandaloneBuildingHalfSize(entry) {
+            let halfX = 4;
+            let halfZ = 4;
+            for (const part of toSafeArray(entry && entry.parts)) {
+                const size = getDetailSize(part, [1, 1, 1]);
+                const position = part && part.position || [0, 0, 0];
+                halfX = Math.max(halfX, Math.abs(Number(position[0]) || 0) + size[0] / 2);
+                halfZ = Math.max(halfZ, Math.abs(Number(position[2]) || 0) + size[2] / 2);
+            }
+            const match = entry && entry.match || {};
+            return {
+                x: Math.max(3, Number(match.width) / 2 || Number(entry && entry.width) / 2 || halfX + .5),
+                z: Math.max(3, Number(match.depth) / 2 || Number(entry && entry.depth) / 2 || halfZ + .5)
+            };
+        }
+
+        function createStandaloneAddressBuilding(entry, chunk, index) {
+            const position = getAddressMatchPosition(entry);
+            if (!position || !isWorldPositionInsideChunk(position, chunk, Number(entry && entry.match && entry.match.radius) || 45))
+                return null;
+            const cx = Number(chunk && chunk.cx) || 0;
+            const cz = Number(chunk && chunk.cz) || 0;
+            const localX = position.x - cx;
+            const localZ = position.z - cz;
+            let y = 0;
+            try {
+                if (chunk && "function" == typeof chunk.getTerrainYLoc) {
+                    const terrainY = chunk.getTerrainYLoc(localX, localZ);
+                    Number.isFinite(terrainY) && terrainY > -999 && (y = terrainY);
+                } else
+                    y = getTerrainYWorld(position, 0);
+            } catch (terrainError) {}
+            const half = getStandaloneBuildingHalfSize(entry);
+            const THREE = globalState.THREE;
+            return {
+                __tmStandaloneAddressBuilding: !0,
+                index: -1 - (Number(index) || 0),
+                level: Math.max(1, Number(entry && entry.base && entry.base.floors) || 1),
+                type: 9,
+                y,
+                chunkCenter: new THREE.Vector3(cx,0,cz),
+                houseCenterLocal: new THREE.Vector3(localX,y,localZ),
+                houseCenter: new THREE.Vector3(position.x,y,position.z),
+                points: [[localX - half.x, localZ - half.z], [localX + half.x, localZ - half.z], [localX + half.x, localZ + half.z], [localX - half.x, localZ + half.z]]
+            };
         }
 
         function isAuto3dCatalogEnabled(catalog) {
@@ -7723,8 +7919,9 @@
             const position = detail.position || [0, 0, 0];
             const rotation = getDetailRotationRadians(detail);
             const offsetX = detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.x) || 0;
+            const offsetY = detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.y) || 0;
             const offsetZ = detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.z) || 0;
-            object.position.set(offsetX + (Number(position[0]) || 0), Number(position[1]) || 0, offsetZ + (Number(position[2]) || 0));
+            object.position.set(offsetX + (Number(position[0]) || 0), offsetY + (Number(position[1]) || 0), offsetZ + (Number(position[2]) || 0));
             object.rotation.set(rotation[0], rotation[1], rotation[2]);
             return object;
         }
@@ -7832,8 +8029,9 @@
             }
             const position = detail.position || [0, 0, 0];
             const offsetX = detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.x) || 0;
+            const offsetY = detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.y) || 0;
             const offsetZ = detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.z) || 0;
-            const center = new THREE.Vector3(offsetX + (Number(position[0]) || 0), Number(position[1]) || 0, offsetZ + (Number(position[2]) || 0));
+            const center = new THREE.Vector3(offsetX + (Number(position[0]) || 0), offsetY + (Number(position[1]) || 0), offsetZ + (Number(position[2]) || 0));
             const [rx, ry, rz] = getDetailRotationRadians(detail);
             const hingeRight = "right" === String(detail.hinge || detail.hingeSide || "").toLowerCase();
             const openOut = !1 !== detail.openOut;
@@ -8061,10 +8259,12 @@
                     sides: spec.sides || {}
                 }));
             }
-            const anchorPoint = match.building.houseCenterLocal || {
+            const anchorPoint = Object.assign({
+                y: baseY
+            }, match.building.houseCenterLocal || {
                 x: match.building.houseCenter ? match.building.houseCenter.x - (match.building.chunkCenter && match.building.chunkCenter.x || 0) : 0,
                 z: match.building.houseCenter ? match.building.houseCenter.z - (match.building.chunkCenter && match.building.chunkCenter.z || 0) : 0
-            };
+            });
             for (const part of toSafeArray(spec.parts)) {
                 const detailMesh = createPrimitiveDetailMesh(part, anchorPoint);
                 detailMesh && group.add(detailMesh);
@@ -8088,33 +8288,43 @@
                 syncBuildingFactoryBuildingSources(chunk, !0);
                 chunk.__tmMatchedCustomBuildings = matched;
                 chunk.__tmCustomBuildingsPrepared = !0;
+                chunk.__tmCustomBuildingOverlayReady = !1;
                 runtimeState.customBuildingEntriesByChunk.set(chunk, matched);
                 applyOriginalBuildingMeshVisibilityForChunk(chunk);
                 return matched;
             }
-            const addCustomBuildingMatch = (id, entry, building) => {
+            const addCustomBuildingMatch = (id, entry, building, options={}) => {
                 if (!building || matchedBuildings.has(building))
                     return;
-                matchedBuildings.add(building);
+                options.standalone || matchedBuildings.add(building);
                 matched.push({
                     id,
                     entry,
                     building
                 });
-                suppressions.push({
+                options.standalone || suppressions.push({
                     id,
                     naa: cloneJson(building.points, []),
                     list: cloneJson(toSafeArray(entry && entry.bundleParts), [])
                 });
             };
             if (featureState.customBuildings)
-                for (const rawEntry of toSafeArray(catalog && catalog.buildings)) {
+                for (let entryIndex = 0; entryIndex < toSafeArray(catalog && catalog.buildings).length; entryIndex++) {
+                    const rawEntry = toSafeArray(catalog && catalog.buildings)[entryIndex];
                     const resolved = resolveBuildingTemplate(rawEntry, catalog && catalog.templates);
+                    let matchedExistingBuilding = !1;
                     for (const building of sourceBuildings)
                         if (building && building.houseCenter && matchBuildingEntry(resolved, chunk, building)) {
                             const id = resolved.id || getBuildingDebugId(chunk, building);
                             addCustomBuildingMatch(id, resolved, building);
+                            matchedExistingBuilding = !0;
                         }
+                    if (!matchedExistingBuilding && getCustomBuildingAddressText(resolved && resolved.match)) {
+                        const standalone = createStandaloneAddressBuilding(resolved, chunk, entryIndex);
+                        standalone && addCustomBuildingMatch(resolved.id || `address_${entryIndex}_${Math.round(standalone.houseCenter.x)}_${Math.round(standalone.houseCenter.z)}`, resolved, standalone, {
+                            standalone: !0
+                        });
+                    }
                 }
             if (isAuto3dCatalogEnabled(catalog))
                 for (const building of sourceBuildings) {
@@ -8128,6 +8338,7 @@
             syncBuildingFactoryBuildingSources(chunk, !0);
             chunk.__tmMatchedCustomBuildings = matched;
             chunk.__tmCustomBuildingsPrepared = !0;
+            chunk.__tmCustomBuildingOverlayReady = !1;
             runtimeState.customBuildingEntriesByChunk.set(chunk, matched);
             applyOriginalBuildingMeshVisibilityForChunk(chunk);
             log(`3D-Haeuser vorbereitet fuer Chunk ${chunk.cx}/${chunk.cz}: ${matched.length} ersetzt, ${chunk.buildings.length} PNG-Haeuser bleiben.`);
@@ -8253,19 +8464,38 @@
             runtimeState.customBuildingDoorItems = runtimeState.customBuildingDoorItems.filter((item => item && item.chunk !== chunk));
             clearCustomBuildingOverlayChildren(overlay);
             overlay.userData.tmBuildSignature = "";
+            chunk.__tmCustomBuildingOverlayReady = !1;
             if (!matches.length || !isAny3dBuildingFeatureEnabled()) {
                 overlay.parent && overlay.parent.remove(overlay);
                 applyOriginalBuildingMeshVisibilityForChunk(chunk);
                 return;
             }
+            let builtCount = 0;
             for (const match of matches) {
-                const object = buildCustomBuildingObject(match);
-                object && overlay.add(object);
+                try {
+                    const object = buildCustomBuildingObject(match);
+                    if (object) {
+                        overlay.add(object);
+                        builtCount++;
+                    }
+                } catch (buildError) {
+                    markFeatureFault(match && match.entry && match.entry.__tmAuto3d ? "auto3dBuildings" : "customBuildings", buildError, `3D-Haus ${match && match.id || ""}`.trim());
+                }
             }
-            optimizeCustomBuildingOverlay(overlay);
+            if (!builtCount) {
+                overlay.parent && overlay.parent.remove(overlay);
+                applyOriginalBuildingMeshVisibilityForChunk(chunk);
+                return;
+            }
+            try {
+                optimizeCustomBuildingOverlay(overlay);
+            } catch (optimizeError) {
+                warn("Custom-Building-Optimierung fehlgeschlagen, zeige unoptimierte Geometrie:", optimizeError);
+            }
             overlay.userData.tmBuildSignature = signature;
             overlay.parent !== chunk.group && chunk.group.add(overlay);
             collectCustomBuildingDoorsForChunk(chunk, overlay);
+            chunk.__tmCustomBuildingOverlayReady = !0;
             applyOriginalBuildingMeshVisibilityForChunk(chunk);
         }
 
@@ -8275,6 +8505,7 @@
                 overlay.parent && overlay.parent.remove(overlay);
                 clearCustomBuildingOverlayChildren(overlay);
             }
+            chunk && (chunk.__tmCustomBuildingOverlayReady = !1);
             runtimeState.chunkCustomOverlayGroups.delete(chunk);
             runtimeState.customBuildingDoorItems = runtimeState.customBuildingDoorItems.filter((item => item && item.chunk !== chunk));
             resetCustomBuildingPreparationForChunk(chunk);
