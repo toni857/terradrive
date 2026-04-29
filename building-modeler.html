@@ -22,25 +22,46 @@
                 <button id="moveTool" class="tool-button" type="button">Move</button>
                 <button id="duplicateElement" class="tool-button" type="button">Duplicate</button>
                 <button id="deleteElement" class="tool-button danger" type="button">Delete</button>
-                <button id="copyCode" class="tool-button primary" type="button">Kopieren</button>
+                <button id="fillTool" class="tool-button" type="button">Fuellen</button>
+                <button id="cutTool" class="tool-button" type="button">Ausschneiden</button>
+                <button id="copyCode" class="tool-button primary" type="button">Konvertieren</button>
                 <span id="statusText" class="status">Bereit</span>
             </div>
-            <div id="viewport" class="viewport"></div>
+            <div id="viewport" class="viewport">
+                <div class="viewport-hint">Shift = Drag-Snap, V = Kanten-Modus</div>
+                <div class="mirror-panel">
+                    <label for="mirrorMode">Spiegelmodus</label>
+                    <select id="mirrorMode">
+                        <option value="off">Aus</option>
+                        <option value="quad">Alle 4 Quadranten</option>
+                        <option value="x">X gespiegelt</option>
+                        <option value="z">Z gespiegelt</option>
+                        <option value="diagA">Diagonal A</option>
+                        <option value="diagB">Diagonal B</option>
+                    </select>
+                </div>
+            </div>
             <textarea id="codeOutput" class="code-output" spellcheck="false" readonly></textarea>
         </main>
 
         <aside class="sidebar sidebar-right">
-            <div class="panel-title">Bauteile</div>
-            <div id="palette" class="palette">
-                <button type="button" draggable="true" data-type="wall">Quadratische Wand</button>
-                <button type="button" draggable="true" data-type="cylinderWall">Zylinderwand</button>
-                <button type="button" draggable="true" data-type="pyramidRoof">Pyramidisches Dach</button>
-                <button type="button" draggable="true" data-type="cone">Kegel</button>
+            <div class="tab-bar">
+                <button type="button" class="tab-button active" data-tab="palette">Bauteile</button>
+                <button type="button" class="tab-button" data-tab="inspector">Inspector</button>
+                <button type="button" class="tab-button" data-tab="settings">Einstellungen</button>
             </div>
-            <div class="panel-title">Inspector</div>
-            <form id="inspector" class="inspector"></form>
+            <section id="tab-palette" class="tab-panel active">
+                <div id="palette" class="palette"></div>
+            </section>
+            <section id="tab-inspector" class="tab-panel">
+                <form id="inspector" class="inspector"></form>
+            </section>
+            <section id="tab-settings" class="tab-panel">
+                <form id="settingsPanel" class="settings-panel"></form>
+            </section>
         </aside>
     </div>
+
     <script type="importmap">
         {
             "imports": {

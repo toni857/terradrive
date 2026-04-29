@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.1.1.0
+// @version      2.1.2.0
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -158,7 +158,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.1.1.0",
+            version: "2.1.2.0",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -6478,21 +6478,29 @@
                 }
                 const frameColor = null != sideSpec.frameColor ? sideSpec.frameColor : VISUAL_CONFIG.windowFrameColor;
                 const glassColor = null != sideSpec.glassColor ? sideSpec.glassColor : VISUAL_CONFIG.windowGlassColor;
-                const frameMaterial = new globalState.THREE.MeshLambertMaterial({
-                    color: frameColor
+                const frameMaterial = createDetailStandardMaterial({
+                    materialKind: "metal"
+                }, {
+                    color: frameColor,
+                    materialKind: "metal",
+                    transparent: !1,
+                    opacity: 1
                 });
-                const glassMaterial = new globalState.THREE.MeshLambertMaterial({
+                const glassMaterial = createDetailStandardMaterial({
+                    materialKind: "glass"
+                }, {
                     color: glassColor,
+                    materialKind: "glass",
                     transparent: !0,
-                    opacity: null != sideSpec.opacity ? clamp(Number(sideSpec.opacity) || .45, .05, .95) : .45,
-                    depthWrite: !1,
-                    side: globalState.THREE.DoubleSide
+                    opacity: null != sideSpec.opacity ? clamp(Number(sideSpec.opacity) || .55, .08, .95) : .55,
+                    roughness: .08,
+                    metalness: .05
                 });
                 const frameDepth = Math.max(.035, Number(sideSpec.frameDepth) || .08);
                 for (const rect of layout.rects) {
                     const width = rect.width;
                     const height = rect.height;
-                    const frameThickness = Math.min(width * .28, height * .22, Math.max(.06, Number(sideSpec.frameThickness) || .12));
+                    const frameThickness = null != sideSpec.frameThickness ? Math.max(.04, Number(sideSpec.frameThickness) || .04) : Math.max(.04, Math.min(width, height) * .09);
                     const along = rect.centerU - edgeLength / 2;
                     const basePointX = midX + dx * along;
                     const basePointZ = midZ + dz * along;
@@ -6507,7 +6515,7 @@
                     addWindowPart([width, frameThickness, frameDepth], 0, -height / 2 + frameThickness / 2, frameMaterial, .055);
                     addWindowPart([frameThickness, Math.max(.08, height - 2 * frameThickness), frameDepth], -width / 2 + frameThickness / 2, 0, frameMaterial, .055);
                     addWindowPart([frameThickness, Math.max(.08, height - 2 * frameThickness), frameDepth], width / 2 - frameThickness / 2, 0, frameMaterial, .055);
-                    addWindowPart([Math.max(.08, width - 2 * frameThickness), Math.max(.08, height - 2 * frameThickness), .035], 0, 0, glassMaterial, .09);
+                    addWindowPart([Math.max(.1, width - 2 * frameThickness), Math.max(.1, height - 2 * frameThickness), Math.max(.03, frameDepth * .45)], 0, 0, glassMaterial, .09);
                 }
             }
         }
@@ -6521,14 +6529,89 @@
             ];
         }
 
+        function getDetailMaterialPreset(kind) {
+            const presets = {
+                plaster: {
+                    roughness: .94,
+                    metalness: .02
+                },
+                brick: {
+                    roughness: .9,
+                    metalness: .03
+                },
+                concrete: {
+                    roughness: .98,
+                    metalness: .04
+                },
+                naturalStone: {
+                    roughness: .97,
+                    metalness: .03
+                },
+                wood: {
+                    roughness: .83,
+                    metalness: .08
+                },
+                glass: {
+                    roughness: .08,
+                    metalness: .05
+                },
+                metal: {
+                    roughness: .45,
+                    metalness: .75
+                },
+                roofTiles: {
+                    roughness: .92,
+                    metalness: .02
+                },
+                ribbedMetal: {
+                    roughness: .5,
+                    metalness: .72
+                },
+                shingles: {
+                    roughness: .93,
+                    metalness: .02
+                },
+                tile: {
+                    roughness: .72,
+                    metalness: .08
+                },
+                laminate: {
+                    roughness: .68,
+                    metalness: .06
+                },
+                castFloor: {
+                    roughness: .52,
+                    metalness: .16
+                }
+            };
+            return presets[kind] || presets.plaster;
+        }
+
+        function createDetailStandardMaterial(detail, overrides={}) {
+            const THREE = globalState.THREE;
+            const preset = getDetailMaterialPreset(overrides.materialKind || detail && detail.materialKind);
+            const transparent = null != overrides.transparent ? overrides.transparent : !!(detail && detail.transparent) || null != (detail && detail.opacity) && Number(detail.opacity) < 1;
+            const opacity = null != overrides.opacity ? overrides.opacity : null != (detail && detail.opacity) ? clamp(Number(detail.opacity) || 0, .05, 1) : 1;
+            const materialOptions = {
+                color: null != overrides.color ? overrides.color : null != (detail && detail.color) ? detail.color : 12632256,
+                roughness: null != overrides.roughness ? overrides.roughness : preset.roughness,
+                metalness: null != overrides.metalness ? overrides.metalness : preset.metalness,
+                transparent,
+                opacity,
+                depthWrite: !(transparent || opacity < 1),
+                side: THREE.DoubleSide
+            };
+            return THREE.MeshStandardMaterial ? new THREE.MeshStandardMaterial(materialOptions) : new THREE.MeshLambertMaterial(materialOptions);
+        }
+
         function createDetailMaterial(detail) {
-            return new globalState.THREE.MeshLambertMaterial({
-                color: null != detail.color ? detail.color : 12632256,
-                transparent: !!detail.transparent || null != detail.opacity && Number(detail.opacity) < 1,
-                opacity: null != detail.opacity ? clamp(Number(detail.opacity) || 0, 0, 1) : 1,
-                depthWrite: !(!!detail.transparent || null != detail.opacity && Number(detail.opacity) < 1),
-                side: globalState.THREE.DoubleSide
-            });
+            return createDetailStandardMaterial(detail);
+        }
+
+        function createRuntimeBox(size, material, position=[0, 0, 0]) {
+            const mesh = new globalState.THREE.Mesh(new globalState.THREE.BoxGeometry(size[0], size[1], size[2]),material);
+            mesh.position.set(position[0], position[1], position[2]);
+            return mesh;
         }
 
         function pushFace(indices, a, b, c, d) {
@@ -6663,6 +6746,51 @@
             return geometry;
         }
 
+        function positionDetailObject(object, detail, anchorPoint) {
+            if (!object || !detail)
+                return object;
+            const position = detail.position || [0, 0, 0];
+            const rotation = detail.rotation || [0, 0, 0];
+            const offsetX = detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.x) || 0;
+            const offsetZ = detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.z) || 0;
+            object.position.set(offsetX + (Number(position[0]) || 0), Number(position[1]) || 0, offsetZ + (Number(position[2]) || 0));
+            object.rotation.set((Number(rotation[0]) || 0) * Math.PI / 180, (Number(rotation[1]) || 0) * Math.PI / 180, (Number(rotation[2]) || 0) * Math.PI / 180);
+            return object;
+        }
+
+        function createWindowDetailObject(detail, anchorPoint) {
+            const THREE = globalState.THREE;
+            const size = getDetailSize(detail, [1.2, 1.4, .16]);
+            const width = Math.max(.2, size[0]);
+            const height = Math.max(.2, size[1]);
+            const depth = Math.max(.05, size[2]);
+            const frameThickness = Math.max(.04, Math.min(width, height) * .09);
+            const group = new THREE.Group;
+            group.name = "__tmCustomBuildingWindow";
+            const frameMaterial = createDetailStandardMaterial(detail, {
+                color: null != detail.frameColor ? detail.frameColor : null != detail.color ? detail.color : 0xf1eadf,
+                materialKind: "metal",
+                transparent: !1,
+                opacity: 1
+            });
+            const glassMaterial = createDetailStandardMaterial(detail, {
+                color: null != detail.glassColor ? detail.glassColor : 0x9dd5ff,
+                materialKind: "glass",
+                transparent: !0,
+                opacity: clamp(Number(detail.opacity) || .55, .08, .95),
+                roughness: .08,
+                metalness: .05
+            });
+            group.add(createRuntimeBox([width, frameThickness, depth], frameMaterial, [0, height / 2 - frameThickness / 2, 0]));
+            group.add(createRuntimeBox([width, frameThickness, depth], frameMaterial, [0, -height / 2 + frameThickness / 2, 0]));
+            group.add(createRuntimeBox([frameThickness, Math.max(.05, height - frameThickness * 2), depth], frameMaterial, [-width / 2 + frameThickness / 2, 0, 0]));
+            group.add(createRuntimeBox([frameThickness, Math.max(.05, height - frameThickness * 2), depth], frameMaterial, [width / 2 - frameThickness / 2, 0, 0]));
+            const glass = createRuntimeBox([Math.max(.1, width - frameThickness * 2), Math.max(.1, height - frameThickness * 2), Math.max(.03, depth * .45)], glassMaterial, [0, 0, 0]);
+            glass.renderOrder = 20;
+            group.add(glass);
+            return positionDetailObject(group, detail, anchorPoint);
+        }
+
         function isDoorDetail(detail) {
             if (!detail)
                 return !1;
@@ -6685,7 +6813,50 @@
             if (!globalState.THREE || !detail)
                 return null;
             const THREE = globalState.THREE;
+            const explicitDoor = "door" === String(detail.type || "").toLowerCase();
             const size = getDetailSize(detail, [1.05, 2.25, .1]);
+            if (explicitDoor) {
+                const width = Math.max(.25, size[0]);
+                const height = Math.max(.25, size[1]);
+                const depth = Math.max(.04, size[2]);
+                const frameThickness = Math.max(.05, Math.min(width, height) * .08);
+                const group = new THREE.Group;
+                group.name = "__tmCustomBuildingDoorFrame";
+                const frameMaterial = createDetailStandardMaterial(detail, {
+                    color: null != detail.frameColor ? detail.frameColor : 0xece0cb,
+                    materialKind: "wood",
+                    transparent: !1,
+                    opacity: 1
+                });
+                const leafMaterial = createDetailStandardMaterial(detail, {
+                    materialKind: detail.materialKind || "wood"
+                });
+                group.add(createRuntimeBox([width, frameThickness, depth], frameMaterial, [0, height / 2 - frameThickness / 2, 0]));
+                group.add(createRuntimeBox([frameThickness, height, depth], frameMaterial, [-width / 2 + frameThickness / 2, 0, 0]));
+                group.add(createRuntimeBox([frameThickness, height, depth], frameMaterial, [width / 2 - frameThickness / 2, 0, 0]));
+                const hingeLeft = String(detail.hingeSide || detail.hinge || "left").toLowerCase() !== "right";
+                const pivot = new THREE.Group;
+                pivot.name = "__tmCustomBuildingDoor";
+                pivot.position.set(hingeLeft ? -width / 2 + frameThickness / 2 : width / 2 - frameThickness / 2, 0, 0);
+                const leafWidth = Math.max(.08, width - frameThickness * 1.5);
+                const leafHeight = Math.max(.08, height - frameThickness * 1.5);
+                const leaf = createRuntimeBox([leafWidth, leafHeight, Math.max(.03, depth * .82)], leafMaterial, [hingeLeft ? leafWidth / 2 : -leafWidth / 2, 0, 0]);
+                leaf.userData.tmDynamicDoor = !0;
+                pivot.add(leaf);
+                const modelerOpen = detail.isOpen ? clamp(Number(detail.openAngle) || 90, 0, 180) : 0;
+                const interactiveOpen = clamp(Number(detail.openAngle) || 90, 0, 180) * Math.PI / 180 * (hingeLeft ? -1 : 1);
+                pivot.rotation.y = modelerOpen * Math.PI / 180 * (hingeLeft ? -1 : 1);
+                pivot.userData.tmDoor = {
+                    closedY: 0,
+                    openY: interactiveOpen,
+                    current: detail.isOpen ? 1 : 0,
+                    radius: Math.max(4, Number(detail.openRadius) || 9),
+                    speed: Math.max(.8, Number(detail.openSpeed) || 4.5)
+                };
+                pivot.userData.tmDynamicDoor = !0;
+                group.add(pivot);
+                return positionDetailObject(group, detail, anchorPoint);
+            }
             const position = detail.position || [0, 0, 0];
             const rotation = detail.rotation || [0, 0, 0];
             const offsetX = detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.x) || 0;
@@ -6726,6 +6897,8 @@
                 return null;
             const type = String(detail.type || "").toLowerCase();
             let geometry = null;
+            if ("window" === type)
+                return createWindowDetailObject(detail, anchorPoint);
             if (isDoorDetail(detail))
                 return createDoorDetailObject(detail, anchorPoint);
             if ("box" === type || "wall" === type || "door" === type) {
