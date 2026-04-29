@@ -4,9 +4,9 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.1.0
-// @downloadURL  https://toni857.github.io/terradrive/Texture%20Override%20(Universal%20Safe)-1.1.1.1.user.js
-// @updateURL    https://toni857.github.io/terradrive/Texture%20Override%20(Universal%20Safe)-1.1.1.1.user.js
+// @version      2.1.1.0
+// @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
+// @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
 
 (function tmCollisionEarlyLoadGuard() {
@@ -158,7 +158,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.1.0",
+            version: "2.1.1.0",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -5977,6 +5977,80 @@
             return !0;
         }
 
+        function isAuto3dCatalogEnabled(catalog) {
+            if (!catalog)
+                return !0;
+            if (!1 === catalog.auto3d || !1 === catalog.auto3D || catalog.settings && (!1 === catalog.settings.auto3d || !1 === catalog.settings.auto3D))
+                return !1;
+            return !0;
+        }
+
+        function getFootprintArea(points) {
+            if (!Array.isArray(points) || points.length < 3)
+                return 0;
+            let area = 0;
+            for (let index = 0; index < points.length; index++) {
+                const current = points[index];
+                const next = points[(index + 1) % points.length];
+                area += (Number(current.x) || 0) * (Number(next.z) || 0) - (Number(next.x) || 0) * (Number(current.z) || 0);
+            }
+            return Math.abs(area) / 2;
+        }
+
+        function pickExistingTemplate(templateNames, templates) {
+            for (const templateName of templateNames)
+                if (templates && templates[templateName])
+                    return templateName;
+            const fallback = templates && Object.keys(templates).find((templateName => templateName && "modeler_house_demo" !== templateName));
+            return fallback || null;
+        }
+
+        function pickAutoBuildingTemplate(building, chunk, templates) {
+            const level = Math.max(1, Math.round(Number(building && building.level) || 2));
+            const points = getBuildingFootprint(building, {
+                base: {
+                    inset: 0
+                }
+            });
+            const area = getFootprintArea(points);
+            const seed = Math.abs(Math.round((Number(chunk && chunk.cx) || 0) * .13 + (Number(chunk && chunk.cz) || 0) * .17 + (Number(building && building.index) || 0) * 31));
+            if (level >= 6)
+                return pickExistingTemplate(seed % 2 ? ["glass_office", "city_apartment"] : ["city_apartment", "glass_office"], templates);
+            if (level >= 4)
+                return pickExistingTemplate(seed % 3 ? ["city_apartment", "alpine_hotel", "school_building"] : ["alpine_hotel", "city_apartment"], templates);
+            if (area > 520)
+                return pickExistingTemplate(seed % 2 ? ["logistics_warehouse", "school_building", "supermarket_block"] : ["school_building", "logistics_warehouse"], templates);
+            if (area > 260 && level <= 2)
+                return pickExistingTemplate(seed % 3 ? ["supermarket_block", "modern_villa", "corner_shop"] : ["modern_villa", "supermarket_block"], templates);
+            if (level <= 1)
+                return pickExistingTemplate(seed % 3 ? ["lakeside_cottage", "farm_barn", "chalet_house"] : ["farm_barn", "lakeside_cottage"], templates);
+            return pickExistingTemplate([
+                ["chalet_house", "row_house", "modern_villa"][seed % 3],
+                "corner_shop",
+                "alpine_hotel",
+                "modern_villa",
+                "chalet_house"
+            ], templates);
+        }
+
+        function createAuto3dBuildingEntry(building, chunk, catalog) {
+            if (!building || !building.houseCenter || !Array.isArray(building.points) || building.points.length < 3)
+                return null;
+            const templateName = pickAutoBuildingTemplate(building, chunk, catalog && catalog.templates);
+            if (!templateName)
+                return null;
+            const id = `auto3d_${getBuildingDebugId(chunk, building)}`;
+            const entry = {
+                id,
+                template: templateName,
+                match: {
+                    id: getBuildingDebugId(chunk, building)
+                },
+                __tmAuto3d: !0
+            };
+            return resolveBuildingTemplate(entry, catalog && catalog.templates);
+        }
+
         function getBuildingFootprint(building, spec) {
             const rawPoints = Array.isArray(spec && spec.footprint) && spec.footprint.length >= 3 ? spec.footprint : toSafeArray(building && building.points);
             if (!rawPoints.length)
@@ -6755,23 +6829,37 @@
             chunk.__tmCustomBuildingsPreparePromise = ensureBuildingCatalogLoaded().then((catalog => {
                 const matched = [];
                 const suppressions = [];
+                const matchedBuildings = new Set;
+                const addCustomBuildingMatch = (id, entry, building) => {
+                    if (!building || matchedBuildings.has(building))
+                        return;
+                    matchedBuildings.add(building);
+                    matched.push({
+                        id,
+                        entry,
+                        building
+                    });
+                    suppressions.push({
+                        id,
+                        naa: cloneJson(building.points, []),
+                        list: cloneJson(toSafeArray(entry && entry.bundleParts), [])
+                    });
+                };
                 for (const rawEntry of toSafeArray(catalog && catalog.buildings)) {
                     const resolved = resolveBuildingTemplate(rawEntry, catalog.templates);
                     for (const building of toSafeArray(chunk.buildings))
                         if (building && building.houseCenter && matchBuildingEntry(resolved, chunk, building)) {
                             const id = resolved.id || getBuildingDebugId(chunk, building);
-                            matched.push({
-                                id,
-                                entry: resolved,
-                                building
-                            });
-                            suppressions.push({
-                                id,
-                                naa: cloneJson(building.points, []),
-                                list: cloneJson(toSafeArray(resolved.bundleParts), [])
-                            });
+                            addCustomBuildingMatch(id, resolved, building);
                         }
                 }
+                if (isAuto3dCatalogEnabled(catalog))
+                    for (const building of toSafeArray(chunk.buildings)) {
+                        if (!building || !building.houseCenter || matchedBuildings.has(building))
+                            continue;
+                        const autoEntry = createAuto3dBuildingEntry(building, chunk, catalog);
+                        autoEntry && addCustomBuildingMatch(autoEntry.id || getBuildingDebugId(chunk, building), autoEntry, building);
+                    }
                 chunk.custome_buildings = toSafeArray(chunk.__tmOriginalCustomBuildings).concat(suppressions);
                 chunk.__tmMatchedCustomBuildings = matched;
                 chunk.__tmCustomBuildingsPrepared = !0;
