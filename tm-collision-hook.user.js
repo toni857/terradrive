@@ -4886,66 +4886,328 @@
             const THREE = globalState.THREE;
             const group = new THREE.Group;
             group.name = "__tmPoliceCar";
+            const makeMat = (color, extra={}) => THREE.MeshStandardMaterial ? new THREE.MeshStandardMaterial(Object.assign({
+                color,
+                roughness: .55,
+                metalness: .28
+            }, extra)) : new THREE.MeshLambertMaterial({
+                color
+            });
+            const paintDark = makeMat(0x0c1621, {
+                metalness: .46,
+                roughness: .36
+            });
+            const paintWhite = makeMat(0xf5f8fb, {
+                metalness: .18,
+                roughness: .44
+            });
+            const paintBlue = makeMat(0x214fba, {
+                metalness: .24,
+                roughness: .42
+            });
+            const paintRed = makeMat(0xc32337, {
+                metalness: .24,
+                roughness: .42
+            });
+            const trim = makeMat(0x1b1f24, {
+                metalness: .62,
+                roughness: .34
+            });
+            const glass = makeMat(0x83b8d8, {
+                transparent: !0,
+                opacity: .72,
+                metalness: .08,
+                roughness: .12
+            });
             const lightRed = new THREE.MeshBasicMaterial({
                 color: 0xff2030
             });
             const lightBlue = new THREE.MeshBasicMaterial({
                 color: 0x2f77ff
             });
-            const glass = new THREE.MeshLambertMaterial({
-                color: 0x83b8d8
-            });
-            group.add(createEllipsoid([5.7, 1.05, 2.2], 0x183b78, [0, .88, 0]));
-            group.add(createEllipsoid([2.65, .92, 1.7], 0xf2f2ef, [-.25, 1.48, 0]));
-            group.add(createEllipsoid([1.65, .5, 1.74], 0x17305e, [1.72, 1.12, 0]));
-            group.add(createEllipsoid([1.3, .45, 1.62], 0x244f99, [-2.08, 1.08, 0]));
-            group.add(createBox([.08, .42, 1.38], 0xffffff, [.15, 1.47, 0]));
-            group.add(createBox([.08, .42, 1.38], 0xffffff, [-1.08, 1.47, 0]));
-            const windshield = createBox([.12, .52, 1.42], 0x83b8d8, [1.12, 1.56, 0]);
+            group.add(createEllipsoid([6.1, 1.15, 2.34], 0x0c1621, [0, .92, 0], paintDark));
+            group.add(createEllipsoid([3.25, 1.02, 1.92], 0xf5f8fb, [-.18, 1.54, 0], paintWhite));
+            group.add(createEllipsoid([1.9, .54, 1.84], 0x0f1f33, [1.95, 1.06, 0], trim));
+            group.add(createEllipsoid([1.52, .5, 1.72], 0x0f1f33, [-2.12, 1.06, 0], trim));
+            const hoodStripe = createBox([1.8, .05, 1.2], 0x214fba, [1.78, 1.3, 0]);
+            hoodStripe.material = paintBlue;
+            group.add(hoodStripe);
+            const doorPanelLeft = createBox([2.38, .66, .08], 0xf5f8fb, [-.1, 1.16, -1.01]);
+            const doorPanelRight = createBox([2.38, .66, .08], 0xf5f8fb, [-.1, 1.16, 1.01]);
+            doorPanelLeft.material = paintWhite;
+            doorPanelRight.material = paintWhite;
+            group.add(doorPanelLeft, doorPanelRight);
+            const sideBlueLeft = createBox([2.95, .18, .05], 0x214fba, [-.05, .96, -1.12]);
+            const sideBlueRight = createBox([2.95, .18, .05], 0x214fba, [-.05, .96, 1.12]);
+            const sideRedLeft = createBox([1.18, .16, .05], 0xc32337, [-1.55, 1.02, -1.12]);
+            const sideRedRight = createBox([1.18, .16, .05], 0xc32337, [-1.55, 1.02, 1.12]);
+            sideBlueLeft.material = paintBlue;
+            sideBlueRight.material = paintBlue;
+            sideRedLeft.material = paintRed;
+            sideRedRight.material = paintRed;
+            group.add(sideBlueLeft, sideBlueRight, sideRedLeft, sideRedRight);
+            group.add(createBox([.08, .42, 1.54], 0xffffff, [.08, 1.53, 0]));
+            group.add(createBox([.08, .42, 1.54], 0xffffff, [-1.18, 1.53, 0]));
+            const windshield = createBox([.12, .58, 1.52], 0x83b8d8, [1.16, 1.6, 0]);
             windshield.material = glass;
             group.add(windshield);
-            const rearWindow = createBox([.12, .48, 1.36], 0x83b8d8, [-1.48, 1.54, 0]);
+            const rearWindow = createBox([.12, .5, 1.42], 0x83b8d8, [-1.55, 1.56, 0]);
             rearWindow.material = glass;
             group.add(rearWindow);
+            const sideWindowL = createBox([1.7, .42, .06], 0x83b8d8, [-.2, 1.56, -1.01]);
+            const sideWindowR = createBox([1.7, .42, .06], 0x83b8d8, [-.2, 1.56, 1.01]);
+            sideWindowL.material = glass;
+            sideWindowR.material = glass;
+            group.add(sideWindowL, sideWindowR);
             const lightbar = new THREE.Group;
             lightbar.name = "__tmPoliceLightbar";
-            const red = createBox([.64, .2, .42], 0xff2030, [-.32, 1.96, -.24]);
+            const lightbarBase = createBox([1.28, .12, .52], 0x171a1f, [-.35, 1.94, 0]);
+            lightbarBase.material = trim;
+            const lightbarGlass = createBox([1.3, .22, .58], 0xb5d4ff, [-.35, 2, 0]);
+            lightbarGlass.material = makeMat(0xb5d4ff, {
+                transparent: !0,
+                opacity: .38,
+                metalness: .08,
+                roughness: .14
+            });
+            const red = createBox([.52, .15, .24], 0xff2030, [-.62, 2, -.14]);
             red.material = lightRed;
-            const blue = createBox([.64, .2, .42], 0x2f77ff, [-.32, 1.96, .24]);
+            const blue = createBox([.52, .15, .24], 0x2f77ff, [-.08, 2, .14]);
             blue.material = lightBlue;
-            const center = createBox([.68, .12, .18], 0xf4f4f4, [-.32, 1.94, 0]);
-            lightbar.add(red, blue, center);
+            const siren = createBox([.3, .08, .18], 0xf4f4f4, [-.35, 1.94, 0]);
+            lightbar.add(lightbarBase, lightbarGlass, red, blue, siren);
             group.add(lightbar);
-            const headLeft = createBox([.08, .22, .46], 0xfff2a8, [2.74, .86, -.55]);
-            const headRight = createBox([.08, .22, .46], 0xfff2a8, [2.74, .86, .55]);
+            const pushBar = createBox([.18, .82, 1.42], 0x161b20, [2.98, .9, 0]);
+            pushBar.material = trim;
+            group.add(pushBar);
+            const headLeft = createBox([.08, .24, .52], 0xfff2a8, [2.94, .86, -.58]);
+            const headRight = createBox([.08, .24, .52], 0xfff2a8, [2.94, .86, .58]);
             headLeft.material = new THREE.MeshBasicMaterial({
                 color: 0xfff2a8
             });
             headRight.material = headLeft.material;
             group.add(headLeft, headRight);
-            const tailLeft = createBox([.08, .2, .42], 0xb60e1b, [-2.76, .86, -.55]);
-            const tailRight = createBox([.08, .2, .42], 0xb60e1b, [-2.76, .86, .55]);
+            const tailLeft = createBox([.08, .22, .48], 0xb60e1b, [-2.96, .9, -.56]);
+            const tailRight = createBox([.08, .22, .48], 0xb60e1b, [-2.96, .9, .56]);
             tailLeft.material = new THREE.MeshBasicMaterial({
                 color: 0xb60e1b
             });
             tailRight.material = tailLeft.material;
             group.add(tailLeft, tailRight);
             const wheels = [];
-            for (const x of [-1.55, 1.55])
-                for (const z of [-1.1, 1.1]) {
-                    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(.38, .38, .28, 16), new THREE.MeshLambertMaterial({
+            for (const x of [-1.62, 1.62])
+                for (const z of [-1.12, 1.12]) {
+                    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(.42, .42, .32, 20), new THREE.MeshLambertMaterial({
                         color: 0x111111
                     }));
                     wheel.rotation.x = Math.PI / 2;
-                    wheel.position.set(x, .38, z);
+                    wheel.position.set(x, .42, z);
+                    group.add(wheel);
+                    wheels.push(wheel);
+                }
+            const antenna = createBox([.03, .68, .03], 0x1f252c, [-2.05, 2.26, .22]);
+            antenna.material = trim;
+            group.add(antenna);
+            group.userData.wheels = wheels;
+            group.userData.wheelRadius = .42;
+            group.userData.lightRed = red;
+            group.userData.lightBlue = blue;
+            return group;
+        }
+
+        function createNpcFigure(seed=0, palette={}) {
+            const THREE = globalState.THREE;
+            const group = new THREE.Group;
+            group.name = "__tmNpcFigure";
+            const skin = new THREE.MeshLambertMaterial({
+                color: palette.skin || 0xd6b08f
+            });
+            const jacket = new THREE.MeshLambertMaterial({
+                color: palette.jacket || 0x47515c
+            });
+            const pants = new THREE.MeshLambertMaterial({
+                color: palette.pants || 0x24303a
+            });
+            const shoes = new THREE.MeshLambertMaterial({
+                color: palette.shoes || 0x14181c
+            });
+            const head = createEllipsoid([.42, .5, .42], 0xd6b08f, [0, 1.74, 0], skin);
+            const torso = createEllipsoid([.76, .98, .44], 0x47515c, [0, 1.08, 0], jacket);
+            const pelvis = createEllipsoid([.52, .34, .32], 0x24303a, [0, .48, 0], pants);
+            const armL = createEllipsoid([.18, .78, .18], 0xd6b08f, [-.42, 1.08, 0], jacket);
+            const armR = createEllipsoid([.18, .78, .18], 0xd6b08f, [.42, 1.08, 0], jacket);
+            const legL = createEllipsoid([.22, .9, .22], 0x24303a, [-.15, -.2, 0], pants);
+            const legR = createEllipsoid([.22, .9, .22], 0x24303a, [.15, -.2, 0], pants);
+            const shoeL = createBox([.24, .08, .34], 0x14181c, [-.15, -.7, .06]);
+            const shoeR = createBox([.24, .08, .34], 0x14181c, [.15, -.7, .06]);
+            shoeL.material = shoes;
+            shoeR.material = shoes;
+            group.add(head, torso, pelvis, armL, armR, legL, legR, shoeL, shoeR);
+            group.userData.limbs = {
+                armL,
+                armR,
+                legL,
+                legR
+            };
+            group.userData.seed = seed;
+            return group;
+        }
+
+        function createTowTruckVisual() {
+            const THREE = globalState.THREE;
+            const group = new THREE.Group;
+            group.name = "__tmTowTruck";
+            const yellow = THREE.MeshStandardMaterial ? new THREE.MeshStandardMaterial({
+                color: 0xf0b73f,
+                roughness: .48,
+                metalness: .32
+            }) : new THREE.MeshLambertMaterial({
+                color: 0xf0b73f
+            });
+            const dark = new THREE.MeshLambertMaterial({
+                color: 0x1a1e24
+            });
+            const steel = THREE.MeshStandardMaterial ? new THREE.MeshStandardMaterial({
+                color: 0x9aa3ad,
+                roughness: .34,
+                metalness: .72
+            }) : new THREE.MeshLambertMaterial({
+                color: 0x9aa3ad
+            });
+            const glass = THREE.MeshStandardMaterial ? new THREE.MeshStandardMaterial({
+                color: 0x89c2dc,
+                transparent: !0,
+                opacity: .68,
+                roughness: .12,
+                metalness: .08
+            }) : new THREE.MeshLambertMaterial({
+                color: 0x89c2dc
+            });
+            const amber = new THREE.MeshBasicMaterial({
+                color: 0xffb638
+            });
+            group.add(createEllipsoid([5.6, 1.18, 2.36], 0xf0b73f, [-.4, .98, 0], yellow));
+            group.add(createEllipsoid([2.2, 1.08, 1.96], 0xf4f4f1, [1.25, 1.68, 0], yellow));
+            const bed = createBox([4.6, .22, 2.34], 0x9aa3ad, [-1.55, 1.02, 0]);
+            bed.material = steel;
+            group.add(bed);
+            const rearBoom = createBox([2.8, .18, .18], 0x9aa3ad, [-3.05, 1.8, 0]);
+            rearBoom.material = steel;
+            rearBoom.rotation.z = -.32;
+            group.add(rearBoom);
+            const hookArm = createBox([.18, .18, 1.08], 0x9aa3ad, [-4.06, 1.22, 0]);
+            hookArm.material = steel;
+            group.add(hookArm);
+            const cabinGlass = createBox([1.18, .52, 1.68], 0x89c2dc, [1.56, 1.78, 0]);
+            cabinGlass.material = glass;
+            group.add(cabinGlass);
+            const amberLeft = createBox([.34, .14, .18], 0xffb638, [1.14, 2.28, -.3]);
+            const amberRight = createBox([.34, .14, .18], 0xffb638, [1.14, 2.28, .3]);
+            amberLeft.material = amber;
+            amberRight.material = amber;
+            group.add(amberLeft, amberRight);
+            const wheels = [];
+            for (const x of [-2.7, -1.08, 1.42])
+                for (const z of [-1.08, 1.08]) {
+                    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(.42, .42, .32, 18), dark);
+                    wheel.rotation.x = Math.PI / 2;
+                    wheel.position.set(x, .42, z);
                     group.add(wheel);
                     wheels.push(wheel);
                 }
             group.userData.wheels = wheels;
-            group.userData.wheelRadius = .38;
-            group.userData.lightRed = red;
-            group.userData.lightBlue = blue;
+            group.userData.wheelRadius = .42;
+            group.userData.lights = [amberLeft, amberRight];
             return group;
+        }
+
+        function createBrokenCarShell() {
+            const THREE = globalState.THREE;
+            const group = new THREE.Group;
+            group.name = "__tmBrokenCarShell";
+            const charred = THREE.MeshStandardMaterial ? new THREE.MeshStandardMaterial({
+                color: 0x272a2f,
+                roughness: .82,
+                metalness: .18
+            }) : new THREE.MeshLambertMaterial({
+                color: 0x272a2f
+            });
+            const glass = THREE.MeshStandardMaterial ? new THREE.MeshStandardMaterial({
+                color: 0x5b6875,
+                transparent: !0,
+                opacity: .42
+            }) : new THREE.MeshLambertMaterial({
+                color: 0x5b6875
+            });
+            group.add(createEllipsoid([5.2, .98, 2.1], 0x272a2f, [0, .82, 0], charred));
+            group.add(createEllipsoid([2.7, .78, 1.58], 0x2f3338, [-.25, 1.36, 0], charred));
+            const windshield = createBox([.1, .44, 1.28], 0x5b6875, [1.02, 1.45, 0]);
+            windshield.material = glass;
+            group.add(windshield);
+            const scorch = createEllipsoid([1.6, .12, .9], 0x111111, [.95, 1.08, -.26], new THREE.MeshBasicMaterial({
+                color: 0x111111,
+                transparent: !0,
+                opacity: .8
+            }));
+            group.add(scorch);
+            return group;
+        }
+
+        function spawnRuntimeOverlayItem(kind, key, group, position, data={}) {
+            const overlay = ensureRuntimeOverlayGroup();
+            if (!overlay || !group || !position)
+                return null;
+            group.position.copy(position);
+            overlay.add(group);
+            const item = {
+                kind,
+                key,
+                group,
+                position: position.clone ? position.clone() : position,
+                data
+            };
+            runtimeState.overlayItems.push(item);
+            return item;
+        }
+
+        function spawnFleeingDriver(position, heading) {
+            if (!position || !globalState.THREE)
+                return;
+            const group = createNpcFigure(position.x + position.z, {
+                jacket: 0x59656f,
+                pants: 0x2a333d
+            });
+            group.position.copy(position);
+            group.position.y = getTerrainYWorld(position, position.y || 0) + .74;
+            group.rotation.y = Number(heading) || 0;
+            spawnRuntimeOverlayItem("aftermath", `driver_${Math.round(position.x)}_${Math.round(position.z)}_${Date.now()}`, group, group.position, {
+                type: "driver",
+                life: 16,
+                speed: 2.3 + Math.abs(Math.sin(position.x)) * .6,
+                heading: (Number(heading) || 0) + (Math.random() > .5 ? .9 : -.9)
+            });
+        }
+
+        function spawnTowRecoveryScene(position, yaw) {
+            if (!position || !globalState.THREE)
+                return;
+            const group = new globalState.THREE.Group;
+            group.name = "__tmTowRecoveryScene";
+            const truck = createTowTruckVisual();
+            const shell = createBrokenCarShell();
+            truck.position.set(0, 0, 0);
+            shell.position.set(-4.8, .28, 0);
+            shell.rotation.y = Math.PI;
+            group.add(truck, shell);
+            group.position.copy(position);
+            group.position.y = getTerrainYWorld(position, position.y || 0);
+            group.rotation.y = Number(yaw) || 0;
+            spawnRuntimeOverlayItem("aftermath", `tow_${Math.round(position.x)}_${Math.round(position.z)}_${Date.now()}`, group, group.position, {
+                type: "tow",
+                life: 22,
+                speed: 6.5,
+                heading: Number(yaw) || 0
+            });
         }
 
         function spawnPoliceCar(playerPos, index) {
@@ -5448,11 +5710,16 @@
                 const position = candidate.aiCar.getPosition && candidate.aiCar.getPosition();
                 if (!position)
                     return !1;
+                const oldPosition = car.getPosition && car.getPosition();
+                const oldYaw = car.cameraGroup && car.cameraGroup.rotation ? car.cameraGroup.rotation.y : 0;
+                const aiYaw = candidate.aiCar.cameraGroup && candidate.aiCar.cameraGroup.rotation ? candidate.aiCar.cameraGroup.rotation.y : oldYaw;
                 stopAi(candidate.resolver, candidate.aiId, candidate.aiCar, 120, 5);
                 if ("function" == typeof candidate.resolver.requestDelete)
                     candidate.resolver.requestDelete(candidate.aiId);
+                spawnFleeingDriver(position.clone ? position.clone() : position, aiYaw);
+                oldPosition && spawnTowRecoveryScene(oldPosition.clone ? oldPosition.clone() : oldPosition, oldYaw);
                 car.cameraGroup.position.copy(position);
-                car.cameraGroup.rotation.set(0, candidate.aiCar.cameraGroup && candidate.aiCar.cameraGroup.rotation ? candidate.aiCar.cameraGroup.rotation.y : car.cameraGroup.rotation.y, 0);
+                car.cameraGroup.rotation.set(0, aiYaw, 0);
                 car.group && (car.group.rotation.z = 0);
                 car.__tmDamage = 0;
                 car.__tmBrokenDown = !1;
@@ -5578,18 +5845,31 @@
             const THREE = globalState.THREE;
             const group = new THREE.Group;
             group.name = `__tmAircraft:${type}`;
-            const white = new THREE.MeshLambertMaterial({
-                color: "helicopter" === type ? 0xe7efe7 : 0xf0f4fa
+            const makeMat = (color, extra={}) => THREE.MeshStandardMaterial ? new THREE.MeshStandardMaterial(Object.assign({
+                color,
+                roughness: .48,
+                metalness: .26
+            }, extra)) : new THREE.MeshLambertMaterial({
+                color
             });
-            const dark = new THREE.MeshLambertMaterial({
-                color: 0x1f2833
+            const white = makeMat("helicopter" === type ? 0xe7efe7 : 0xf0f4fa, {
+                roughness: .4,
+                metalness: .22
             });
-            const glass = new THREE.MeshLambertMaterial({
-                color: 0x89c2dc
+            const dark = makeMat(0x1f2833, {
+                roughness: .5,
+                metalness: .45
+            });
+            const glass = makeMat(0x89c2dc, {
+                transparent: !0,
+                opacity: .7,
+                roughness: .08,
+                metalness: .04
             });
             const accentColor = "helicopter" === type ? 0x2c855c : "jet" === type ? 0xd84545 : "passenger" === type ? 0x2e6fc6 : 0xf0b73f;
-            const accent = new THREE.MeshLambertMaterial({
-                color: accentColor
+            const accent = makeMat(accentColor, {
+                roughness: .42,
+                metalness: .24
             });
             const lightRed = new THREE.MeshBasicMaterial({
                 color: 0xff2935
@@ -5605,6 +5885,7 @@
             const fuselage = new THREE.Mesh(new THREE.CylinderGeometry(bodyRadius, bodyRadius * .75, length, 18), white);
             fuselage.rotation.z = Math.PI / 2;
             group.add(fuselage);
+            group.add(createEllipsoid([length * .58, bodyRadius * .55, bodyRadius * 1.62], accentColor, [-length * .04, -bodyRadius * .18, 0], accent));
             const nose = new THREE.Mesh(new THREE.ConeGeometry(bodyRadius, bodyRadius * 2.2, 18), white);
             nose.rotation.z = -Math.PI / 2;
             nose.position.x = length / 2 + bodyRadius;
@@ -5617,17 +5898,23 @@
             cockpit.material = glass;
             group.add(cockpit);
             const stripe = createBox([length * .78, bodyRadius * .18, bodyRadius * 2.05], accentColor, [-length * .04, -bodyRadius * .18, 0]);
+            stripe.material = accent;
             group.add(stripe);
             const rotors = [];
             const wheels = [];
             const lights = [];
             if ("helicopter" === type) {
+                const noseBubble = createEllipsoid([2.2, 1.14, 1.54], 0x89c2dc, [length * .36, .4, 0], glass);
+                group.add(noseBubble);
                 const mainRotor = new THREE.Group;
                 mainRotor.name = "__tmRotorMain";
                 mainRotor.add(createBox([9.8, .16, .28], 0x202326, [0, 0, 0]));
                 mainRotor.add(createBox([.28, .16, 9.8], 0x202326, [0, 0, 0]));
                 mainRotor.position.set(0, bodyRadius + 1.22, 0);
                 group.add(mainRotor);
+                const rotorMast = createBox([.34, 1.1, .34], 0x202326, [0, bodyRadius + .7, 0]);
+                rotorMast.material = dark;
+                group.add(rotorMast);
                 rotors.push({
                     group: mainRotor,
                     axis: "y",
@@ -5652,14 +5939,24 @@
                 group.add(createBox([.18, .95, .18], 0x1c1f22, [1.8, -bodyRadius * .7, -1.25]));
                 group.add(createBox([.18, .95, .18], 0x1c1f22, [-1.8, -bodyRadius * .7, 1.25]));
                 group.add(createBox([.18, .95, .18], 0x1c1f22, [1.8, -bodyRadius * .7, 1.25]));
+                group.add(createBox([1.2, .2, 2.8], 0x202326, [-length / 2 - 5.9, .92, 0]));
             } else {
                 const wingSpan = "passenger" === type ? 78 : "jet" === type ? 20 : 16;
                 const wing = createBox([length * .26, .28, wingSpan], 0xd7dde8, [length * .02, 0, 0]);
+                wing.material = makeMat(0xd7dde8, {
+                    roughness: .4,
+                    metalness: .22
+                });
+                wing.rotation.x = .04;
                 group.add(wing);
                 const tailWing = createBox([length * .12, .2, wingSpan * .28], 0xd7dde8, [-length * .46, bodyRadius * .45, 0]);
+                tailWing.material = wing.material;
                 group.add(tailWing);
                 const fin = createBox([length * .08, bodyRadius * 2.2, .28], accentColor, [-length * .48, bodyRadius * 1.2, 0]);
+                fin.material = accent;
                 group.add(fin);
+                const belly = createEllipsoid([length * .3, bodyRadius * .34, bodyRadius * 1.12], 0xcfd7e2, [length * .04, -bodyRadius * .36, 0], wing.material);
+                group.add(belly);
                 const windowCount = "passenger" === type ? 12 : "jet" === type ? 4 : 3;
                 for (let index = 0; index < windowCount; index++) {
                     const x = length * .26 - index * (length * .52 / Math.max(1, windowCount - 1));
@@ -5675,6 +5972,14 @@
                         engine.rotation.z = Math.PI / 2;
                         engine.position.set(length * .02, -1.2, z);
                         group.add(engine);
+                        group.add(createEllipsoid([1.6, 1.22, 1.28], 0x303943, [length * .72, -1.08, z], dark));
+                    }
+                if ("jet" === type)
+                    for (const z of [-wingSpan * .22, wingSpan * .22]) {
+                        const engine = new THREE.Mesh(new THREE.CylinderGeometry(.62, .72, 2.8, 14), dark);
+                        engine.rotation.z = Math.PI / 2;
+                        engine.position.set(length * .06, -.62, z);
+                        group.add(engine);
                     }
                 if ("prop" === type) {
                     const propeller = new THREE.Group;
@@ -5688,6 +5993,8 @@
                         axis: "x",
                         speed: 34
                     });
+                    const propNose = createEllipsoid([1.2, .9, .9], accentColor, [length / 2 + bodyRadius * 1.1, 0, 0], accent);
+                    group.add(propNose);
                 }
                 const gearXs = "passenger" === type ? [-length * .22, length * .22] : [-length * .22, length * .18];
                 for (const x of gearXs)
@@ -5697,18 +6004,35 @@
                         wheel.position.set(x, -bodyRadius - .25, z);
                         group.add(wheel);
                         wheels.push(wheel);
+                        const strut = createBox([.08, bodyRadius * .82, .08], 0xb8c2ce, [x, -bodyRadius * .58, z]);
+                        strut.material = makeMat(0xb8c2ce, {
+                            roughness: .34,
+                            metalness: .78
+                        });
+                        group.add(strut);
                     }
                 const noseGear = new THREE.Mesh(new THREE.CylinderGeometry(bodyRadius * .16, bodyRadius * .16, bodyRadius * .14, 12), dark);
                 noseGear.rotation.x = Math.PI / 2;
                 noseGear.position.set(length * .38, -bodyRadius - .2, 0);
                 group.add(noseGear);
                 wheels.push(noseGear);
+                const noseStrut = createBox([.07, bodyRadius * .72, .07], 0xb8c2ce, [length * .38, -bodyRadius * .56, 0]);
+                noseStrut.material = makeMat(0xb8c2ce, {
+                    roughness: .34,
+                    metalness: .78
+                });
+                group.add(noseStrut);
                 const leftLight = createBox([.22, .18, .22], 0xff2935, [length * .02, .08, -wingSpan / 2]);
                 leftLight.material = lightRed;
                 const rightLight = createBox([.22, .18, .22], 0x2ff072, [length * .02, .08, wingSpan / 2]);
                 rightLight.material = lightGreen;
                 group.add(leftLight, rightLight);
                 lights.push(leftLight, rightLight);
+                const wingletL = createBox([.18, bodyRadius * .92, .18], accentColor, [length * .03, .44, -wingSpan / 2]);
+                const wingletR = createBox([.18, bodyRadius * .92, .18], accentColor, [length * .03, .44, wingSpan / 2]);
+                wingletL.material = accent;
+                wingletR.material = accent;
+                group.add(wingletL, wingletR);
             }
             const beacon = createBox([.32, .2, .32], 0xffffff, [-length * .05, bodyRadius + .18, 0]);
             beacon.material = lightWhite;
@@ -6025,17 +6349,86 @@
             const THREE = globalState.THREE;
             const group = new THREE.Group;
             group.name = "__tmBirdFlock";
-            const mat = new THREE.MeshBasicMaterial({
-                color: 0x1d2428
+            const bodyMat = THREE.MeshStandardMaterial ? new THREE.MeshStandardMaterial({
+                color: 0x3d454d,
+                roughness: .76,
+                metalness: .02
+            }) : new THREE.MeshLambertMaterial({
+                color: 0x3d454d
+            });
+            const wingMat = THREE.MeshStandardMaterial ? new THREE.MeshStandardMaterial({
+                color: 0x222a31,
+                roughness: .82,
+                metalness: .01
+            }) : new THREE.MeshLambertMaterial({
+                color: 0x222a31
+            });
+            const beakMat = new THREE.MeshLambertMaterial({
+                color: 0xd39d4b
             });
             for (let i = 0; i < 9; i++) {
-                const bird = createBox([.65, .08, .18], 0x1d2428, [Math.sin(i) * 8, Math.cos(i * 1.7) * 2, Math.cos(i) * 7]);
-                bird.material = mat;
+                const bird = new THREE.Group;
+                bird.position.set(Math.sin(i) * 8, Math.cos(i * 1.7) * 2, Math.cos(i) * 7);
+                bird.rotation.y = seededUnit(seed + i, 17) * Math.PI * 2;
+                const body = createEllipsoid([.62, .24, .2], 0x3d454d, [0, 0, 0], bodyMat);
+                const head = createEllipsoid([.2, .18, .16], 0x3d454d, [.28, .04, 0], bodyMat);
+                const beak = new THREE.Mesh(new THREE.ConeGeometry(.05, .16, 6), beakMat);
+                beak.rotation.z = -Math.PI / 2;
+                beak.position.set(.42, .03, 0);
+                const wingL = createEllipsoid([.42, .05, .22], 0x222a31, [-.05, .02, -.12], wingMat);
+                const wingR = createEllipsoid([.42, .05, .22], 0x222a31, [-.05, .02, .12], wingMat);
+                const tail = createEllipsoid([.18, .05, .16], 0x222a31, [-.32, .01, 0], wingMat);
+                bird.add(body, head, beak, wingL, wingR, tail);
+                bird.userData.wings = [wingL, wingR];
+                bird.userData.seed = seed + i * 13;
                 group.add(bird);
             }
             group.position.copy(center);
             group.position.y += 45 + 20 * seededUnit(seed, 3);
             group.userData.seed = seed;
+            return group;
+        }
+
+        function createBeeSwarm(center, seed) {
+            const THREE = globalState.THREE;
+            const group = new THREE.Group;
+            group.name = "__tmBeeSwarm";
+            const yellow = THREE.MeshStandardMaterial ? new THREE.MeshStandardMaterial({
+                color: 0xf4c42c,
+                roughness: .5,
+                metalness: .04
+            }) : new THREE.MeshLambertMaterial({
+                color: 0xf4c42c
+            });
+            const black = new THREE.MeshLambertMaterial({
+                color: 0x181b1f
+            });
+            const wingMat = THREE.MeshStandardMaterial ? new THREE.MeshStandardMaterial({
+                color: 0xd8efff,
+                transparent: !0,
+                opacity: .42,
+                roughness: .06,
+                metalness: .02
+            }) : new THREE.MeshLambertMaterial({
+                color: 0xd8efff
+            });
+            for (let i = 0; i < 16; i++) {
+                const bee = new THREE.Group;
+                const body = createEllipsoid([.2, .12, .12], 0xf4c42c, [0, 0, 0], yellow);
+                const stripe1 = createBox([.03, .1, .12], 0x181b1f, [-.03, 0, 0]);
+                const stripe2 = createBox([.03, .1, .12], 0x181b1f, [.04, 0, 0]);
+                stripe1.material = black;
+                stripe2.material = black;
+                const wingL = createEllipsoid([.16, .03, .1], 0xd8efff, [-.01, .08, -.06], wingMat);
+                const wingR = createEllipsoid([.16, .03, .1], 0xd8efff, [-.01, .08, .06], wingMat);
+                const head = createEllipsoid([.08, .08, .08], 0x181b1f, [.11, .01, 0], black);
+                bee.add(body, stripe1, stripe2, wingL, wingR, head);
+                bee.position.set(Math.sin(i * 2.1) * 2, 1 + Math.cos(i) * .7, Math.cos(i * 1.4) * 2);
+                bee.userData.wings = [wingL, wingR];
+                bee.userData.seed = seed + i * 19;
+                group.add(bee);
+            }
+            group.position.copy(center);
             return group;
         }
 
@@ -6067,12 +6460,7 @@
                     const key = `bees:${item.key}`;
                     if (runtimeState.overlayItems.some(existing => existing.key === key))
                         continue;
-                    const bees = new globalState.THREE.Group;
-                    bees.name = "__tmBeeSwarm";
-                    for (let i = 0; i < 16; i++) {
-                        const bee = createBox([.12, .08, .08], 0xffd21f, [Math.sin(i * 2.1) * 2, 1 + Math.cos(i) * .7, Math.cos(i * 1.4) * 2]);
-                        bees.add(bee);
-                    }
+                    const bees = createBeeSwarm(item.position, item.position.x + item.position.z);
                     bees.position.copy(item.position);
                     overlay.add(bees);
                     runtimeState.overlayItems.push({
@@ -6102,13 +6490,48 @@
                     item.group.position.x += Math.sin(runtimeState.overlayTick * .2 + item.group.userData.seed) * dtSeconds * 5;
                     item.group.position.z += Math.cos(runtimeState.overlayTick * .23 + item.group.userData.seed) * dtSeconds * 5;
                     item.group.rotation.y += dtSeconds * .12;
-                    for (const child of item.group.children)
-                        child.rotation.z = Math.sin(runtimeState.overlayTick * 8 + child.position.x) * .45;
+                    for (const child of item.group.children) {
+                        child.rotation.z = Math.sin(runtimeState.overlayTick * 8 + child.position.x) * .18;
+                        const flap = Math.sin(runtimeState.overlayTick * 14 + (child.userData.seed || 0)) * .82;
+                        for (const wing of toSafeArray(child.userData.wings))
+                            wing.rotation.x = flap;
+                    }
                 } else if (item.kind === "bees") {
                     for (let index = 0; index < item.group.children.length; index++) {
                         const bee = item.group.children[index];
                         bee.position.x = Math.sin(runtimeState.overlayTick * 4 + index) * 2.2;
                         bee.position.z = Math.cos(runtimeState.overlayTick * 3.3 + index * 1.7) * 2.2;
+                        bee.position.y = 1 + Math.sin(runtimeState.overlayTick * 6 + index * 1.2) * .55;
+                        bee.rotation.y += dtSeconds * 7;
+                        const flutter = Math.sin(runtimeState.overlayTick * 48 + (bee.userData.seed || 0)) * .95;
+                        for (const wing of toSafeArray(bee.userData.wings))
+                            wing.rotation.z = flutter;
+                    }
+                } else if (item.kind === "aftermath" && item.data) {
+                    item.data.life = Math.max(0, Number(item.data.life) - dtSeconds);
+                    if (item.data.life <= 0) {
+                        item.group.visible = !1;
+                        continue;
+                    }
+                    if ("driver" === item.data.type) {
+                        item.group.position.x += Math.cos(Number(item.data.heading) || 0) * Number(item.data.speed || 2) * dtSeconds;
+                        item.group.position.z -= Math.sin(Number(item.data.heading) || 0) * Number(item.data.speed || 2) * dtSeconds;
+                        item.group.position.y = getTerrainYWorld(item.group.position, item.group.position.y) + .74;
+                        const limbs = item.group.userData.limbs || {};
+                        const gait = Math.sin(runtimeState.overlayTick * 8 + (item.group.userData.seed || 0)) * .7;
+                        limbs.armL && (limbs.armL.rotation.z = gait);
+                        limbs.armR && (limbs.armR.rotation.z = -gait);
+                        limbs.legL && (limbs.legL.rotation.z = -gait);
+                        limbs.legR && (limbs.legR.rotation.z = gait);
+                    } else if ("tow" === item.data.type) {
+                        item.group.position.x += Math.cos(Number(item.data.heading) || 0) * Number(item.data.speed || 6) * dtSeconds;
+                        item.group.position.z -= Math.sin(Number(item.data.heading) || 0) * Number(item.data.speed || 6) * dtSeconds;
+                        item.group.position.y = getTerrainYWorld(item.group.position, item.group.position.y);
+                        const flash = Math.floor(performance.now() / 180) % 2;
+                        for (const light of toSafeArray(item.group.children[0] && item.group.children[0].userData && item.group.children[0].userData.lights))
+                            light.visible = 0 === flash;
+                        for (const wheel of toSafeArray(item.group.children[0] && item.group.children[0].userData && item.group.children[0].userData.wheels))
+                            wheel.rotation.z -= dtSeconds * 12;
                     }
                 } else if (item.kind === "aircraft" && !(item.data && item.data.active)) {
                     animateAircraftVisual(item.group, item.data && item.data.speed || 0, dtSeconds);
