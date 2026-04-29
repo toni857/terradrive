@@ -383,6 +383,7 @@
             menuPatched: !1,
             controlsPatched: !1,
             lastRuntimeUpdateAt: 0,
+            trafficResolver: null,
             overlayGroup: null,
             overlayAttachedTo: null,
             overlayItems: [],
@@ -404,6 +405,8 @@
             navPanel: null,
             navVisible: !1,
             navSearching: !1,
+            moduleDisables: {},
+            moduleFaults: {},
             startMenuFeatureWatcherInstalled: !1,
             playerMoney: 250,
             input: {
@@ -525,6 +528,8 @@
             customBuildingDoorItems: Array.isArray(runtimeState.customBuildingDoorItems) ? runtimeState.customBuildingDoorItems : [],
             customBuildingProgress: runtimeState.customBuildingProgress || null,
             customBuildingPriorityTargets: Array.isArray(runtimeState.customBuildingPriorityTargets) ? runtimeState.customBuildingPriorityTargets : [],
+            moduleDisables: runtimeState.moduleDisables && "object" == typeof runtimeState.moduleDisables ? runtimeState.moduleDisables : {},
+            moduleFaults: runtimeState.moduleFaults && "object" == typeof runtimeState.moduleFaults ? runtimeState.moduleFaults : {},
             autopilot: Object.assign({
                 enabled: !1,
                 pendingMapSelection: !1,
@@ -532,6 +537,9 @@
                 targetRoadPosition: null,
                 targetSignature: "",
                 startSignature: "",
+                route: [],
+                routeIndex: 0,
+                targetRoadMatch: null,
                 edge: null,
                 segmentIndex: 0,
                 segmentT: 0,
@@ -598,6 +606,57 @@
             windowGlassColor: 0xa5d7ff,
             windowFrameColor: 0xf4eee6
         };
+        const INTERNAL_MODULES = {
+            featureMenuUi: {
+                label: "Feature menu UI",
+                feature: null
+            },
+            customMissionRuntime: {
+                label: "Custom missions runtime",
+                feature: "customMissions"
+            },
+            customBuildingProgress: {
+                label: "Address-house progress",
+                feature: "customBuildings"
+            },
+            customBuildingDoors: {
+                label: "Custom building doors",
+                feature: "customBuildings"
+            },
+            overlayRuntime: {
+                label: "Overlay runtime",
+                feature: "overlays"
+            },
+            wildlifeRuntime: {
+                label: "Wildlife runtime",
+                feature: null
+            },
+            hardStartFlow: {
+                label: "Hard start flow",
+                feature: "hardStart"
+            },
+            vehicleReplacementTheft: {
+                label: "Vehicle replacement theft",
+                feature: "vehicleDamage"
+            },
+            vehicleTuningHandling: {
+                label: "Vehicle tuning handling",
+                feature: "vehicleTuning"
+            },
+            autopilotRouting: {
+                label: "Autopilot routing",
+                feature: "autopilot"
+            },
+            navigationUi: {
+                label: "Navigation UI",
+                feature: "navigation"
+            }
+        };
+        const VEHICLE_DAMAGE_TUNING = {
+            intakeMultiplier: .55,
+            breakdownThreshold: 100,
+            towCost: 180
+        };
 
         function log(...args) {
             const first = String(args[0] || "");
@@ -611,6 +670,80 @@
 
         function error(...args) {
             console.error(PREFIX, ...args);
+        }
+
+        function getInternalModuleMeta(name) {
+            return INTERNAL_MODULES[name] || {
+                label: name,
+                feature: null
+            };
+        }
+
+        function getInternalModuleFault(name) {
+            return runtimeState.moduleFaults && runtimeState.moduleFaults[name] || null;
+        }
+
+        function getInternalModuleFaultForFeature(featureName) {
+            if (!featureName || !runtimeState.moduleFaults)
+                return null;
+            for (const [moduleName, fault] of Object.entries(runtimeState.moduleFaults))
+                if (fault && getInternalModuleMeta(moduleName).feature === featureName)
+                    return Object.assign({
+                        moduleName
+                    }, fault);
+            return null;
+        }
+
+        function isInternalModuleEnabled(name) {
+            return !(runtimeState.moduleDisables && runtimeState.moduleDisables[name]);
+        }
+
+        function clearInternalModuleFault(name) {
+            runtimeState.moduleDisables && delete runtimeState.moduleDisables[name];
+            runtimeState.moduleFaults && delete runtimeState.moduleFaults[name];
+        }
+
+        function clearInternalModuleFaultsForFeature(featureName) {
+            for (const moduleName of Object.keys(INTERNAL_MODULES))
+                getInternalModuleMeta(moduleName).feature === featureName && clearInternalModuleFault(moduleName);
+        }
+
+        function markInternalModuleFault(name, failure, context) {
+            const meta = getInternalModuleMeta(name);
+            const message = failure && (failure.message || String(failure)) || "Unknown error";
+            runtimeState.moduleDisables || (runtimeState.moduleDisables = {});
+            runtimeState.moduleFaults || (runtimeState.moduleFaults = {});
+            runtimeState.moduleDisables[name] = !0;
+            runtimeState.moduleFaults[name] = {
+                message,
+                context: context || meta.label,
+                at: Date.now()
+            };
+            warn(`Teilfunktion automatisch deaktiviert: ${meta.label}${context ? ` (${context})` : ""}:`, failure);
+            notifyRuntime(`${meta.label} wurde wegen einem Fehler deaktiviert.`, "error");
+            syncFeatureMenu();
+        }
+
+        function runInternalModule(name, callback, fallback, context) {
+            if (!isInternalModuleEnabled(name))
+                return fallback;
+            try {
+                return callback();
+            } catch (moduleError) {
+                markInternalModuleFault(name, moduleError, context);
+                return fallback;
+            }
+        }
+
+        function runFeatureModule(featureName, callback, fallback, context) {
+            if (featureName && !featureState[featureName])
+                return fallback;
+            try {
+                return callback();
+            } catch (featureError) {
+                featureName ? markFeatureFault(featureName, featureError, context) : error(`${context || "Feature step"} fehlgeschlagen:`, featureError);
+                return fallback;
+            }
         }
 
         const IMPACT_TUNING = {
@@ -1796,6 +1929,58 @@
             return edge.points.map(point => point.clone().add(center));
         }
 
+        let runtimeRoadEdgeId = 0;
+
+        function getRoadEdgeId(edge) {
+            if (!edge)
+                return "edge:none";
+            edge.__tmRoadEdgeId || (edge.__tmRoadEdgeId = `edge:${++runtimeRoadEdgeId}`);
+            return edge.__tmRoadEdgeId;
+        }
+
+        function getEdgeLength2D(edge) {
+            const points = getEdgeWorldPoints(edge);
+            let total = 0;
+            for (let index = 0; index < points.length - 1; index++)
+                total += getDistance2D(points[index], points[index + 1]);
+            return total;
+        }
+
+        function getEdgeDistanceAtMatch(edge, segmentIndex, segmentProgress) {
+            const points = getEdgeWorldPoints(edge);
+            let total = 0;
+            for (let index = 0; index < points.length - 1; index++) {
+                const segmentLength = getDistance2D(points[index], points[index + 1]);
+                if (index < segmentIndex)
+                    total += segmentLength;
+                else if (index === segmentIndex) {
+                    total += segmentLength * clamp(segmentProgress, 0, 1);
+                    break;
+                }
+            }
+            return total;
+        }
+
+        function getRemainingDistanceOnMatchedEdge(match, direction) {
+            if (!match || !match.edge)
+                return 0;
+            const progressDistance = getEdgeDistanceAtMatch(match.edge, match.segmentIndex, match.progress);
+            const totalDistance = getEdgeLength2D(match.edge);
+            return direction > 0 ? Math.max(0, totalDistance - progressDistance) : Math.max(0, progressDistance);
+        }
+
+        function getTargetDistanceFromEdgeStart(match, direction) {
+            if (!match || !match.edge)
+                return 0;
+            const progressDistance = getEdgeDistanceAtMatch(match.edge, match.segmentIndex, match.progress);
+            const totalDistance = getEdgeLength2D(match.edge);
+            return direction > 0 ? progressDistance : Math.max(0, totalDistance - progressDistance);
+        }
+
+        function makeRoadRouteKey(edge, direction) {
+            return `${getRoadEdgeId(edge)}:${direction > 0 ? 1 : -1}`;
+        }
+
         function isRoadEligibleForTownSigns(edge) {
             const roadModule = townSignsState.roadModule;
             if (!edge || !roadModule)
@@ -2636,12 +2821,58 @@
         }
 
         function collectTownMissionTargets() {
-            return toSafeArray(townSignsState.debugPlaces).map(((place, index) => ({
+            const debugTargets = toSafeArray(townSignsState.debugPlaces).map(((place, index) => ({
                 key: `town_${index}`,
                 label: place.name,
                 position: new globalState.THREE.Vector3(Number(place.center.x) || 0, Number(place.center.y) || 0, Number(place.center.z) || 0),
                 radius: clamp(Number(place.radius) || 55, 35, 90)
             }))).filter((target => target.label && target.position));
+            if (debugTargets.length)
+                return debugTargets;
+            const cachedTargets = [];
+            const seen = new Set;
+            for (const places of townSignsState.placeCache instanceof Map ? townSignsState.placeCache.values() : [])
+                for (const place of toSafeArray(places)) {
+                    if (!place || !place.position || !place.name)
+                        continue;
+                    const key = `${String(place.name).toLowerCase()}:${Math.round(place.position.x / 80)}:${Math.round(place.position.z / 80)}`;
+                    if (seen.has(key))
+                        continue;
+                    seen.add(key);
+                    cachedTargets.push({
+                        key: `cached_${cachedTargets.length}`,
+                        label: place.name,
+                        position: cloneVector3(place.position),
+                        radius: 70
+                    });
+                }
+            if (cachedTargets.length)
+                return cachedTargets;
+            const homes = [];
+            for (const chunk of getLoadedChunks())
+                for (const building of toSafeArray(chunk && chunk.buildings))
+                    building && building.houseCenter && homes.push(building.houseCenter.clone());
+            if (!homes.length)
+                return [];
+            const clusters = [];
+            for (const home of homes) {
+                let cluster = clusters.find(entry => getDistance2D(entry.center, home) <= 420);
+                if (!cluster) {
+                    cluster = {
+                        center: home.clone(),
+                        points: []
+                    };
+                    clusters.push(cluster);
+                }
+                cluster.points.push(home.clone());
+                cluster.center = cluster.points.reduce(((acc, point) => acc.add(point)), new globalState.THREE.Vector3).multiplyScalar(1 / cluster.points.length);
+            }
+            return clusters.map(((cluster, index) => ({
+                key: `fallback_town_${index}`,
+                label: `Residential area ${index + 1}`,
+                position: cluster.center,
+                radius: clamp(cluster.points.reduce(((maxDistance, point) => Math.max(maxDistance, getDistance2D(cluster.center, point))), 55) + 40, 55, 120)
+            })));
         }
 
         function collectResidentialMissionTargets(manager) {
@@ -2930,8 +3161,8 @@
                 if (!this.stages.length) {
                     this.failed = !0;
                     this.missionManager.missionPanel.showNavigation();
-                    this.missionManager.missionPanel.updateStatus("No suitable route found here");
-                    this.missionManager.missionPanel.updateMissionDescriptiopn("Drive to another area or reload nearby chunks, then start the task again.");
+                    this.missionManager.missionPanel.updateStatus("No place targets loaded nearby");
+                    this.missionManager.missionPanel.updateMissionDescriptiopn("Load more nearby roads or houses, then start the task again.");
                     this.missionManager.missionPanel.turnOffCompass();
                     return;
                 }
@@ -2972,28 +3203,34 @@
             }
 
             update(dtSeconds, currentTime, inputState, player) {
-                if (!player || this.completed)
+                if (!player || this.completed || !isInternalModuleEnabled("customMissionRuntime"))
                     return;
-                this.ensureInitialized(currentTime, player);
-                if (!this.initialized)
-                    return;
-                const stage = this.stages[this.stageIndex];
-                if (!stage)
-                    return void this.finish(currentTime, player);
-                const playerPos = player.getPosition();
-                if (stage.noMap)
-                    this.missionManager.missionPanel.turnOffCompass();
-                else
-                    this.missionManager.missionPanel.updateCompass(playerPos, player.getHeadings(), stage.position);
-                this.missionManager.missionPanel.updateEntry1(`${this.stageIndex + 1}/${this.stages.length} checkpoints`);
-                this.missionManager.missionPanel.updateEntry2(stage.label);
-                this.missionManager.missionPanel.updateEntry3(stage.noMap ? `Distance: ${Math.max(0, getDistance2D(playerPos, stage.position)).toFixed(0)} m` : `ETA: ${Math.max(0, getDistance2D(playerPos, stage.position)).toFixed(0)} m`);
-                this.missionManager.missionPanel.updateEntry4(`Time: ${formatMissionSeconds((Number(currentTime) || 0) - this.startedAt)}`);
-                if (getDistance2D(playerPos, stage.position) <= (Number(stage.radius) || 24))
-                    if (this.stageIndex >= this.stages.length - 1)
-                        this.finish(currentTime, player);
+                try {
+                    this.ensureInitialized(currentTime, player);
+                    if (!this.initialized)
+                        return;
+                    const stage = this.stages[this.stageIndex];
+                    if (!stage)
+                        return void this.finish(currentTime, player);
+                    const playerPos = player.getPosition();
+                    if (stage.noMap)
+                        this.missionManager.missionPanel.turnOffCompass();
                     else
-                        this.setStage(this.stageIndex + 1);
+                        this.missionManager.missionPanel.updateCompass(playerPos, player.getHeadings(), stage.position);
+                    this.missionManager.missionPanel.updateEntry1(`${this.stageIndex + 1}/${this.stages.length} checkpoints`);
+                    this.missionManager.missionPanel.updateEntry2(stage.label);
+                    this.missionManager.missionPanel.updateEntry3(stage.noMap ? "" : `ETA: ${Math.max(0, getDistance2D(playerPos, stage.position)).toFixed(0)} m`);
+                    this.missionManager.missionPanel.updateEntry4(`Time: ${formatMissionSeconds((Number(currentTime) || 0) - this.startedAt)}`);
+                    if (getDistance2D(playerPos, stage.position) <= (Number(stage.radius) || 24))
+                        if (this.stageIndex >= this.stages.length - 1)
+                            this.finish(currentTime, player);
+                        else
+                            this.setStage(this.stageIndex + 1);
+                } catch (missionError) {
+                    this.failed = !0;
+                    this.cancelMission();
+                    markInternalModuleFault("customMissionRuntime", missionError, "Custom mission update");
+                }
             }
         }
 
@@ -3229,15 +3466,16 @@
         function applyExtendedVehicleControls(car, dtSeconds) {
             if (!car)
                 return;
-            const leftStrength = (runtimeState.input.slowLeft ? .45 : 0) + (runtimeState.input.fastLeft ? 1.8 : 0);
-            const rightStrength = (runtimeState.input.slowRight ? .45 : 0) + (runtimeState.input.fastRight ? 1.8 : 0);
+            const handlingBoost = featureState.vehicleTuning && vehicleTuningState.active ? 1.25 : 1;
+            const leftStrength = ((runtimeState.input.slowLeft ? .45 : 0) + (runtimeState.input.fastLeft ? 1.8 : 0)) * handlingBoost;
+            const rightStrength = ((runtimeState.input.slowRight ? .45 : 0) + (runtimeState.input.fastRight ? 1.8 : 0)) * handlingBoost;
             const steer = Math.sign(leftStrength - rightStrength);
             if (steer) {
-                car.delayMode = Math.max(.12, Math.min(2.2, Math.abs(leftStrength - rightStrength)));
+                car.delayMode = Math.max(featureState.vehicleTuning && vehicleTuningState.active ? .05 : .12, Math.min(featureState.vehicleTuning && vehicleTuningState.active ? 1.35 : 2.2, Math.abs(leftStrength - rightStrength)));
                 if (typeof car.setSteeringTarget === "function")
-                    car.setSteeringTarget(steer);
+                    car.setSteeringTarget(steer * (featureState.vehicleTuning && vehicleTuningState.active ? 1.25 : 1));
                 else
-                    car.steeringTarget = steer * (car.mcs && car.mcs.maxSteeringAngle || .5);
+                    car.steeringTarget = steer * (car.mcs && car.mcs.maxSteeringAngle || .5) * (featureState.vehicleTuning && vehicleTuningState.active ? 1.35 : 1);
             }
             if (runtimeState.input.fullBrake) {
                 if (typeof car.toBreak === "function")
@@ -3249,6 +3487,17 @@
                 else if (car.speed < 0)
                     car.speed = Math.min(0, car.speed + brakeDelta);
             }
+        }
+
+        function applyVehicleTuningHandlingAssist(car, dtSeconds) {
+            if (!car || !featureState.vehicleTuning || !vehicleTuningState.active || !car.cameraGroup)
+                return;
+            const dt = Math.max(1e-3, Number(dtSeconds) || 0);
+            const steerInput = Math.sign(Number(car.steeringTarget) || Number(car.steeringAngle) || 0);
+            const speedRatio = clamp(speedAbs(car.speed) / Math.max(12, getVehicleTuningMaxSpeedMs() * .42), 0, 1.6);
+            if (steerInput)
+                car.cameraGroup.rotation.y = normalizeAngleRad(car.cameraGroup.rotation.y + steerInput * (.22 + .38 * speedRatio) * dt);
+            car.group && (car.group.rotation.z *= Math.pow(.05, dt));
         }
 
         function applyVehicleTuning(car, dtSeconds, previousSpeed) {
@@ -3271,6 +3520,7 @@
             if (car.cruiseControlOn)
                 car.cruiseControlTargetSpeed = Math.min(car.cruiseControlTargetSpeed, maxSpeedMs);
             car.acc = clamp((car.speed - previousSpeed) / dt, -2 * accelerationLimit, accelerationLimit);
+            applyVehicleTuningHandlingAssist(car, dt);
         }
 
         function getAutopilotState() {
@@ -3338,6 +3588,14 @@
             }
         }
 
+        function clearAutopilotRoute(state) {
+            if (!state)
+                return;
+            state.route = [];
+            state.routeIndex = 0;
+            state.targetRoadMatch = null;
+        }
+
         function resetAutopilotRoadState(state) {
             state.edge = null;
             state.segmentIndex = 0;
@@ -3345,6 +3603,7 @@
             state.direction = 1;
             state.snapped = !1;
             state.linking = !1;
+            clearAutopilotRoute(state);
         }
 
         function stopAutopilot(reason, shouldNotify=!0) {
@@ -3381,6 +3640,7 @@
             state.targetRoadPosition = findTargetRoadPosition(target);
             state.targetSignature = signature;
             resetAutopilotRoadState(state);
+            runInternalModule("autopilotRouting", (() => rebuildAutopilotRoute(state, getPlayerPosition() || getControlPosition())), !1, "Route zur Map");
             state.lastNoticeAt = performance.now();
             notifyRuntime(`Automatik aktiv: Ziel gesetzt (${source || "map"}).`);
             syncAutopilotDebug();
@@ -3404,6 +3664,7 @@
             state.targetRoadPosition = findTargetRoadPosition(target);
             state.targetSignature = `${source || "navi"}:${target.x.toFixed(1)},${target.z.toFixed(1)}`;
             resetAutopilotRoadState(state);
+            runInternalModule("autopilotRouting", (() => rebuildAutopilotRoute(state, getPlayerPosition() || getControlPosition())), !1, "Route zur Weltposition");
             state.lastNoticeAt = performance.now();
             notifyRuntime(`Navi aktiv: ${label || "Ziel gesetzt"}.`);
             syncAutopilotDebug();
@@ -3750,9 +4011,11 @@
             state.edge = match.edge;
             state.segmentIndex = match.segmentIndex;
             state.segmentT = clamp(match.progress, 0, 1);
-            state.direction = chooseAutopilotDirection(match, state.targetRoadPosition || state.targetPosition);
+            const routeStep = Array.isArray(state.route) && state.route.find((step => step && step.edge === match.edge));
+            state.direction = routeStep ? routeStep.direction : chooseAutopilotDirection(match, state.targetRoadPosition || state.targetPosition);
             state.snapped = !0;
             state.linking = !1;
+            syncAutopilotRouteIndex(state);
             return !0;
         }
 
@@ -3835,6 +4098,111 @@
             return best;
         }
 
+        function rebuildAutopilotRoute(state, startPosition) {
+            if (!state || !state.targetRoadPosition)
+                return !1;
+            const startMatch = findNearestRoadSegment(startPosition || getPlayerPosition(), 220);
+            const targetMatch = findNearestRoadSegment(state.targetRoadPosition, 2200);
+            if (!startMatch || !targetMatch)
+                return clearAutopilotRoute(state),
+                !1;
+            const targetPoint = targetMatch.point || state.targetRoadPosition;
+            const sameEdgeDirections = [1, -1].filter((direction => canDriveEdgeDirection(startMatch.edge, direction)));
+            if (startMatch.edge === targetMatch.edge && sameEdgeDirections.length) {
+                const direction = sameEdgeDirections.sort(((a, b) => getTargetDistanceFromEdgeStart(targetMatch, a) - getTargetDistanceFromEdgeStart(targetMatch, b)))[0];
+                state.route = [{
+                    edge: startMatch.edge,
+                    direction
+                }];
+                state.routeIndex = 0;
+                state.targetRoadMatch = targetMatch;
+                return !0;
+            }
+            const open = [];
+            const queueState = (entry => {
+                const existingIndex = open.findIndex((candidate => candidate.key === entry.key));
+                existingIndex >= 0 ? open[existingIndex] = entry : open.push(entry);
+            });
+            const visited = new Map;
+            const previous = new Map;
+            const routeMeta = new Map;
+            let bestGoal = null;
+            for (const direction of [1, -1]) {
+                if (!canDriveEdgeDirection(startMatch.edge, direction))
+                    continue;
+                const key = makeRoadRouteKey(startMatch.edge, direction);
+                const g = getRemainingDistanceOnMatchedEdge(startMatch, direction);
+                const h = getDistance2D(getEdgeEndPointForDirection(startMatch.edge, direction), targetPoint);
+                const entry = {
+                    key,
+                    edge: startMatch.edge,
+                    direction,
+                    g,
+                    f: g + h
+                };
+                queueState(entry);
+                visited.set(key, g);
+                routeMeta.set(key, {
+                    edge: startMatch.edge,
+                    direction
+                });
+            }
+            for (let guard = 0; open.length && guard < 3200; guard++) {
+                open.sort(((a, b) => a.f - b.f));
+                const current = open.shift();
+                if (!current)
+                    break;
+                if (current.edge === targetMatch.edge) {
+                    const totalCost = current.g + getTargetDistanceFromEdgeStart(targetMatch, current.direction);
+                    if (!bestGoal || totalCost < bestGoal.cost)
+                        bestGoal = {
+                            key: current.key,
+                            cost: totalCost
+                        };
+                }
+                const node = current.direction > 0 ? current.edge && current.edge.v : current.edge && current.edge.u;
+                for (const next of collectAutopilotOutgoingRoads(node, current.edge)) {
+                    const key = makeRoadRouteKey(next.edge, next.direction);
+                    const g = current.g + getEdgeLength2D(next.edge);
+                    if (g >= (visited.get(key) ?? 1 / 0))
+                        continue;
+                    visited.set(key, g);
+                    previous.set(key, current.key);
+                    routeMeta.set(key, {
+                        edge: next.edge,
+                        direction: next.direction
+                    });
+                    queueState({
+                        key,
+                        edge: next.edge,
+                        direction: next.direction,
+                        g,
+                        f: g + getDistance2D(getEdgeEndPointForDirection(next.edge, next.direction), targetPoint)
+                    });
+                }
+            }
+            if (!bestGoal)
+                return clearAutopilotRoute(state),
+                !1;
+            const route = [];
+            for (let key = bestGoal.key; key; key = previous.get(key)) {
+                const step = routeMeta.get(key);
+                step && route.push(step);
+            }
+            route.reverse();
+            state.route = route;
+            state.routeIndex = 0;
+            state.targetRoadMatch = targetMatch;
+            return !!route.length;
+        }
+
+        function syncAutopilotRouteIndex(state) {
+            if (!state || !Array.isArray(state.route) || !state.route.length || !state.edge)
+                return;
+            const routeIndex = state.route.findIndex((step => step && step.edge === state.edge && step.direction === state.direction));
+            routeIndex >= 0 && (state.routeIndex = routeIndex);
+        }
+
         function getAutopilotCurrentPoint(state) {
             const points = getEdgeWorldPoints(state.edge);
             const index = clamp(Math.round(Number(state.segmentIndex) || 0), 0, Math.max(0, points.length - 2));
@@ -3852,6 +4220,7 @@
             let position = getAutopilotCurrentPoint(state);
             let travelVector = null;
             const target = state.targetRoadPosition || state.targetPosition;
+            syncAutopilotRouteIndex(state);
             for (let guard = 0; guard < 96 && remaining >= 0; guard++) {
                 const points = getEdgeWorldPoints(state.edge);
                 if (points.length < 2)
@@ -3890,7 +4259,21 @@
                     state.segmentT = 1;
                     continue;
                 }
-                const next = chooseNextAutopilotRoad(state.edge, state.direction, target, travelVector);
+                let next = null;
+                if (Array.isArray(state.route) && state.route.length) {
+                    const planned = state.route[state.routeIndex + 1];
+                    if (planned && planned.edge)
+                        next = {
+                            edge: planned.edge,
+                            direction: planned.direction
+                        },
+                        state.routeIndex += 1;
+                }
+                next || (next = chooseNextAutopilotRoad(state.edge, state.direction, target, travelVector));
+                if (!next && Array.isArray(state.route) && state.route.length)
+                    runInternalModule("autopilotRouting", (() => rebuildAutopilotRoute(state, position || getPlayerPosition() || getControlPosition())), !1, "Route neu berechnen"),
+                    syncAutopilotRouteIndex(state),
+                    next = state.route[state.routeIndex + 1] || chooseNextAutopilotRoad(state.edge, state.direction, target, travelVector);
                 if (!next)
                     break;
                 state.edge = next.edge;
@@ -3930,7 +4313,13 @@
             if (!car || !pose || !pose.position || !pose.direction)
                 return;
             const position = pose.position.clone();
-            position.y = getTerrainYWorld(position, position.y || 0) + .04;
+            if (globalState.THREE) {
+                const right = new globalState.THREE.Vector3(pose.direction.z,0,-pose.direction.x);
+                right.lengthSq() > 1e-6 && right.normalize().multiplyScalar(clamp(getVehicleWidth(car) * .32, .75, 1.35)),
+                position.add(right);
+            }
+            const terrainY = getTerrainYWorld(position, Number(position.y) || 0);
+            position.y = Math.max(Number(position.y) || terrainY, terrainY) + .08;
             car.cameraGroup.position.copy(position);
             car.cameraGroup.rotation.set(0, getYawFromVector(pose.direction), 0);
             car.group && (car.group.rotation.z = 0);
@@ -3955,6 +4344,10 @@
             const dt = clamp(Number(dtSeconds) || .016, 1 / 240, .08);
             const speed = Math.max(8, featureState.vehicleTuning && vehicleTuningState.active ? getVehicleTuningMaxSpeedMs() : getAutopilotCruiseSpeedMs(car));
             const carPosition = car.getPosition();
+            if ((!Array.isArray(state.route) || !state.route.length) && !runInternalModule("autopilotRouting", (() => rebuildAutopilotRoute(state, carPosition)), !1, "Route waehrend Fahrt aufbauen")) {
+                stopAutopilot("keine verbundene Strasse zum Ziel", !0);
+                return !1;
+            }
             const stopTarget = state.targetRoadPosition || state.targetPosition;
             if (getDistance2D(carPosition, state.targetPosition) <= 28 || stopTarget && getDistance2D(carPosition, stopTarget) <= 14) {
                 stopAutopilot("Ziel erreicht", !0);
@@ -3981,10 +4374,14 @@
                 }
                 setAutopilotRoadMatch(state, match);
             }
-            const pose = advanceAutopilotAlongRoad(state, speed * dt);
+            let pose = advanceAutopilotAlongRoad(state, speed * dt);
             if (!pose) {
-                resetAutopilotRoadState(state);
-                return !1;
+                if (runInternalModule("autopilotRouting", (() => rebuildAutopilotRoute(state, carPosition)), !1, "Route waehrend Fahrt neu berechnen"))
+                    pose = advanceAutopilotAlongRoad(state, speed * dt);
+                if (!pose) {
+                    stopAutopilot("keine gueltige Route gefunden", !0);
+                    return !1;
+                }
             }
             applyAutopilotPose(car, pose, speed);
             syncAutopilotDebug();
@@ -4023,6 +4420,34 @@
                 return;
             for (const object of [car.group, car.trailer && car.trailer.group])
                 object && (object.visible = !hidden);
+        }
+
+        function forcePlayerOutOfCar() {
+            const manager = getControlManager();
+            if (!manager || !manager.inCar || "function" != typeof manager.getOutCar)
+                return !1;
+            try {
+                manager.inCar = !1;
+                manager.getOutCar();
+                return !0;
+            } catch (leaveError) {
+                manager.inCar = !0;
+                return !1;
+            }
+        }
+
+        function forcePlayerIntoCar() {
+            const manager = getControlManager();
+            if (!manager)
+                return !1;
+            if ("function" == typeof manager.getInCar)
+                try {
+                    manager.inCar = !0;
+                    manager.getInCar();
+                    return !0;
+                } catch (enterError) {}
+            manager.inCar = !0;
+            return !0;
         }
 
         function notifyRuntime(message, kind) {
@@ -4208,13 +4633,21 @@
                 return;
             const oldValue = featureState[name];
             featureState[name] = !!value;
-            featureState[name] && clearFeatureFault(name);
+            if (featureState[name]) {
+                clearFeatureFault(name);
+                clearInternalModuleFaultsForFeature(name);
+            }
             if ("hardStart" === name && featureState.hardStart) {
                 featureState.survival = !0;
                 featureState.police = !0;
                 featureState.vehicleDamage = !0;
                 setPlayerMoney(0);
                 runtimeState.hardStartLocked = !0;
+                runInternalModule("hardStartFlow", (() => {
+                    forcePlayerOutOfCar();
+                    notifyRuntime("Hard start aktiv: zu Fuss zum Autohaus gehen und dort E druecken.");
+                }
+                ), null, "Hard start aktivieren");
             }
             oldValue !== featureState[name] && applyFeatureSideEffects(name);
             saveFeatureStateToCookies();
@@ -4224,7 +4657,7 @@
         function syncFeatureMenu() {
             for (const panel of document.querySelectorAll("#__tmFeatureMenuSection,#__tmFeatureStartMenuSection"))
                 for (const input of panel.querySelectorAll("input[data-feature]")) {
-                    const fault = getFeatureFault(input.dataset.feature);
+                    const fault = getFeatureFault(input.dataset.feature) || getInternalModuleFaultForFeature(input.dataset.feature);
                     const row = input.closest("label");
                     input.checked = !!featureState[input.dataset.feature];
                     input.title = fault ? `${fault.context || "Feature-Fehler"}: ${fault.message}` : "";
@@ -4321,7 +4754,7 @@
             ensureStartFeatureMenu();
             const oldFloatingPanel = document.getElementById("__tmFeaturePanel");
             oldFloatingPanel && oldFloatingPanel.remove();
-            const target = document.getElementById("content_menu") || document.getElementById("game_menu");
+            const target = document.getElementById("game_menu");
             if (!target)
                 return;
             const panel = createFeatureMenuPanel("__tmFeatureMenuSection", "TM Gameplay");
@@ -4766,13 +5199,14 @@
             const car = getPlayerCar();
             if (!car)
                 return;
-            car.__tmDamage = Math.min(120, (Number(car.__tmDamage) || 0) + Math.max(0, amount));
+            const appliedAmount = Math.max(0, Number(amount) || 0) * VEHICLE_DAMAGE_TUNING.intakeMultiplier;
+            car.__tmDamage = Math.min(120, (Number(car.__tmDamage) || 0) + appliedAmount);
             syncVehicleDamageDisplay(car);
-            if (car.__tmDamage >= 100 && !car.__tmBrokenDown) {
+            if (car.__tmDamage >= VEHICLE_DAMAGE_TUNING.breakdownThreshold && !car.__tmBrokenDown) {
                 car.__tmBrokenDown = !0;
                 car.engineRunning = !1;
                 setPlayerSpeed(car, 0);
-                notifyRuntime(`Car broken (${reason}). Press E near it to tow for 180 EUR or steal a replacement.`, "error");
+                notifyRuntime(`Car broken (${reason}). Press E near it to tow for ${VEHICLE_DAMAGE_TUNING.towCost} EUR or steal a replacement.`, "error");
             }
         }
 
@@ -4968,12 +5402,88 @@
             syncFeatureMenu();
         }
 
+        function getTrafficResolver() {
+            return runtimeState.trafficResolver || globalThis.__tmCollisionHookDebug && globalThis.__tmCollisionHookDebug.resolver || null;
+        }
+
+        function getNearestStealableAiCar(maxDistance=9, maxSpeed=7) {
+            const resolver = getTrafficResolver();
+            const playerPos = getControlPosition() || getPlayerPosition();
+            if (!resolver || !resolver.carMaps || !playerPos)
+                return null;
+            let best = null;
+            let bestDistance = Math.max(2, Number(maxDistance) || 9);
+            for (const [aiId, aiCar] of resolver.carMaps) {
+                if (!aiCar || resolver.actives && !resolver.actives[aiId] || resolver.carReady && !resolver.carReady[aiId])
+                    continue;
+                const position = aiCar.getPosition && aiCar.getPosition();
+                if (!position)
+                    continue;
+                const distance = getDistance2D(playerPos, position);
+                const aiSpeed = speedAbs((resolver.speeds && resolver.speeds[aiId]) ?? aiCar.speed);
+                if (distance > bestDistance || aiSpeed > maxSpeed)
+                    continue;
+                best = {
+                    resolver,
+                    aiId,
+                    aiCar,
+                    distance,
+                    aiSpeed
+                };
+                bestDistance = distance;
+            }
+            return best;
+        }
+
+        function stealReplacementCar() {
+            const car = getPlayerCar();
+            const candidate = getNearestStealableAiCar();
+            if (!car || !car.__tmBrokenDown)
+                return !1;
+            if (!candidate) {
+                notifyRuntime("Kein Geld: Geh zu einem langsamen Botauto und druecke E direkt daneben.", "error");
+                return !1;
+            }
+            return !!runInternalModule("vehicleReplacementTheft", (() => {
+                const position = candidate.aiCar.getPosition && candidate.aiCar.getPosition();
+                if (!position)
+                    return !1;
+                stopAi(candidate.resolver, candidate.aiId, candidate.aiCar, 120, 5);
+                if ("function" == typeof candidate.resolver.requestDelete)
+                    candidate.resolver.requestDelete(candidate.aiId);
+                car.cameraGroup.position.copy(position);
+                car.cameraGroup.rotation.set(0, candidate.aiCar.cameraGroup && candidate.aiCar.cameraGroup.rotation ? candidate.aiCar.cameraGroup.rotation.y : car.cameraGroup.rotation.y, 0);
+                car.group && (car.group.rotation.z = 0);
+                car.__tmDamage = 0;
+                car.__tmBrokenDown = !1;
+                car.engineRunning = !0;
+                forcePlayerIntoCar();
+                syncVehicleDamageDisplay(car);
+                startPoliceChase("stolen replacement car", 10, 180);
+                notifyRuntime("Ersatzauto gestohlen. Die Polizei wurde alarmiert.", "error");
+                return !0;
+            }
+            ), !1, "Ersatzauto stehlen");
+        }
+
         function interactRuntime() {
             const now = performance.now();
             if (runtimeState.lastInteractionAt && now - runtimeState.lastInteractionAt < 450)
                 return;
             runtimeState.lastInteractionAt = now;
             const car = getPlayerCar();
+            if (car && car.__tmBrokenDown) {
+                if (getPlayerMoney() >= VEHICLE_DAMAGE_TUNING.towCost) {
+                    payPlayerMoney(VEHICLE_DAMAGE_TUNING.towCost);
+                    car.__tmDamage = 0;
+                    car.__tmBrokenDown = !1;
+                    car.engineRunning = !0;
+                    syncVehicleDamageDisplay(car);
+                    notifyRuntime(`Tow truck repaired your car: -${VEHICLE_DAMAGE_TUNING.towCost} EUR`);
+                    return syncFeatureMenu();
+                }
+                return void stealReplacementCar();
+            }
             if (featureState.survival && getNearestPoi("supermarket", 35))
                 return buyFoodAndDrink();
             if (featureState.hardStart && runtimeState.hardStartLocked && getNearestPoi("autoshop", 45)) {
@@ -4989,23 +5499,6 @@
                 car && (car.engineRunning = !0);
                 notifyRuntime("Starter car bought.");
                 return syncFeatureMenu();
-            }
-            if (car && car.__tmBrokenDown) {
-                if (getPlayerMoney() >= 180) {
-                    payPlayerMoney(180);
-                    car.__tmDamage = 0;
-                    car.__tmBrokenDown = !1;
-                    car.engineRunning = !0;
-                    syncVehicleDamageDisplay(car);
-                    notifyRuntime("Tow truck repaired your car: -180 EUR");
-                    return syncFeatureMenu();
-                }
-                car.__tmDamage = 0;
-                car.__tmBrokenDown = !1;
-                car.engineRunning = !0;
-                syncVehicleDamageDisplay(car);
-                startPoliceChase("stolen replacement car", 10, 180);
-                notifyRuntime("You stole a replacement car. Police response incoming.", "error");
             }
         }
 
@@ -5664,23 +6157,23 @@
 
         function updateRuntimeSystems(game, dtSeconds) {
             runtimeState.game = game || runtimeState.game;
-            ensureFeatureMenu(game);
-            ensureVehicleTuningHotkey();
-            ensureRuntimeInputHandlers();
+            runInternalModule("featureMenuUi", (() => ensureFeatureMenu(game)), null, "Feature-Menue");
+            runFeatureModule("vehicleTuning", ensureVehicleTuningHotkey, null, "Vehicle tuning hotkey");
+            runInternalModule("featureMenuUi", ensureRuntimeInputHandlers, null, "Input-Handler");
             const dt = Math.min(.08, Math.max(.001, Number(dtSeconds) || .016));
-            updateAutopilotMapSelection();
-            rebuildPoiOverlays();
-            ensureAirportSystems();
-            updateBotAircraft(dt);
-            ensureWildlife();
-            updateActiveAircraft(dt);
-            updateProjectiles(dt);
-            updateOverlayCullingAndAnimation(dt);
-            updateCustomBuildingDoors(dt);
-            updatePolice(dt);
-            updateSurvival(dt);
-            updateHardStartLock();
-            updateVehicleDamageVisuals(dt);
+            runInternalModule("autopilotRouting", updateAutopilotMapSelection, null, "Autopilot-Map");
+            runFeatureModule("shops", rebuildPoiOverlays, null, "POI overlays");
+            runFeatureModule("aircraft", ensureAirportSystems, null, "Airport systems");
+            runFeatureModule("aircraft", (() => updateBotAircraft(dt)), null, "Bot aircraft");
+            runInternalModule("wildlifeRuntime", ensureWildlife, null, "Wildlife runtime");
+            runFeatureModule("aircraft", (() => updateActiveAircraft(dt)), null, "Active aircraft");
+            runFeatureModule("aircraft", (() => updateProjectiles(dt)), null, "Aircraft projectiles");
+            runInternalModule("overlayRuntime", (() => updateOverlayCullingAndAnimation(dt)), null, "Overlay runtime");
+            runInternalModule("customBuildingDoors", (() => updateCustomBuildingDoors(dt)), null, "Custom-building doors");
+            runFeatureModule("police", (() => updatePolice(dt)), null, "Police update");
+            runFeatureModule("survival", (() => updateSurvival(dt)), null, "Survival update");
+            runInternalModule("hardStartFlow", updateHardStartLock, null, "Hard start lock");
+            runFeatureModule("vehicleDamage", (() => updateVehicleDamageVisuals(dt)), null, "Vehicle damage visuals");
             runtimeState.input.fire = !1;
         }
 
@@ -6306,32 +6799,43 @@
         }
 
         function setCustomBuildingProgress(done, total, label) {
-            const panel = ensureCustomBuildingProgressPanel();
-            if (!panel)
-                return;
-            const state = runtimeState.customBuildingProgress || (runtimeState.customBuildingProgress = {
-                panel
-            });
-            state.hideTimer && clearTimeout(state.hideTimer);
-            const percent = total > 0 ? clamp(Math.round(done / total * 100), 0, 100) : 0;
-            const labelNode = panel.querySelector('[data-role="label"]');
-            const valueNode = panel.querySelector('[data-role="value"]');
-            const barNode = panel.querySelector('[data-role="bar"]');
-            labelNode && (labelNode.textContent = label || "Haeuser optimieren");
-            valueNode && (valueNode.textContent = `${percent}%`);
-            barNode && (barNode.style.width = `${percent}%`);
-            panel.style.display = "block";
+            runInternalModule("customBuildingProgress", (() => {
+                const panel = ensureCustomBuildingProgressPanel();
+                if (!panel)
+                    return;
+                const state = runtimeState.customBuildingProgress || (runtimeState.customBuildingProgress = {
+                    panel
+                });
+                state.hideTimer && clearTimeout(state.hideTimer);
+                const percent = total > 0 ? clamp(Math.round(done / total * 100), 0, 100) : 0;
+                const labelNode = panel.querySelector('[data-role="label"]');
+                const valueNode = panel.querySelector('[data-role="value"]');
+                const barNode = panel.querySelector('[data-role="bar"]');
+                labelNode && (labelNode.textContent = label || "Haeuser optimieren");
+                valueNode && (valueNode.textContent = `${percent}%`);
+                barNode && (barNode.style.width = `${percent}%`);
+                panel.style.display = "block";
+                percent >= 100 && finishCustomBuildingProgress();
+            }
+            ), null, "Fortschrittspanel");
         }
 
         function finishCustomBuildingProgress() {
-            const panel = runtimeState.customBuildingProgress && runtimeState.customBuildingProgress.panel;
-            if (!panel)
-                return;
-            runtimeState.customBuildingProgress.hideTimer && clearTimeout(runtimeState.customBuildingProgress.hideTimer);
-            runtimeState.customBuildingProgress.hideTimer = setTimeout((() => {
-                panel.style.display = "none";
+            runInternalModule("customBuildingProgress", (() => {
+                const panel = runtimeState.customBuildingProgress && runtimeState.customBuildingProgress.panel;
+                if (!panel)
+                    return;
+                runtimeState.customBuildingProgress.hideTimer && clearTimeout(runtimeState.customBuildingProgress.hideTimer);
+                runtimeState.customBuildingProgress.hideTimer = setTimeout((() => {
+                    panel.style.display = "none";
+                    const valueNode = panel.querySelector('[data-role="value"]');
+                    const barNode = panel.querySelector('[data-role="bar"]');
+                    valueNode && (valueNode.textContent = "0%");
+                    barNode && (barNode.style.width = "0%");
+                }
+                ), 900);
             }
-            ), 900);
+            ), null, "Fortschrittspanel ausblenden");
         }
 
         function getCustomBuildingAddressText(match) {
@@ -7028,6 +7532,68 @@
             };
         }
 
+        function getCustomBuildingWorldOffset(spec) {
+            return {
+                x: Number(spec && spec.__tmWorldOffset && spec.__tmWorldOffset.x) || 0,
+                z: Number(spec && spec.__tmWorldOffset && spec.__tmWorldOffset.z) || 0
+            };
+        }
+
+        function isWindowRectClearOfTerrain(rect, edgeFrame, baseY, spec) {
+            if (!rect || !edgeFrame || !globalState.THREE)
+                return !0;
+            const worldOffset = getCustomBuildingWorldOffset(spec);
+            const terrainMargin = .35;
+            const sampleOffsets = [0, -rect.width * .22, rect.width * .22];
+            for (const alongOffset of sampleOffsets) {
+                const along = rect.centerU - edgeFrame.length / 2 + alongOffset;
+                const worldX = worldOffset.x + edgeFrame.midX + edgeFrame.alongX * along;
+                const worldZ = worldOffset.z + edgeFrame.midZ + edgeFrame.alongZ * along;
+                const terrainY = getTerrainYWorld(new globalState.THREE.Vector3(worldX, baseY + rect.y1, worldZ), baseY);
+                if (baseY + rect.y1 <= terrainY + terrainMargin)
+                    return !1;
+            }
+            return !0;
+        }
+
+        function getFootprintMinTerrainY(points, baseY, spec) {
+            if (!globalState.THREE || !Array.isArray(points) || !points.length)
+                return Number(baseY) || 0;
+            const worldOffset = getCustomBuildingWorldOffset(spec);
+            let minY = Number(baseY) || 0;
+            for (let index = 0; index < points.length; index++) {
+                const current = points[index];
+                const next = points[(index + 1) % points.length];
+                for (const sample of [current, {
+                    x: (current.x + next.x) / 2,
+                    z: (current.z + next.z) / 2
+                }]) {
+                    const worldX = worldOffset.x + (Number(sample.x) || 0);
+                    const worldZ = worldOffset.z + (Number(sample.z) || 0);
+                    minY = Math.min(minY, getTerrainYWorld(new globalState.THREE.Vector3(worldX, baseY, worldZ), baseY));
+                }
+            }
+            return minY;
+        }
+
+        function createCustomBuildingFoundation(points, baseY, foundationY, colorValue, spec) {
+            const height = Math.max(0, Number(baseY) - Number(foundationY));
+            if (height < .35)
+                return null;
+            return createCustomBuildingBody(points, foundationY, height, shadeDetailColor(null != colorValue ? colorValue : 14540253, -.16), deepMergeConfig(spec || {}, {
+                windows: {
+                    enabled: !1,
+                    cutHoles: !1
+                },
+                roof: {
+                    enabled: !1
+                },
+                base: {
+                    solid: !0
+                }
+            }));
+        }
+
         function createCustomBuildingWallBody(points, baseY, bodyHeight, colorValue, spec) {
             if (!globalState.THREE || points.length < 3)
                 return null;
@@ -7065,6 +7631,13 @@
                 const outwardLength = Math.hypot(outwardX, outwardZ) || 1;
                 const normalX = outwardX / outwardLength;
                 const normalZ = outwardZ / outwardLength;
+                const edgeFrame = {
+                    length: edgeLength,
+                    alongX: dx,
+                    alongZ: dz,
+                    midX,
+                    midZ
+                };
                 const sideSpec = deepMergeConfig(windowsSpec, windowsSpec.sides && (windowsSpec.sides[index] || windowsSpec.sides[String(index)]) || {});
                 const layout = computeWindowLayout(edgeLength, bodyHeight, sideSpec);
                 const shape = new THREE.Shape;
@@ -7075,6 +7648,8 @@
                 shape.lineTo(0, 0);
                 if (!1 !== sideSpec.enabled && !1 !== sideSpec.cutHoles)
                     for (const rect of layout.rects) {
+                        if (!isWindowRectClearOfTerrain(rect, edgeFrame, baseY, spec))
+                            continue;
                         const hole = new THREE.Path;
                         hole.moveTo(rect.x1, rect.y1);
                         hole.lineTo(rect.x1, rect.y2);
@@ -7333,6 +7908,8 @@
                 });
                 const frameDepth = Math.max(.035, Number(sideSpec.frameDepth) || .08);
                 for (const rect of layout.rects) {
+                    if (!isWindowRectClearOfTerrain(rect, frame, baseY, spec))
+                        continue;
                     const width = rect.width;
                     const height = rect.height;
                     const frameThickness = null != sideSpec.frameThickness ? Math.max(.04, Number(sideSpec.frameThickness) || .04) : Math.max(.04, Math.min(width, height) * .09);
@@ -7969,6 +8546,8 @@
                 return !0;
             if (!("box" === type || "wall" === type || "panel" === type))
                 return !1;
+            if (!(detail.hinge || detail.hingeSide || null != detail.openAngle || null != detail.openRadius || null != detail.openSpeed))
+                return !1;
             const size = getDetailSize(detail);
             const position = detail.position || [0, 0, 0];
             const width = Math.max(size[0], size[2]);
@@ -8244,6 +8823,14 @@
                 },
                 parts: []
             }, match.entry || {});
+            const entryIsAuto3d = !!(match.entry && match.entry.__tmAuto3d || spec.__tmAuto3d);
+            entryIsAuto3d || (spec.windows = deepMergeConfig(spec.windows || {}, {
+                cutHoles: !0
+            }));
+            spec.__tmWorldOffset = match.building.chunkCenter || {
+                x: 0,
+                z: 0
+            };
             const group = new globalState.THREE.Group;
             group.name = `tmCustomBuilding:${match.id}`;
             const points = getBuildingFootprint(match.building, spec);
@@ -8251,12 +8838,15 @@
             const bodyHeight = Math.max(1.4, Number(spec.base && spec.base.height) || Math.max(1, Number(spec.base && spec.base.floors) || 2) * Math.max(2.4, Number(spec.base && spec.base.floorHeight) || 3));
             const baseEnabled = !(spec.base && !1 === spec.base.enabled);
             if (baseEnabled) {
+                const foundation = createCustomBuildingFoundation(points, baseY, getFootprintMinTerrainY(points, baseY, spec), spec.base && spec.base.color, spec);
+                foundation && group.add(foundation);
                 const body = createCustomBuildingBody(points, baseY, bodyHeight, spec.base && spec.base.color, spec);
                 body && group.add(body);
                 const roof = createCustomRoof(points, baseY, bodyHeight, spec.roof);
                 roof && group.add(roof);
                 createWindowsForFootprint(group, points, baseY, bodyHeight, deepMergeConfig(spec.windows, {
-                    sides: spec.sides || {}
+                    sides: spec.sides || {},
+                    __tmWorldOffset: spec.__tmWorldOffset
                 }));
             }
             const anchorPoint = Object.assign({
@@ -8784,6 +9374,7 @@
                     const originalSetControlManager = trafficProto.setControlManager;
                     trafficProto.setControlManager = function(...args) {
                         globalThis.__tmCollisionHookDebug.resolver = this;
+                        runtimeState.trafficResolver = this;
                         log("AiTrafficResolver verbunden.");
                         return originalSetControlManager.apply(this, args);
                     };
@@ -8849,12 +9440,12 @@
                             return result;
                         }
                         const previousSpeed = Number(this.speed) || 0;
-                        applyExtendedVehicleControls(this, dtSeconds);
-                        enhanceVehicleAppearance(this);
+                        runInternalModule("vehicleTuningHandling", (() => applyExtendedVehicleControls(this, dtSeconds)), null, "Erweiterte Fahrzeugsteuerung");
+                        runFeatureModule("enhancedVehicles", (() => enhanceVehicleAppearance(this)), null, "Enhanced vehicle appearance");
                         const result = originalMoveGroup.apply(this, arguments);
-                        applyExtendedVehicleControls(this, dtSeconds);
-                        applyVehicleTuning(this, dtSeconds, previousSpeed);
-                        applyAutopilotToCar(this, dtSeconds);
+                        runInternalModule("vehicleTuningHandling", (() => applyExtendedVehicleControls(this, dtSeconds)), null, "Erweiterte Fahrzeugsteuerung");
+                        runInternalModule("vehicleTuningHandling", (() => applyVehicleTuning(this, dtSeconds, previousSpeed)), null, "Vehicle tuning handling");
+                        runFeatureModule("autopilot", (() => applyAutopilotToCar(this, dtSeconds)), !1, "Autopilot drive");
                         return result;
                     };
                     controllableProto.__tmMoveGroupPatched = !0;
