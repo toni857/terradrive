@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.0.0
+// @version      2.1.0
 // @downloadURL  https://toni857.github.io/terradrive/Texture%20Override%20(Universal%20Safe)-1.1.1.1.user.js
 // @updateURL    https://toni857.github.io/terradrive/Texture%20Override%20(Universal%20Safe)-1.1.1.1.user.js
 // ==/UserScript==
@@ -76,7 +76,21 @@
     "use strict";
     console.log("[Texture Hook] gestartet");
 
-    const BUILDING_TEXTURE_PLACEHOLDER = "data:image/svg+xml;charset=utf-8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4" fill="#d9d3c5"/></svg>');
+    const BASE = "https://toni857.github.io/my-textures/";
+    const cache = {
+        fallback: BASE + "type1me.png"
+    };
+
+    function resolveUrl(id) {
+        return BASE + `type${id}me.png`;
+    }
+
+    function testImage(url, cb) {
+        const img = new Image;
+        img.onload = () => cb(!0);
+        img.onerror = () => cb(!1);
+        img.src = url;
+    }
 
     const desc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "src");
     if (!desc || "function" != typeof desc.set) {
@@ -89,9 +103,23 @@
             configurable: !1 !== desc.configurable,
             enumerable: !!desc.enumerable,
             set(value) {
-                if ("string" == typeof value && /textures\/building\//i.test(value))
-                    return desc.set.call(this, BUILDING_TEXTURE_PLACEHOLDER);
-                return desc.set.call(this, value);
+                if ("string" != typeof value || !value.includes("textures/building/type"))
+                    return desc.set.call(this, value);
+
+                const match = value.match(/type(\d+)\.png/);
+                const id = match ? match[1] : "1";
+                const targetUrl = resolveUrl(id);
+                console.log("[Texture Hook] pruefe:", targetUrl);
+                testImage(targetUrl, ok => {
+                    let finalUrl = targetUrl;
+                    if (!ok) {
+                        console.warn("[Texture Hook] fehlt:", targetUrl, "-> fallback type1me");
+                        finalUrl = cache.fallback;
+                    }
+                    console.log("[Texture Hook] final:", finalUrl);
+                    desc.set.call(this, finalUrl);
+                }
+                );
             },
             get: desc.get
         });
@@ -120,7 +148,6 @@
             CONTROLLABLE_CAR: 7818,
             ROAD_FACTORY: 5263,
             CHUNK: 4763,
-            BUILDING_FACTORY: 5119,
             TERRAIN: 5367,
             TREE_LIBRARY: 419,
             BIOM: 495,
@@ -131,7 +158,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.0.0",
+            version: "2.1.0",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -180,8 +207,8 @@
         townSignsState.placeFetchWarnedAt = Number(townSignsState.placeFetchWarnedAt) || 0;
         townSignsState.placeFetchFailures = Number(townSignsState.placeFetchFailures) || 0;
         const BUILDING_CONFIG_URL = "https://toni857.github.io/terradrive/buildings.js";
-        const CUSTOM_BUILDING_TEXTURE_BASE = "";
-        const CUSTOM_BUILDING_FALLBACK_TEXTURE_URL = "data:image/svg+xml;charset=utf-8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4" fill="#d9d3c5"/></svg>');
+        const CUSTOM_BUILDING_TEXTURE_BASE = "https://toni857.github.io/my-textures/";
+        const CUSTOM_BUILDING_FALLBACK_TEXTURE_URL = CUSTOM_BUILDING_TEXTURE_BASE + "type1me.png";
         const CUSTOM_TASK_OPTIONS = [{
             value: "tmTownHop",
             label: "Town Hop"
@@ -312,7 +339,10 @@
             buildingDebugEntries: [],
             customBuildingEntriesByChunk: new WeakMap,
             customBuildingTextureCache: new Map,
-            buildingAddressCache: new Map
+            customBuildingAddressCache: new Map,
+            customBuildingDoorItems: [],
+            customBuildingProgress: null,
+            customBuildingPriorityTargets: []
         });
         const vehicleTuningState = globalThis.__tmVehicleTuningState || (globalThis.__tmVehicleTuningState = {
             installed: !1,
@@ -327,7 +357,6 @@
             police: !1,
             vehicleDamage: !1,
             hardStart: !1,
-            textureReplacement: !1,
             overlays: !0,
             birds: !0,
             bees: !0,
@@ -350,7 +379,10 @@
             navSearching: !!runtimeState.navSearching,
             startMenuFeatureWatcherInstalled: !!runtimeState.startMenuFeatureWatcherInstalled,
             customBuildingTextureCache: runtimeState.customBuildingTextureCache instanceof Map ? runtimeState.customBuildingTextureCache : new Map,
-            buildingAddressCache: runtimeState.buildingAddressCache instanceof Map ? runtimeState.buildingAddressCache : new Map,
+            customBuildingAddressCache: runtimeState.customBuildingAddressCache instanceof Map ? runtimeState.customBuildingAddressCache : new Map,
+            customBuildingDoorItems: Array.isArray(runtimeState.customBuildingDoorItems) ? runtimeState.customBuildingDoorItems : [],
+            customBuildingProgress: runtimeState.customBuildingProgress || null,
+            customBuildingPriorityTargets: Array.isArray(runtimeState.customBuildingPriorityTargets) ? runtimeState.customBuildingPriorityTargets : [],
             autopilot: Object.assign({
                 enabled: !1,
                 pendingMapSelection: !1,
@@ -391,7 +423,6 @@
             police: !1,
             vehicleDamage: !1,
             hardStart: !1,
-            textureReplacement: !1,
             overlays: !0,
             birds: !0,
             bees: !0,
@@ -2465,19 +2496,10 @@
 
         function collectGasStationMissionTargets() {
             const targets = [];
-            const seen = new Set;
             for (const chunk of getLoadedChunks())
-                for (const station of toSafeArray(chunk && chunk.gasStations)) {
-                    const rawPosition = station && station.pumpPositions && station.pumpPositions[0] ? station.pumpPositions[0] : station && station.origin ? station.origin : station && station.position ? station.position : station && station.center ? station.center : null;
-                    const position = rawPosition && "function" == typeof rawPosition.clone ? rawPosition.clone() : rawPosition && globalState.THREE ? new globalState.THREE.Vector3(Number(rawPosition.x) || 0, Number(rawPosition.y) || 0, Number(rawPosition.z) || 0) : null;
-                    if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.z))
-                        continue;
-                    Number.isFinite(position.y) || (position.y = getTerrainYWorld(position, 0));
-                    const key = `${Math.round(position.x)}:${Math.round(position.z)}`;
-                    if (seen.has(key))
-                        continue;
-                    seen.add(key);
-                    targets.push({
+                for (const station of toSafeArray(chunk.gasStations)) {
+                    const position = station && station.pumpPositions && station.pumpPositions[0] ? station.pumpPositions[0].clone() : station && station.origin ? station.origin.clone() : null;
+                    position && targets.push({
                         key: `fuel_${targets.length}`,
                         label: "Fuel station",
                         position,
@@ -2788,7 +2810,7 @@
                     this.missionManager.missionPanel.updateCompass(playerPos, player.getHeadings(), stage.position);
                 this.missionManager.missionPanel.updateEntry1(`${this.stageIndex + 1}/${this.stages.length} checkpoints`);
                 this.missionManager.missionPanel.updateEntry2(stage.label);
-                this.missionManager.missionPanel.updateEntry3(stage.noMap ? "No distance hint" : `ETA: ${Math.max(0, getDistance2D(playerPos, stage.position)).toFixed(0)} m`);
+                this.missionManager.missionPanel.updateEntry3(stage.noMap ? `Distance: ${Math.max(0, getDistance2D(playerPos, stage.position)).toFixed(0)} m` : `ETA: ${Math.max(0, getDistance2D(playerPos, stage.position)).toFixed(0)} m`);
                 this.missionManager.missionPanel.updateEntry4(`Time: ${formatMissionSeconds((Number(currentTime) || 0) - this.startedAt)}`);
                 if (getDistance2D(playerPos, stage.position) <= (Number(stage.radius) || 24))
                     if (this.stageIndex >= this.stages.length - 1)
@@ -2974,11 +2996,6 @@
                     event.stopPropagation();
                 }
                 else if ("KeyE" === code) {
-                    const car = getPlayerCar();
-                    if (car && car.__tmBrokenDown) {
-                        event.preventDefault();
-                        event.stopPropagation();
-                    }
                     runtimeState.input.fire = !0;
                     interactRuntime();
                 } else if ("KeyM" === code) {
@@ -3233,7 +3250,7 @@
                 return collectPoiNaviTargets(type);
             if ("town" === type)
                 return collectTownMissionTargets();
-            return collectPoiNaviTargets(type);
+            return [];
         }
 
         function chooseNearestNaviTarget(targets) {
@@ -3245,40 +3262,16 @@
             })).sort(((a, b) => a.distance - b.distance))[0] || null;
         }
 
-        function getNaviPresetLabel(type) {
-            const preset = NAV_PRESETS.find((entry => entry.type === type));
-            return preset && preset.label || type || "Ziel";
-        }
-
-        function delayMs(ms) {
-            return new Promise((resolve => setTimeout(resolve, ms)));
-        }
-
-        async function startNaviPreset(type) {
-            const presetLabel = getNaviPresetLabel(type);
-            setNaviPanelStatus("Suche Ziel...");
+        function startNaviPreset(type) {
             if ("airport" !== type && "town" !== type)
                 for (const chunk of getLoadedChunks())
                     queuePoiFetch(chunk);
-            "airport" === type && getAirportEntries();
-            "town" === type && queueTownRebuild("navi_preset");
-            let targets = collectNaviTargets(type);
-            if (!targets.length) {
-                await delayMs(600);
-                "airport" === type && getAirportEntries();
-                "town" === type && queueTownRebuild("navi_retry");
-                targets = collectNaviTargets(type);
-            }
-            const target = chooseNearestNaviTarget(targets);
+            const target = chooseNearestNaviTarget(collectNaviTargets(type));
             if (!target) {
-                const message = "airport" === type ? "Navi: kein Flughafen in geladenen Chunks gefunden." : `Navi: kein passendes ${presetLabel.toLowerCase()}-Ziel in geladenen Daten gefunden.`;
-                setNaviPanelStatus(message, "error");
-                notifyRuntime(message, "error");
+                notifyRuntime("Navi: kein passendes Ziel in geladenen Daten gefunden.", "error");
                 return !1;
             }
-            const started = startAutopilotToWorldPosition(target.position, target.label || presetLabel, `preset:${type}`);
-            started ? setNaviPanelStatus(`Ziel gesetzt: ${target.label || presetLabel}`) : setNaviPanelStatus(`Ziel konnte nicht gesetzt werden: ${presetLabel}`, "error");
-            return started;
+            return startAutopilotToWorldPosition(target.position, target.label || type, `preset:${type}`);
         }
 
         function setNaviPanelStatus(message, kind) {
@@ -3318,6 +3311,8 @@
                     throw new Error("Koordinaten konnten nicht ins Spiel umgerechnet werden");
                 position.y = getTerrainYWorld(position, 0);
                 const label = normalizeTownLabel(result.display_name).slice(0, 72) || text;
+                addCustomBuildingPriorityTarget(position, label);
+                prepareCustomBuildingsNearPosition(position, "address");
                 startAutopilotToWorldPosition(position, label, "address");
                 setNaviPanelStatus(`Ziel gesetzt: ${label}`);
             }).catch(searchError => {
@@ -3350,28 +3345,16 @@
                 </form>
                 <div data-role="status" style="min-height:18px;color:#9fd7ff;font-size:12px;"></div>
             `;
-            const stopPanelEvent = event => event.stopPropagation();
-            for (const eventName of ["pointerdown", "mousedown", "mouseup", "click", "keydown", "keyup"])
-                panel.addEventListener(eventName, stopPanelEvent);
-            panel.querySelector('[data-role="close"]').addEventListener("click", (event => {
-                event.preventDefault();
-                event.stopPropagation();
-                toggleNaviPanel(!1);
-            }));
+            panel.addEventListener("keydown", (event => event.stopPropagation()));
+            panel.addEventListener("keyup", (event => event.stopPropagation()));
+            panel.querySelector('[data-role="close"]').addEventListener("click", (() => toggleNaviPanel(!1)));
             panel.querySelector('[data-role="addressForm"]').addEventListener("submit", (event => {
                 event.preventDefault();
-                event.stopPropagation();
                 const input = panel.querySelector('[data-role="address"]');
                 searchNaviAddress(input && input.value);
             }));
-            panel.querySelector('[data-role="presets"]').addEventListener("click", (event => {
-                const button = event.target.closest("button[data-preset]");
-                if (!button)
-                    return;
-                event.preventDefault();
-                event.stopPropagation();
-                startNaviPreset(button.dataset.preset);
-            }));
+            for (const button of panel.querySelectorAll("button[data-preset]"))
+                button.addEventListener("click", (() => startNaviPreset(button.dataset.preset)));
             document.body.appendChild(panel);
             runtimeState.navPanel = panel;
             return panel;
@@ -3883,9 +3866,7 @@
                 featureState.police = !0;
                 featureState.vehicleDamage = !0;
                 setPlayerMoney(0);
-                runtimeState.hardStartLocked = !1;
-                const car = getPlayerCar();
-                car && (car.engineRunning = !0);
+                runtimeState.hardStartLocked = !0;
             }
             syncFeatureMenu();
         }
@@ -4427,7 +4408,7 @@
                 car.__tmBrokenDown = !0;
                 car.engineRunning = !1;
                 setPlayerSpeed(car, 0);
-                notifyRuntime(`Car broken (${reason}). Press E to call tow truck for 180 EUR or steal a replacement.`, "error");
+                notifyRuntime(`Car broken (${reason}). Press E near it to tow for 180 EUR or steal a replacement.`, "error");
             }
         }
 
@@ -4587,36 +4568,12 @@
             syncFeatureMenu();
         }
 
-        function towOrReplaceBrokenCar(car) {
-            if (!car || !car.__tmBrokenDown)
-                return !1;
-            if (getPlayerMoney() >= 180) {
-                payPlayerMoney(180);
-                car.__tmDamage = 0;
-                car.__tmBrokenDown = !1;
-                car.engineRunning = !0;
-                syncVehicleDamageDisplay(car);
-                notifyRuntime("Tow truck repaired your car: -180 EUR");
-                syncFeatureMenu();
-                return !0;
-            }
-            car.__tmDamage = 0;
-            car.__tmBrokenDown = !1;
-            car.engineRunning = !0;
-            syncVehicleDamageDisplay(car);
-            startPoliceChase("stolen replacement car", 10, 180);
-            notifyRuntime("You stole a replacement car. Police response incoming.", "error");
-            return !0;
-        }
-
         function interactRuntime() {
             const now = performance.now();
             if (runtimeState.lastInteractionAt && now - runtimeState.lastInteractionAt < 450)
                 return;
             runtimeState.lastInteractionAt = now;
             const car = getPlayerCar();
-            if (car && car.__tmBrokenDown)
-                return towOrReplaceBrokenCar(car);
             if (featureState.survival && getNearestPoi("supermarket", 35))
                 return buyFoodAndDrink();
             if (featureState.hardStart && runtimeState.hardStartLocked && getNearestPoi("autoshop", 45)) {
@@ -4632,6 +4589,23 @@
                 car && (car.engineRunning = !0);
                 notifyRuntime("Starter car bought.");
                 return syncFeatureMenu();
+            }
+            if (car && car.__tmBrokenDown) {
+                if (getPlayerMoney() >= 180) {
+                    payPlayerMoney(180);
+                    car.__tmDamage = 0;
+                    car.__tmBrokenDown = !1;
+                    car.engineRunning = !0;
+                    syncVehicleDamageDisplay(car);
+                    notifyRuntime("Tow truck repaired your car: -180 EUR");
+                    return syncFeatureMenu();
+                }
+                car.__tmDamage = 0;
+                car.__tmBrokenDown = !1;
+                car.engineRunning = !0;
+                syncVehicleDamageDisplay(car);
+                startPoliceChase("stolen replacement car", 10, 180);
+                notifyRuntime("You stole a replacement car. Police response incoming.", "error");
             }
         }
 
@@ -5247,8 +5221,36 @@
             }
         }
 
+        function updateCustomBuildingDoors(dtSeconds) {
+            const playerPos = getPlayerPosition();
+            if (!playerPos || !globalState.THREE)
+                return;
+            const worldPosition = new globalState.THREE.Vector3;
+            for (let index = runtimeState.customBuildingDoorItems.length - 1; index >= 0; index--) {
+                const item = runtimeState.customBuildingDoorItems[index];
+                const group = item && item.group;
+                const state = group && group.userData && group.userData.tmDoor;
+                if (!group || !group.parent || !state) {
+                    runtimeState.customBuildingDoorItems.splice(index, 1);
+                    continue;
+                }
+                group.getWorldPosition(worldPosition);
+                const target = getDistance2D(playerPos, worldPosition) <= state.radius ? 1 : 0;
+                const delta = Math.max(.001, Number(dtSeconds) || .016) * state.speed;
+                state.current += (target - state.current) * Math.min(1, delta);
+                const eased = state.current * state.current * (3 - 2 * state.current);
+                group.rotation.y = state.closedY + (state.openY - state.closedY) * eased;
+            }
+        }
+
         function updateHardStartLock() {
-            return;
+            if (!featureState.hardStart || !runtimeState.hardStartLocked)
+                return;
+            const car = getPlayerCar();
+            if (!car)
+                return;
+            car.engineRunning = !1;
+            setPlayerSpeed(car, 0);
         }
 
         function updateRuntimeSystems(game, dtSeconds) {
@@ -5265,6 +5267,7 @@
             updateActiveAircraft(dt);
             updateProjectiles(dt);
             updateOverlayCullingAndAnimation(dt);
+            updateCustomBuildingDoors(dt);
             updatePolice(dt);
             updateSurvival(dt);
             updateHardStartLock();
@@ -5389,7 +5392,6 @@
                 try {
                     enhanceTerrainMesh(chunk);
                     enhanceRoadMeshes(chunk);
-                    stripBuildingTextureMaps(chunk);
                     rebuildCustomBuildingsForChunk(chunk);
                 } catch (visualError) {
                     error(`Fehler beim Visual-Refresh fuer Chunk ${chunk.cx}/${chunk.cz}:`, visualError);
@@ -5403,9 +5405,189 @@
             const usable = geometries.filter(Boolean);
             if (!usable.length)
                 return null;
-            if (1 === usable.length || !runtimeState.bufferGeometryUtils || "function" != typeof runtimeState.bufferGeometryUtils.mergeBufferGeometries)
+            const merger = runtimeState.bufferGeometryUtils && (runtimeState.bufferGeometryUtils.mergeBufferGeometries || runtimeState.bufferGeometryUtils.mergeGeometries);
+            if (1 === usable.length || "function" != typeof merger)
                 return usable[0];
-            return runtimeState.bufferGeometryUtils.mergeBufferGeometries(usable);
+            try {
+                return merger(usable, !1) || usable[0];
+            } catch (mergeError) {
+                warn("Geometrie-Merge fehlgeschlagen:", mergeError);
+                return usable[0];
+            }
+        }
+
+        function getGeometryMerger() {
+            return runtimeState.bufferGeometryUtils && (runtimeState.bufferGeometryUtils.mergeBufferGeometries || runtimeState.bufferGeometryUtils.mergeGeometries) || null;
+        }
+
+        function normalizeGeometryForBatch(geometry, material) {
+            if (!geometry || !geometry.attributes || !geometry.attributes.position)
+                return null;
+            let normalized = geometry;
+            if (normalized.index && "function" == typeof normalized.toNonIndexed) {
+                const nonIndexed = normalized.toNonIndexed();
+                normalized.dispose && normalized.dispose();
+                normalized = nonIndexed;
+            }
+            if (material && material.map) {
+                if (!normalized.attributes.uv)
+                    normalized.setAttribute("uv", new globalState.THREE.Float32BufferAttribute(new Float32Array(2 * normalized.attributes.position.count),2));
+            } else {
+                for (const attributeName of Object.keys(normalized.attributes))
+                    if ("position" !== attributeName && "normal" !== attributeName)
+                        normalized.deleteAttribute(attributeName);
+            }
+            normalized.attributes.normal || normalized.computeVertexNormals();
+            return normalized;
+        }
+
+        function getMaterialBatchKey(material) {
+            if (!material)
+                return "default";
+            const color = material.color && "function" == typeof material.color.getHexString ? material.color.getHexString() : "none";
+            const map = material.map ? material.map.uuid || material.map.id || "map" : "none";
+            const opacity = null != material.opacity ? Math.round(1e3 * material.opacity) / 1e3 : 1;
+            return [
+                material.type || "Material",
+                color,
+                map,
+                material.transparent || opacity < 1 ? 1 : 0,
+                opacity,
+                null != material.side ? material.side : "side",
+                material.depthWrite === !1 ? 0 : 1,
+                material.vertexColors ? 1 : 0
+            ].join("|");
+        }
+
+        function cloneMaterialForBatch(material) {
+            const THREE = globalState.THREE;
+            const clone = material && "function" == typeof material.clone ? material.clone() : new THREE.MeshLambertMaterial({
+                color: 0xffffff,
+                side: THREE.DoubleSide
+            });
+            if (clone.transparent || Number(clone.opacity) < 1) {
+                clone.transparent = !0;
+                clone.depthWrite = !1;
+            }
+            clone.needsUpdate = !0;
+            return clone;
+        }
+
+        function getLocalMatrixToAncestor(object, ancestor) {
+            const THREE = globalState.THREE;
+            const stack = [];
+            for (let node = object; node && node !== ancestor; node = node.parent)
+                stack.push(node);
+            const matrix = new THREE.Matrix4;
+            for (let index = stack.length - 1; index >= 0; index--) {
+                stack[index].updateMatrix();
+                matrix.multiply(stack[index].matrix);
+            }
+            return matrix;
+        }
+
+        function disposeMeshOnly(mesh) {
+            if (!mesh || !mesh.isMesh)
+                return;
+            mesh.geometry && "function" == typeof mesh.geometry.dispose && mesh.geometry.dispose();
+            if (Array.isArray(mesh.material))
+                for (const material of mesh.material)
+                    material && "function" == typeof material.dispose && material.dispose();
+            else
+                mesh.material && "function" == typeof mesh.material.dispose && mesh.material.dispose();
+        }
+
+        function pruneEmptyGroups(group, root) {
+            if (!group || !group.children)
+                return;
+            for (let index = group.children.length - 1; index >= 0; index--) {
+                const child = group.children[index];
+                if (!child || child.isMesh)
+                    continue;
+                pruneEmptyGroups(child, root || group);
+                child !== (root || group) && child.children && !child.children.length && group.remove(child);
+            }
+        }
+
+        function clearCustomBuildingOverlayChildren(overlay) {
+            if (!overlay)
+                return;
+            while (overlay.children.length) {
+                const child = overlay.children[0];
+                overlay.remove(child);
+                disposeObject3D(child);
+            }
+        }
+
+        function optimizeCustomBuildingOverlay(overlay) {
+            if (!overlay || !globalState.THREE)
+                return;
+            const THREE = globalState.THREE;
+            const batches = new Map;
+            const staticMeshes = [];
+            overlay.updateMatrixWorld && overlay.updateMatrixWorld(!0);
+            overlay.traverse((node => {
+                if (!node || !node.isMesh || node.userData && (node.userData.tmDynamicDoor || node.userData.tmNoBatch) || Array.isArray(node.material) || !node.geometry)
+                    return;
+                const sourceGeometry = node.geometry.clone();
+                sourceGeometry.applyMatrix4(getLocalMatrixToAncestor(node, overlay));
+                const geometry = normalizeGeometryForBatch(sourceGeometry, node.material);
+                if (!geometry) {
+                    sourceGeometry.dispose && sourceGeometry.dispose();
+                    return;
+                }
+                const key = getMaterialBatchKey(node.material);
+                let batch = batches.get(key);
+                if (!batch) {
+                    batch = {
+                        material: cloneMaterialForBatch(node.material),
+                        geometries: [],
+                        transparent: !!(node.material && (node.material.transparent || Number(node.material.opacity) < 1))
+                    };
+                    batches.set(key, batch);
+                }
+                batch.geometries.push(geometry);
+                staticMeshes.push(node);
+            }
+            ));
+            if (!staticMeshes.length)
+                return;
+            for (const mesh of staticMeshes) {
+                mesh.parent && mesh.parent.remove(mesh);
+                disposeMeshOnly(mesh);
+            }
+            pruneEmptyGroups(overlay, overlay);
+            const merger = getGeometryMerger();
+            for (const batch of batches.values()) {
+                const outputGeometries = [];
+                if (batch.geometries.length > 1 && "function" == typeof merger) {
+                    try {
+                        const merged = merger(batch.geometries, !1);
+                        if (merged) {
+                            outputGeometries.push(merged);
+                            for (const geometry of batch.geometries)
+                                geometry !== merged && geometry.dispose && geometry.dispose();
+                        }
+                    } catch (batchMergeError) {
+                        warn("Custom-Building-Batch konnte nicht gemerged werden:", batchMergeError);
+                    }
+                }
+                outputGeometries.length || outputGeometries.push(...batch.geometries);
+                for (const geometry of outputGeometries) {
+                    geometry.computeBoundingSphere && geometry.computeBoundingSphere();
+                    geometry.computeBoundingBox && geometry.computeBoundingBox();
+                    const mesh = new THREE.Mesh(geometry,batch.material.clone ? batch.material.clone() : batch.material);
+                    mesh.name = batch.transparent ? "__tmCustomBuildingGlassBatch" : "__tmCustomBuildingStaticBatch";
+                    mesh.userData.tmNoBatch = !0;
+                    if (batch.transparent) {
+                        mesh.renderOrder = 20;
+                        mesh.material.transparent = !0;
+                        mesh.material.depthWrite = !1;
+                    }
+                    overlay.add(mesh);
+                }
+                batch.material && "function" == typeof batch.material.dispose && batch.material.dispose();
+            }
         }
 
         function transformGeometry(geometry, options) {
@@ -5613,12 +5795,131 @@
             };
         }
 
+        function ensureCustomBuildingProgressPanel() {
+            if (runtimeState.customBuildingProgress && runtimeState.customBuildingProgress.panel && runtimeState.customBuildingProgress.panel.isConnected)
+                return runtimeState.customBuildingProgress.panel;
+            if (!document.body)
+                return null;
+            const panel = document.createElement("div");
+            panel.id = "__tmCustomBuildingProgress";
+            panel.style.cssText = "position:fixed;left:50%;top:18px;transform:translateX(-50%);z-index:999999;min-width:280px;max-width:min(420px,calc(100vw - 28px));box-sizing:border-box;background:rgba(18,22,27,.92);color:#fff7e8;border:1px solid rgba(255,255,255,.18);border-radius:10px;box-shadow:0 14px 36px rgba(0,0,0,.3);padding:10px 12px;font:700 12px/1.35 Arial,Helvetica,sans-serif;display:none;backdrop-filter:blur(10px);";
+            panel.innerHTML = `
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:8px;">
+                    <span data-role="label">Haeuser optimieren</span>
+                    <span data-role="value">0%</span>
+                </div>
+                <div style="height:7px;background:rgba(255,255,255,.15);border-radius:999px;overflow:hidden;">
+                    <div data-role="bar" style="height:100%;width:0%;background:#7dd3fc;border-radius:999px;"></div>
+                </div>
+            `;
+            document.body.appendChild(panel);
+            runtimeState.customBuildingProgress = {
+                panel,
+                hideTimer: 0
+            };
+            return panel;
+        }
+
+        function setCustomBuildingProgress(done, total, label) {
+            const panel = ensureCustomBuildingProgressPanel();
+            if (!panel)
+                return;
+            const state = runtimeState.customBuildingProgress || (runtimeState.customBuildingProgress = {
+                panel
+            });
+            state.hideTimer && clearTimeout(state.hideTimer);
+            const percent = total > 0 ? clamp(Math.round(done / total * 100), 0, 100) : 0;
+            const labelNode = panel.querySelector('[data-role="label"]');
+            const valueNode = panel.querySelector('[data-role="value"]');
+            const barNode = panel.querySelector('[data-role="bar"]');
+            labelNode && (labelNode.textContent = label || "Haeuser optimieren");
+            valueNode && (valueNode.textContent = `${percent}%`);
+            barNode && (barNode.style.width = `${percent}%`);
+            panel.style.display = "block";
+        }
+
+        function finishCustomBuildingProgress() {
+            const panel = runtimeState.customBuildingProgress && runtimeState.customBuildingProgress.panel;
+            if (!panel)
+                return;
+            runtimeState.customBuildingProgress.hideTimer && clearTimeout(runtimeState.customBuildingProgress.hideTimer);
+            runtimeState.customBuildingProgress.hideTimer = setTimeout((() => {
+                panel.style.display = "none";
+            }
+            ), 900);
+        }
+
+        function getCustomBuildingAddressText(match) {
+            const raw = match && (match.address || match.adresse || match.query || match.addressQuery);
+            if (!raw)
+                return "";
+            return "object" == typeof raw ? raw.text || raw.label || raw.q || raw.query || "" : String(raw);
+        }
+
+        async function fetchCustomBuildingAddressPosition(address) {
+            const text = normalizeTownLabel(address);
+            if (!text || !runtimeState.geoModule || "function" != typeof runtimeState.geoModule.convertProjLocalCoords)
+                return null;
+            const key = text.toLowerCase();
+            if (runtimeState.customBuildingAddressCache.has(key)) {
+                const cached = runtimeState.customBuildingAddressCache.get(key);
+                return cached && "function" == typeof cached.then ? await cached : cached;
+            }
+            const promise = fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=1&q=${encodeURIComponent(text)}`, {
+                headers: {
+                    Accept: "application/json"
+                }
+            }).then((response => response.json())).then((results => {
+                const result = Array.isArray(results) ? results[0] : null;
+                const lat = Number(result && result.lat);
+                const lon = Number(result && result.lon);
+                if (!Number.isFinite(lat) || !Number.isFinite(lon))
+                    return null;
+                const position = runtimeState.geoModule.convertProjLocalCoords([lat, lon]);
+                return position ? {
+                    x: Number(position.x) || 0,
+                    z: Number(position.z) || 0,
+                    label: normalizeTownLabel(result.display_name || text)
+                } : null;
+            })).catch((addressError => {
+                warn(`Adresse fuer Custom-Haus konnte nicht aufgeloest werden (${text}):`, addressError);
+                return null;
+            }));
+            runtimeState.customBuildingAddressCache.set(key, promise);
+            const resolved = await promise;
+            runtimeState.customBuildingAddressCache.set(key, resolved);
+            return resolved;
+        }
+
+        async function hydrateCustomBuildingAddressMatches(catalog) {
+            if (!catalog || !runtimeState.geoModule)
+                return catalog;
+            for (const rawEntry of toSafeArray(catalog.buildings)) {
+                const resolved = resolveBuildingTemplate(rawEntry, catalog.templates);
+                const match = resolved && resolved.match;
+                if (!match || Array.isArray(match.near))
+                    continue;
+                const addressText = getCustomBuildingAddressText(match);
+                if (!addressText)
+                    continue;
+                const position = await fetchCustomBuildingAddressPosition(addressText);
+                if (!position)
+                    continue;
+                rawEntry.match = deepMergeConfig(match, {
+                    near: [position.x, position.z],
+                    radius: Math.max(12, Number(match.radius || match.addressRadius) || 45),
+                    __addressResolved: position.label || addressText
+                });
+            }
+            return catalog;
+        }
+
         function ensureBuildingCatalogLoaded() {
             if (runtimeState.buildingConfigPromise)
                 return runtimeState.buildingConfigPromise;
             runtimeState.buildingConfigPromise = fetch(BUILDING_CONFIG_URL, {
                 cache: "no-store"
-            }).then((response => response.text())).then((text => normalizeBuildingCatalog(parseBuildingConfigText(text)))).catch((catalogError => {
+            }).then((response => response.text())).then((text => normalizeBuildingCatalog(parseBuildingConfigText(text)))).then((catalog => hydrateCustomBuildingAddressMatches(catalog))).catch((catalogError => {
                 warn("Externe buildings.js konnte nicht geladen werden:", catalogError);
                 return {
                     templates: {},
@@ -5657,65 +5958,10 @@
             return deepMergeConfig(merged, entry || {});
         }
 
-        async function resolveBuildingAddressMatch(entry) {
-            if (!entry || !entry.match || !entry.match.address || entry.match.__tmAddressResolved || entry.match.__tmAddressFailed)
-                return entry;
-            if (!runtimeState.geoModule || "function" != typeof runtimeState.geoModule.convertProjLocalCoords)
-                return entry;
-            const query = normalizeTownLabel(entry.match.address);
-            if (!query) {
-                entry.match.__tmAddressFailed = !0;
-                return entry;
-            }
-            let pending = runtimeState.buildingAddressCache.get(query);
-            if (!pending) {
-                pending = fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`, {
-                    headers: {
-                        Accept: "application/json"
-                    }
-                }).then((response => response.json())).then((results => {
-                    const result = Array.isArray(results) ? results[0] : null;
-                    if (!result)
-                        return null;
-                    const lat = Number(result.lat);
-                    const lon = Number(result.lon);
-                    if (!Number.isFinite(lat) || !Number.isFinite(lon))
-                        return null;
-                    try {
-                        return runtimeState.geoModule.convertProjLocalCoords([lat, lon]);
-                    } catch (geoError) {
-                        return null;
-                    }
-                })).catch((addressError => {
-                    warn("Address-Match konnte nicht geocodiert werden:", query, addressError);
-                    return null;
-                }));
-                runtimeState.buildingAddressCache.set(query, pending);
-            }
-            const resolved = await pending;
-            if (resolved && Number.isFinite(resolved.x) && Number.isFinite(resolved.z)) {
-                entry.match.__tmResolvedNear = [resolved.x, resolved.z];
-                null == entry.match.radius && (entry.match.radius = 25);
-                entry.match.__tmAddressResolved = !0;
-                return entry;
-            }
-            entry.match.__tmAddressFailed = !0;
-            warn("Address-Match konnte nicht aufgeloest werden:", query);
-            return entry;
-        }
-
         function matchBuildingEntry(entry, chunk, building) {
             if (!entry || !entry.match)
                 return !1;
             const match = entry.match;
-            const chance = clamp(Number(null != match.chance ? match.chance : entry.chance), 0, 1);
-            if (Number.isFinite(chance) && chance < 1) {
-                const chunkSeed = 131 * Math.round(Number(chunk && chunk.cx) || 0) + 197 * Math.round(Number(chunk && chunk.cz) || 0);
-                if (seededUnit(chunkSeed, Number(building && building.index) || 0) > chance)
-                    return !1;
-            }
-            if (!0 === match.all)
-                return !0;
             if (match.id && match.id !== getBuildingDebugId(chunk, building))
                 return !1;
             if (Array.isArray(match.chunk) && 2 === match.chunk.length)
@@ -5723,11 +5969,8 @@
                     return !1;
             if (null != match.index && Number(building.index) !== Number(match.index))
                 return !1;
-            const nearTarget = Array.isArray(match.__tmResolvedNear) ? match.__tmResolvedNear : match.near;
-            if (match.address && !Array.isArray(match.__tmResolvedNear))
-                return !1;
-            if (Array.isArray(nearTarget) && 2 <= nearTarget.length && building.houseCenter) {
-                const distance = Math.hypot((Number(building.houseCenter.x) || 0) - (Number(nearTarget[0]) || 0), (Number(building.houseCenter.z) || 0) - (Number(nearTarget[1]) || 0));
+            if (Array.isArray(match.near) && 2 <= match.near.length && building.houseCenter) {
+                const distance = Math.hypot((Number(building.houseCenter.x) || 0) - (Number(match.near[0]) || 0), (Number(building.houseCenter.z) || 0) - (Number(match.near[1]) || 0));
                 if (distance > Math.max(8, Number(match.radius) || 25))
                     return !1;
             }
@@ -5783,9 +6026,9 @@
                 return CUSTOM_BUILDING_FALLBACK_TEXTURE_URL;
             const text = String(raw).trim();
             if (/^\d+$/.test(text))
-                return CUSTOM_BUILDING_FALLBACK_TEXTURE_URL;
-            if (/^type\d+me\.[a-z0-9]+$/i.test(text))
-                return CUSTOM_BUILDING_FALLBACK_TEXTURE_URL;
+                return `${CUSTOM_BUILDING_TEXTURE_BASE}type${text}me.png`;
+            if (/^type\d+me\.png$/i.test(text))
+                return CUSTOM_BUILDING_TEXTURE_BASE + text;
             try {
                 return new URL(text, BUILDING_CONFIG_URL).href;
             } catch (urlError) {
@@ -5797,12 +6040,6 @@
             if (!spec)
                 return CUSTOM_BUILDING_FALLBACK_TEXTURE_URL;
             return spec.textureUrl || spec.texture || spec.imageUrl || spec.image || spec.material && (spec.material.textureUrl || spec.material.texture || spec.material.imageUrl || spec.material.image) || spec.base && (spec.base.textureUrl || spec.base.texture || spec.base.imageUrl || spec.base.image) || spec.textureId || spec.base && spec.base.textureId || CUSTOM_BUILDING_FALLBACK_TEXTURE_URL;
-        }
-
-        function hasExplicitCustomBuildingTexture(spec) {
-            if (!spec)
-                return !1;
-            return !!(spec.textureUrl || spec.texture || spec.imageUrl || spec.image || spec.material && (spec.material.textureUrl || spec.material.texture || spec.material.imageUrl || spec.material.image) || spec.base && (spec.base.textureUrl || spec.base.texture || spec.base.imageUrl || spec.base.image) || spec.textureId || spec.base && spec.base.textureId);
         }
 
         function applyCustomBuildingTexture(material, textureValue, repeatValue) {
@@ -5842,18 +6079,140 @@
         }
 
         function createCustomBuildingMaterial(colorValue, spec) {
-            const material = new globalState.THREE.MeshStandardMaterial({
+            const material = new globalState.THREE.MeshLambertMaterial({
                 color: null != colorValue ? colorValue : 0xffffff,
-                roughness: .92,
-                metalness: .04,
                 side: globalState.THREE.DoubleSide
             });
-            return material;
+            const textureValue = getCustomBuildingTextureValue(spec);
+            return applyCustomBuildingTexture(material, textureValue, spec && (spec.textureRepeat || spec.repeat || spec.base && (spec.base.textureRepeat || spec.base.repeat)));
+        }
+
+        function computeWindowLayout(edgeLength, bodyHeight, sideSpec) {
+            if (!sideSpec || !1 === sideSpec.enabled)
+                return {
+                    rects: []
+                };
+            const margin = Math.max(.35, Number(sideSpec.margin) || .8);
+            const width = Math.max(.3, Number(sideSpec.width) || 1.05);
+            const height = Math.max(.35, Number(sideSpec.height) || 1.35);
+            const gap = Math.max(.15, Number(sideSpec.gap) || .65);
+            const rows = Math.max(1, Math.round(Number(sideSpec.rows) || Math.max(1, Math.round((bodyHeight - 1.8) / 2.4))));
+            const availableLength = Math.max(0, edgeLength - 2 * margin);
+            const cols = Math.max(1, Math.round(Number(sideSpec.cols) || Math.max(1, Math.floor((availableLength + gap) / (width + gap)))));
+            const runLength = cols * width + Math.max(0, cols - 1) * gap;
+            const startOffset = (edgeLength - runLength) / 2 + width / 2;
+            const bottom = Math.max(.7, Number(sideSpec.sill) || 1.1);
+            const topPadding = Math.max(.55, Number(sideSpec.topPadding) || .85);
+            const usableHeight = Math.max(height, bodyHeight - bottom - topPadding);
+            const rowSpacing = rows > 1 ? (usableHeight - height) / (rows - 1) : 0;
+            const rects = [];
+            for (let row = 0; row < rows; row++)
+                for (let col = 0; col < cols; col++) {
+                    const centerU = startOffset + col * (width + gap);
+                    const centerY = bottom + row * rowSpacing;
+                    const x1 = clamp(centerU - width / 2, .03, Math.max(.03, edgeLength - .03));
+                    const x2 = clamp(centerU + width / 2, .03, Math.max(.03, edgeLength - .03));
+                    const y1 = clamp(centerY - height / 2, .03, Math.max(.03, bodyHeight - .03));
+                    const y2 = clamp(centerY + height / 2, .03, Math.max(.03, bodyHeight - .03));
+                    if (x2 - x1 > .08 && y2 - y1 > .08)
+                        rects.push({
+                            col,
+                            row,
+                            centerU,
+                            centerY,
+                            x1,
+                            x2,
+                            y1,
+                            y2,
+                            width,
+                            height
+                        });
+                }
+            return {
+                rects,
+                width,
+                height,
+                gap,
+                rows,
+                cols,
+                bottom,
+                rowSpacing
+            };
+        }
+
+        function createCustomBuildingWallBody(points, baseY, bodyHeight, colorValue, spec) {
+            if (!globalState.THREE || points.length < 3)
+                return null;
+            const THREE = globalState.THREE;
+            const group = new THREE.Group;
+            group.name = "__tmCustomBuildingWindowCutBody";
+            const material = createCustomBuildingMaterial(colorValue, spec);
+            const center = points.reduce(((acc, point) => ({
+                x: acc.x + point.x,
+                z: acc.z + point.z
+            })), {
+                x: 0,
+                z: 0
+            });
+            center.x /= points.length;
+            center.z /= points.length;
+            const windowsSpec = deepMergeConfig(spec && spec.windows || {}, {
+                sides: spec && spec.sides || {}
+            });
+            const wallDepth = Math.max(.02, Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .12);
+            for (let index = 0; index < points.length; index++) {
+                const current = points[index];
+                const next = points[(index + 1) % points.length];
+                const dxRaw = next.x - current.x;
+                const dzRaw = next.z - current.z;
+                const edgeLength = Math.hypot(dxRaw, dzRaw);
+                if (edgeLength < .4)
+                    continue;
+                const dx = dxRaw / edgeLength;
+                const dz = dzRaw / edgeLength;
+                const midX = (current.x + next.x) / 2;
+                const midZ = (current.z + next.z) / 2;
+                const outwardX = midX - center.x;
+                const outwardZ = midZ - center.z;
+                const outwardLength = Math.hypot(outwardX, outwardZ) || 1;
+                const normalX = outwardX / outwardLength;
+                const normalZ = outwardZ / outwardLength;
+                const sideSpec = deepMergeConfig(windowsSpec, windowsSpec.sides && (windowsSpec.sides[index] || windowsSpec.sides[String(index)]) || {});
+                const layout = computeWindowLayout(edgeLength, bodyHeight, sideSpec);
+                const shape = new THREE.Shape;
+                shape.moveTo(0, 0);
+                shape.lineTo(edgeLength, 0);
+                shape.lineTo(edgeLength, bodyHeight);
+                shape.lineTo(0, bodyHeight);
+                shape.lineTo(0, 0);
+                if (!1 !== sideSpec.enabled && !1 !== sideSpec.cutHoles)
+                    for (const rect of layout.rects) {
+                        const hole = new THREE.Path;
+                        hole.moveTo(rect.x1, rect.y1);
+                        hole.lineTo(rect.x1, rect.y2);
+                        hole.lineTo(rect.x2, rect.y2);
+                        hole.lineTo(rect.x2, rect.y1);
+                        hole.lineTo(rect.x1, rect.y1);
+                        shape.holes.push(hole);
+                    }
+                const geometry = new THREE.ShapeGeometry(shape);
+                geometry.applyMatrix4((new THREE.Matrix4).makeBasis(new THREE.Vector3(dx,0,dz), new THREE.Vector3(0,1,0), new THREE.Vector3(normalX,0,normalZ)));
+                geometry.translate(current.x + normalX * wallDepth / 2, baseY, current.z + normalZ * wallDepth / 2);
+                geometry.computeVertexNormals();
+                group.add(new THREE.Mesh(geometry, material));
+            }
+            return group.children.length ? group : null;
         }
 
         function createCustomBuildingBody(points, baseY, bodyHeight, colorValue, spec) {
             if (!globalState.THREE || points.length < 3)
                 return null;
+            const shouldCutWindows = spec && spec.windows && !1 !== spec.windows.enabled && !(spec.base && !0 === spec.base.solid) && !1 !== spec.windows.cutHoles;
+            if (shouldCutWindows) {
+                const windowBody = createCustomBuildingWallBody(points, baseY, bodyHeight, colorValue, spec);
+                if (windowBody)
+                    return windowBody;
+            }
             const shape = createShapeFromFootprint(points);
             if (!shape)
                 return null;
@@ -6027,15 +6386,8 @@
                 if (!1 === sideSpec.enabled)
                     continue;
                 const edgeLength = Math.hypot(next.x - current.x, next.z - current.z);
-                const margin = Math.max(.35, Number(sideSpec.margin) || .8);
-                const width = Math.max(.3, Number(sideSpec.width) || 1.05);
-                const height = Math.max(.35, Number(sideSpec.height) || 1.35);
-                const gap = Math.max(.15, Number(sideSpec.gap) || .65);
-                const rows = Math.max(1, Math.round(Number(sideSpec.rows) || Math.max(1, Math.round((bodyHeight - 1.8) / 2.4))));
-                const availableLength = Math.max(0, edgeLength - 2 * margin);
-                const cols = Math.max(1, Math.round(Number(sideSpec.cols) || Math.max(1, Math.floor((availableLength + gap) / (width + gap)))));
-                const runLength = cols * width + Math.max(0, cols - 1) * gap;
-                const startOffset = (edgeLength - runLength) / 2 + width / 2;
+                if (edgeLength < .4)
+                    continue;
                 const dx = (next.x - current.x) / edgeLength;
                 const dz = (next.z - current.z) / edgeLength;
                 const midX = (current.x + next.x) / 2;
@@ -6045,203 +6397,45 @@
                 const outwardLength = Math.hypot(outwardX, outwardZ) || 1;
                 const normalX = outwardX / outwardLength;
                 const normalZ = outwardZ / outwardLength;
-                const bottom = Math.max(.7, Number(sideSpec.sill) || 1.1);
-                const topPadding = Math.max(.55, Number(sideSpec.topPadding) || .85);
-                const usableHeight = Math.max(height, bodyHeight - bottom - topPadding);
-                const rowSpacing = rows > 1 ? (usableHeight - height) / (rows - 1) : 0;
+                const layout = computeWindowLayout(edgeLength, bodyHeight, sideSpec);
                 if (sideSpec.color) {
                     const panel = createWallPanel(current, next, center, baseY + .1, Math.max(.3, bodyHeight - .2), sideSpec.color, Number(sideSpec.claddingDepth) || .05);
                     panel && group.add(panel);
                 }
-                for (let row = 0; row < rows; row++)
-                    for (let col = 0; col < cols; col++) {
-                        const along = startOffset + col * (width + gap) - edgeLength / 2;
-                        const basePointX = midX + dx * along;
-                        const basePointZ = midZ + dz * along;
-                        const centerY = baseY + bottom + row * rowSpacing;
-                        const windowGroup = createWindowDetailGroup({
-                            size: [width, height, .12],
-                            frameColor: null != sideSpec.frameColor ? sideSpec.frameColor : VISUAL_CONFIG.windowFrameColor,
-                            glassColor: null != sideSpec.glassColor ? sideSpec.glassColor : VISUAL_CONFIG.windowGlassColor,
-                            opacity: null != sideSpec.opacity ? sideSpec.opacity : .62
-                        });
-                        windowGroup.position.set(basePointX + normalX * .09, centerY, basePointZ + normalZ * .09);
-                        windowGroup.rotation.y = Math.atan2(dz, dx);
-                        group.add(windowGroup);
-                    }
-            }
-        }
-
-        function createFloorForFootprint(points, baseY, style) {
-            if (!globalState.THREE || points.length < 3)
-                return null;
-            const shape = createShapeFromFootprint(points);
-            if (!shape)
-                return null;
-            const geometry = new globalState.THREE.ShapeGeometry(shape);
-            geometry.rotateX(-Math.PI / 2);
-            geometry.translate(0, baseY + .035, 0);
-            const materialKind = String(style && style.materialKind || "laminate").toLowerCase();
-            const color = null != style && null != style.color ? style.color : "tile" === materialKind || "checkertile" === materialKind ? 0xcfc8bd : "castfloor" === materialKind ? 0x888c8e : 0xb99061;
-            return new globalState.THREE.Mesh(geometry, createDetailMaterial({
-                color,
-                materialKind
-            }, {
-                color,
-                transparent: !1,
-                opacity: 1
-            }));
-        }
-
-        function getLongestFootprintSide(points) {
-            let best = null;
-            for (let index = 0; index < points.length; index++) {
-                const start = points[index];
-                const end = points[(index + 1) % points.length];
-                const length = Math.hypot(end.x - start.x, end.z - start.z);
-                if (!best || length > best.length)
-                    best = {
-                        start,
-                        end,
-                        length,
-                        index
+                const frameColor = null != sideSpec.frameColor ? sideSpec.frameColor : VISUAL_CONFIG.windowFrameColor;
+                const glassColor = null != sideSpec.glassColor ? sideSpec.glassColor : VISUAL_CONFIG.windowGlassColor;
+                const frameMaterial = new globalState.THREE.MeshLambertMaterial({
+                    color: frameColor
+                });
+                const glassMaterial = new globalState.THREE.MeshLambertMaterial({
+                    color: glassColor,
+                    transparent: !0,
+                    opacity: null != sideSpec.opacity ? clamp(Number(sideSpec.opacity) || .45, .05, .95) : .45,
+                    depthWrite: !1,
+                    side: globalState.THREE.DoubleSide
+                });
+                const frameDepth = Math.max(.035, Number(sideSpec.frameDepth) || .08);
+                for (const rect of layout.rects) {
+                    const width = rect.width;
+                    const height = rect.height;
+                    const frameThickness = Math.min(width * .28, height * .22, Math.max(.06, Number(sideSpec.frameThickness) || .12));
+                    const along = rect.centerU - edgeLength / 2;
+                    const basePointX = midX + dx * along;
+                    const basePointZ = midZ + dz * along;
+                    const centerY = baseY + rect.centerY;
+                    const addWindowPart = (size, alongOffset, yOffset, material, normalOffset) => {
+                        const mesh = new globalState.THREE.Mesh(new globalState.THREE.BoxGeometry(size[0], size[1], size[2]), material);
+                        mesh.position.set(basePointX + dx * alongOffset + normalX * normalOffset, centerY + yOffset, basePointZ + dz * alongOffset + normalZ * normalOffset);
+                        mesh.rotation.y = Math.atan2(dz, dx);
+                        group.add(mesh);
                     };
-            }
-            return best;
-        }
-
-        function createDoorForFootprint(points, baseY, bodyHeight, style) {
-            if (!globalState.THREE || points.length < 3)
-                return null;
-            const edge = getLongestFootprintSide(points);
-            if (!edge || edge.length < 1.4)
-                return null;
-            const center = points.reduce(((acc, point) => ({
-                x: acc.x + point.x,
-                z: acc.z + point.z
-            })), {
-                x: 0,
-                z: 0
-            });
-            center.x /= points.length;
-            center.z /= points.length;
-            const dx = (edge.end.x - edge.start.x) / edge.length;
-            const dz = (edge.end.z - edge.start.z) / edge.length;
-            const midX = (edge.start.x + edge.end.x) / 2;
-            const midZ = (edge.start.z + edge.end.z) / 2;
-            const outwardX = midX - center.x;
-            const outwardZ = midZ - center.z;
-            const outwardLength = Math.hypot(outwardX, outwardZ) || 1;
-            const normalX = outwardX / outwardLength;
-            const normalZ = outwardZ / outwardLength;
-            const height = Math.min(2.25, Math.max(1.75, bodyHeight - .45));
-            const width = Math.min(1.18, Math.max(.82, edge.length * .22));
-            const door = createDoorDetailGroup({
-                size: [width, height, .14],
-                color: style && style.color || 0x8a5a36,
-                frameColor: style && style.frameColor || 0xe7d8bf,
-                isOpen: !!(style && style.open),
-                openAngle: 18
-            });
-            door.position.set(midX + normalX * .12, baseY + height / 2, midZ + normalZ * .12);
-            door.rotation.y = Math.atan2(dz, dx);
-            return door;
-        }
-
-        function createWallSurfaceDetails(group, points, baseY, bodyHeight, style) {
-            if (!globalState.THREE || !group || points.length < 3)
-                return;
-            const center = points.reduce(((acc, point) => ({
-                x: acc.x + point.x,
-                z: acc.z + point.z
-            })), {
-                x: 0,
-                z: 0
-            });
-            center.x /= points.length;
-            center.z /= points.length;
-            const baseColor = style && style.color || 0xd8d0c2;
-            const accentColor = shadeDetailColor(baseColor, style && style.dark ? -.16 : .1);
-            for (let index = 0; index < points.length; index++) {
-                const current = points[index];
-                const next = points[(index + 1) % points.length];
-                const edgeLength = Math.hypot(next.x - current.x, next.z - current.z);
-                if (edgeLength < .8)
-                    continue;
-                const panel = createWallPanel(current, next, center, baseY + .08, Math.max(.5, bodyHeight - .16), baseColor, .045);
-                panel && group.add(panel);
-                const courses = Math.max(3, Math.min(9, Math.round(bodyHeight / .72)));
-                for (let row = 1; row < courses; row++) {
-                    const y = baseY + row * bodyHeight / courses;
-                    const band = createWallPanel(current, next, center, y, .035, accentColor, .068);
-                    band && group.add(band);
-                }
-                const verticals = Math.max(2, Math.min(6, Math.round(edgeLength / 2.4)));
-                const dx = (next.x - current.x) / edgeLength;
-                const dz = (next.z - current.z) / edgeLength;
-                const midX = (current.x + next.x) / 2;
-                const midZ = (current.z + next.z) / 2;
-                const outwardX = midX - center.x;
-                const outwardZ = midZ - center.z;
-                const outwardLength = Math.hypot(outwardX, outwardZ) || 1;
-                const normalX = outwardX / outwardLength;
-                const normalZ = outwardZ / outwardLength;
-                for (let col = 1; col < verticals; col++) {
-                    const along = edgeLength * (col / verticals - .5);
-                    const strip = createDetailBox([.035, Math.max(.5, bodyHeight - .25), .075], createDetailMaterial({
-                        color: accentColor,
-                        materialKind: "concrete"
-                    }, {
-                        color: accentColor,
-                        transparent: !1,
-                        opacity: 1
-                    }), [0, 0, 0]);
-                    strip.position.set(midX + dx * along + normalX * .08, baseY + bodyHeight / 2, midZ + dz * along + normalZ * .08);
-                    strip.rotation.y = Math.atan2(dz, dx);
-                    group.add(strip);
+                    addWindowPart([width, frameThickness, frameDepth], 0, height / 2 - frameThickness / 2, frameMaterial, .055);
+                    addWindowPart([width, frameThickness, frameDepth], 0, -height / 2 + frameThickness / 2, frameMaterial, .055);
+                    addWindowPart([frameThickness, Math.max(.08, height - 2 * frameThickness), frameDepth], -width / 2 + frameThickness / 2, 0, frameMaterial, .055);
+                    addWindowPart([frameThickness, Math.max(.08, height - 2 * frameThickness), frameDepth], width / 2 - frameThickness / 2, 0, frameMaterial, .055);
+                    addWindowPart([Math.max(.08, width - 2 * frameThickness), Math.max(.08, height - 2 * frameThickness), .035], 0, 0, glassMaterial, .09);
                 }
             }
-        }
-
-        function createRoofSurfaceDetails(group, points, baseY, bodyHeight, roofSpec) {
-            if (!globalState.THREE || !group || points.length < 3)
-                return;
-            const roofHeight = Math.max(.6, Number(roofSpec && roofSpec.height) || 1.7);
-            const frame = computeFootprintFrame(points, roofSpec && roofSpec.ridgeDirection || "longest");
-            const width = Math.max(.4, frame.maxU - frame.minU);
-            const halfDepth = Math.max(.3, (frame.maxV - frame.minV) / 2);
-            const y0 = baseY + bodyHeight;
-            const roofColor = roofSpec && roofSpec.color || 0x874132;
-            const ridge = createDetailBox([width * .96, .09, .14], createDetailMaterial({
-                color: roofColor,
-                materialKind: "roofTiles"
-            }, {
-                color: roofColor,
-                transparent: !1,
-                opacity: 1
-            }), [0, 0, 0]);
-            ridge.position.copy(localFramePoint(frame, 0, 0, y0 + roofHeight + .08));
-            ridge.rotation.y = Math.atan2(frame.axis.z, frame.axis.x);
-            group.add(ridge);
-            const rows = Math.max(4, Math.min(11, Math.round(halfDepth / .55)));
-            const tileColor = shadeDetailColor(roofColor, .09);
-            for (const side of [-1, 1])
-                for (let row = 1; row <= rows; row++) {
-                    const ratio = row / (rows + 1);
-                    const v = side * ratio * halfDepth;
-                    const y = y0 + roofHeight * (1 - ratio) + .045;
-                    const strip = createDetailBox([width * .92, .055, .1], createDetailMaterial({
-                        color: tileColor,
-                        materialKind: "roofTiles"
-                    }, {
-                        color: tileColor,
-                        transparent: !1,
-                        opacity: 1
-                    }), [0, 0, 0]);
-                    strip.position.copy(localFramePoint(frame, 0, v, y));
-                    strip.rotation.y = Math.atan2(frame.axis.z, frame.axis.x);
-                    group.add(strip);
-                }
         }
 
         function getDetailSize(detail, fallback=[1, 1, 1]) {
@@ -6253,87 +6447,14 @@
             ];
         }
 
-        function getDetailMaterialPreset(kind) {
-            return {
-                plaster: {
-                    roughness: .96,
-                    metalness: .02
-                },
-                brick: {
-                    roughness: .92,
-                    metalness: .05
-                },
-                concrete: {
-                    roughness: .98,
-                    metalness: .04
-                },
-                naturalstone: {
-                    roughness: .97,
-                    metalness: .03
-                },
-                wood: {
-                    roughness: .83,
-                    metalness: .08
-                },
-                glass: {
-                    roughness: .16,
-                    metalness: .03
-                },
-                metal: {
-                    roughness: .45,
-                    metalness: .78
-                },
-                rooftiles: {
-                    roughness: .92,
-                    metalness: .02
-                },
-                ribbedmetal: {
-                    roughness: .48,
-                    metalness: .72
-                },
-                shingles: {
-                    roughness: .93,
-                    metalness: .02
-                },
-                tile: {
-                    roughness: .72,
-                    metalness: .08
-                },
-                smalltile: {
-                    roughness: .72,
-                    metalness: .08
-                },
-                checkertile: {
-                    roughness: .7,
-                    metalness: .08
-                },
-                laminate: {
-                    roughness: .68,
-                    metalness: .06
-                },
-                castfloor: {
-                    roughness: .52,
-                    metalness: .16
-                }
-            }[String(kind || "plaster").toLowerCase()] || {
-                roughness: .96,
-                metalness: .02
-            };
-        }
-
-        function createDetailMaterial(detail, overrides) {
-            const materialKind = String(detail && detail.materialKind || "plaster").toLowerCase();
-            const preset = getDetailMaterialPreset(materialKind);
-            const transparent = overrides && null != overrides.transparent ? overrides.transparent : !!(detail && detail.transparent) || null != detail && null != detail.opacity && Number(detail.opacity) < 1 || "glass" === materialKind;
-            const opacity = overrides && null != overrides.opacity ? overrides.opacity : null != detail && null != detail.opacity ? clamp(Number(detail.opacity) || 0, 0, 1) : 1;
-            return new globalState.THREE.MeshStandardMaterial(Object.assign({
-                color: overrides && null != overrides.color ? overrides.color : null != detail && null != detail.color ? detail.color : 12632256,
-                roughness: preset.roughness,
-                metalness: preset.metalness,
-                transparent,
-                opacity,
+        function createDetailMaterial(detail) {
+            return new globalState.THREE.MeshLambertMaterial({
+                color: null != detail.color ? detail.color : 12632256,
+                transparent: !!detail.transparent || null != detail.opacity && Number(detail.opacity) < 1,
+                opacity: null != detail.opacity ? clamp(Number(detail.opacity) || 0, 0, 1) : 1,
+                depthWrite: !(!!detail.transparent || null != detail.opacity && Number(detail.opacity) < 1),
                 side: globalState.THREE.DoubleSide
-            }, overrides || {}));
+            });
         }
 
         function pushFace(indices, a, b, c, d) {
@@ -6468,437 +6589,104 @@
             return geometry;
         }
 
-        function createTriangleWallGeometry(detail) {
-            const size = getDetailSize(detail, [3, 2, .2]);
-            const width = size[0];
-            const height = size[1];
-            const depth = size[2];
-            const leftHigh = "right" !== String(detail && detail.slopeDirection || "left").toLowerCase();
-            const topX = leftHigh ? -width / 2 : width / 2;
-            const flatX = leftHigh ? width / 2 : -width / 2;
-            const front = [[topX, height / 2, depth / 2], [flatX, -height / 2, depth / 2], [topX, -height / 2, depth / 2]];
-            const back = front.map((point => [point[0], point[1], -depth / 2]));
-            const geometry = new globalState.THREE.BufferGeometry;
-            geometry.setAttribute("position", new globalState.THREE.Float32BufferAttribute([...front, ...back].flat(),3));
-            geometry.setIndex([0, 1, 2, 5, 4, 3, 0, 3, 1, 1, 3, 4, 0, 2, 3, 2, 5, 3, 2, 1, 5, 1, 4, 5]);
-            geometry.computeVertexNormals();
-            return geometry;
+        function isDoorDetail(detail) {
+            if (!detail)
+                return !1;
+            const type = String(detail.type || "").toLowerCase();
+            if (detail.noDoor || detail.noAutoDoor || detail.staticDoor)
+                return !1;
+            if (detail.door || detail.openable || detail.hinged || type.includes("door") || type.includes("tuer") || type.includes("tur"))
+                return !0;
+            if (!("box" === type || "wall" === type || "panel" === type))
+                return !1;
+            const size = getDetailSize(detail);
+            const position = detail.position || [0, 0, 0];
+            const width = Math.max(size[0], size[2]);
+            const thickness = Math.min(size[0], size[2]);
+            const bottom = (Number(position[1]) || 0) - size[1] / 2;
+            return thickness <= .25 && width >= .65 && width <= 4.2 && size[1] >= 1.55 && size[1] <= 4.25 && bottom >= -.18 && bottom <= .48;
         }
 
-        function createTriangleFillGeometry(detail) {
-            return createTriangleWallGeometry(detail);
-        }
-
-        function createWedgeFillGeometry(detail) {
-            const size = getDetailSize(detail, [3, 1.2, .55]);
-            const width = size[0];
-            const height = size[1];
-            const depth = size[2];
-            const leftHigh = "right" !== String(detail && detail.slopeDirection || "left").toLowerCase();
-            const highX = leftHigh ? -width / 2 : width / 2;
-            const lowX = leftHigh ? width / 2 : -width / 2;
-            const geometry = new globalState.THREE.BufferGeometry;
-            geometry.setAttribute("position", new globalState.THREE.Float32BufferAttribute([
-                highX, height / 2, -depth / 2,
-                lowX, -height / 2, -depth / 2,
-                highX, -height / 2, -depth / 2,
-                highX, height / 2, depth / 2,
-                lowX, -height / 2, depth / 2,
-                highX, -height / 2, depth / 2
-            ],3));
-            geometry.setIndex([0, 1, 2, 5, 4, 3, 0, 3, 1, 1, 3, 4, 0, 2, 3, 2, 5, 3, 2, 1, 5, 1, 4, 5]);
-            geometry.computeVertexNormals();
-            return geometry;
-        }
-
-        function createFillCylinderGeometry(detail) {
-            const height = Math.max(.05, Number(detail.height) || Number(detail.b) || 2);
-            const radiusX = Math.max(.05, Number(detail.radiusX) || Number(detail.a) || 1);
-            const radiusZ = Math.max(.05, Number(detail.radiusZ) || Number(detail.c) || radiusX);
-            const segments = Math.max(3, Math.round(Number(detail.segments) || 24));
-            const geometry = new globalState.THREE.CylinderGeometry(1, 1, height, segments);
-            geometry.scale(radiusX, 1, radiusZ);
-            return geometry;
-        }
-
-        function createFrustumRoofGeometry(width, height, depth, topScale) {
-            const topWidth = Math.max(.2, width * Math.max(.05, Number(topScale) || .3));
-            const topDepth = Math.max(.2, depth * Math.max(.05, Number(topScale) || .3));
-            const geometry = new globalState.THREE.BufferGeometry;
-            geometry.setAttribute("position", new globalState.THREE.Float32BufferAttribute([
-                -width / 2, -height / 2, -depth / 2, width / 2, -height / 2, -depth / 2, width / 2, -height / 2, depth / 2, -width / 2, -height / 2, depth / 2,
-                -topWidth / 2, height / 2, -topDepth / 2, topWidth / 2, height / 2, -topDepth / 2, topWidth / 2, height / 2, topDepth / 2, -topWidth / 2, height / 2, topDepth / 2
-            ],3));
-            geometry.setIndex([0, 1, 4, 1, 5, 4, 1, 2, 5, 2, 6, 5, 2, 3, 6, 3, 7, 6, 3, 0, 7, 0, 4, 7, 4, 5, 6, 4, 6, 7]);
-            geometry.computeVertexNormals();
-            return geometry;
-        }
-
-        function createShedRoofGeometry(detail) {
-            const size = getDetailSize(detail, [4, 2, 4]);
-            const width = size[0];
-            const height = size[1];
-            const depth = size[2];
-            const leftHigh = "right" !== String(detail && detail.slopeDirection || "left").toLowerCase();
-            const topLeft = leftHigh ? height / 2 : -height / 2;
-            const topRight = leftHigh ? -height / 2 : height / 2;
-            const geometry = new globalState.THREE.BufferGeometry;
-            geometry.setAttribute("position", new globalState.THREE.Float32BufferAttribute([
-                -width / 2, topLeft, -depth / 2, width / 2, topRight, -depth / 2, width / 2, -height / 2, -depth / 2, -width / 2, -height / 2, -depth / 2,
-                -width / 2, topLeft, depth / 2, width / 2, topRight, depth / 2, width / 2, -height / 2, depth / 2, -width / 2, -height / 2, depth / 2
-            ],3));
-            geometry.setIndex([0, 1, 3, 1, 2, 3, 4, 7, 5, 5, 7, 6, 0, 4, 1, 1, 4, 5, 1, 5, 2, 2, 5, 6, 2, 6, 3, 3, 6, 7, 0, 3, 4, 3, 7, 4]);
-            geometry.computeVertexNormals();
-            return geometry;
-        }
-
-        function createRoundRoofGeometry(detail) {
-            const size = getDetailSize(detail, [4, 2, 4]);
-            const geometry = new globalState.THREE.CylinderGeometry(1, 1, size[0], 20, 1, !1, 0, Math.PI);
-            geometry.rotateZ(Math.PI / 2);
-            geometry.scale(1, size[1], size[2] / 2);
-            return geometry;
-        }
-
-        function createDetailBox(size, material, position) {
-            const mesh = new globalState.THREE.Mesh(new globalState.THREE.BoxGeometry(size[0], size[1], size[2]), material);
-            position && mesh.position.set(position[0], position[1], position[2]);
-            return mesh;
-        }
-
-        function shadeDetailColor(colorValue, amount) {
-            const base = toThreeColor(colorValue, 12632256);
-            const target = new globalState.THREE.Color(amount >= 0 ? 0xffffff : 0x000000);
-            base.lerp(target, Math.abs(amount));
-            return base.getHex();
-        }
-
-        function addDetailPattern(group, detail, size, mode) {
-            const pattern = detail && detail.pattern && "object" == typeof detail.pattern ? detail.pattern : null;
-            const patternType = String(pattern && pattern.type || "").toLowerCase();
-            if (!patternType || "none" === patternType)
-                return;
-            const width = Math.max(.1, Number(size[0]) || 1);
-            const height = Math.max(.1, Number(size[1]) || 1);
-            const depth = Math.max(.04, Number(size[2]) || .2);
-            const scale = Math.max(.2, Number(pattern && pattern.scale) || 1);
-            const bump = Math.max(.008, Number(pattern && pattern.depth) || .03);
-            const material = createDetailMaterial({
-                color: null != detail.color ? detail.color : 12632256,
-                materialKind: detail.materialKind || "plaster"
-            }, {
-                color: null != detail.color ? detail.color : 12632256,
-                roughness: .88,
-                metalness: .08,
-                transparent: !1,
-                opacity: 1
-            });
-            const addFrontBack = (sx, sy, px, py, pz) => group.add(createDetailBox([sx, sy, bump], material, [px, py, pz]));
-            const addTop = (sx, sz, px, py, pz) => group.add(createDetailBox([sx, bump, sz], material, [px, py, pz]));
-            if ("floor" === mode || "tile" === patternType || "smalltile" === patternType || "checkertile" === patternType || "laminate" === patternType || "castfloor" === patternType) {
-                if ("castfloor" === patternType) {
-                    const bands = Math.max(4, Math.round(width / (.9 * scale)));
-                    for (let band = 0; band < bands; band++) {
-                        const localX = -width / 2 + width * (band + .5) / bands;
-                        addTop(width / bands * .18, depth * .96, localX, height / 2 + bump / 2, 0);
-                    }
-                    return;
-                }
-                if ("laminate" === patternType) {
-                    const plankWidth = Math.max(.18, .28 * scale);
-                    const planks = Math.max(4, Math.round(width / plankWidth));
-                    for (let plank = 0; plank < planks; plank++) {
-                        const localX = -width / 2 + width * (plank + .5) / planks;
-                        const color = plank % 2 ? shadeDetailColor(detail.color, .08) : null != detail.color ? detail.color : 12632256;
-                        group.add(createDetailBox([width / planks * .86, bump, depth * .96], createDetailMaterial(detail, {
-                            color,
-                            transparent: !1,
-                            opacity: 1
-                        }), [localX, height / 2 + bump / 2, 0]));
-                    }
-                    return;
-                }
-                const tileBase = "smalltile" === patternType ? .34 : .72;
-                const tileSize = Math.max(.14, tileBase * scale);
-                const cols = Math.max(2, Math.round(width / tileSize));
-                const rows = Math.max(2, Math.round(depth / tileSize));
-                const tileWidth = width / cols;
-                const tileDepth = depth / rows;
-                for (let row = 0; row < rows; row++)
-                    for (let col = 0; col < cols; col++) {
-                        const localX = -width / 2 + tileWidth / 2 + col * tileWidth;
-                        const localZ = -depth / 2 + tileDepth / 2 + row * tileDepth;
-                        const color = "checkertile" === patternType && (row + col) % 2 ? shadeDetailColor(detail.color, -.28) : null != detail.color ? detail.color : 12632256;
-                        group.add(createDetailBox([tileWidth * .88, bump, tileDepth * .88], createDetailMaterial(detail, {
-                            color,
-                            transparent: !1,
-                            opacity: 1
-                        }), [localX, height / 2 + bump / 2, localZ]));
-                    }
-                return;
-            }
-            if ("roof" === mode || "rooftiles" === patternType || "shingles" === patternType || "ribbedmetal" === patternType) {
-                const rows = Math.max(3, Math.round(depth / (.42 * scale)));
-                const cols = Math.max(2, Math.round(width / (.8 * scale)));
-                const tileWidth = width / cols;
-                const tileDepth = depth / rows;
-                for (let row = 0; row < rows; row++) {
-                    const localZ = -depth / 2 + tileDepth / 2 + row * tileDepth;
-                    if ("ribbedmetal" === patternType) {
-                        for (let rib = 0; rib < cols; rib++) {
-                            const localX = -width / 2 + tileWidth / 2 + rib * tileWidth;
-                            addTop(tileWidth * .16, tileDepth * .96, localX, height / 2 + bump / 2, localZ);
-                        }
-                        continue;
-                    }
-                    for (let col = 0; col < cols; col++) {
-                        const shift = row % 2 ? tileWidth * .18 : 0;
-                        const localX = clamp(-width / 2 + tileWidth / 2 + col * tileWidth + shift, -width / 2 + tileWidth / 2, width / 2 - tileWidth / 2);
-                        addTop(tileWidth * .88, tileDepth * ("shingles" === patternType ? .56 : .72), localX, height / 2 + bump / 2, localZ);
-                    }
-                }
-                return;
-            }
-            const rows = Math.max(2, Math.round(height / (.45 * scale)));
-            const cols = Math.max(2, Math.round(width / (.8 * scale)));
-            const cellWidth = width / cols;
-            const cellHeight = height / rows;
-            for (const face of [-1, 1]) {
-                if ("wood" === patternType) {
-                    const boardWidth = width / Math.max(3, Math.round(width / (.28 * scale)));
-                    const boards = Math.max(3, Math.round(width / boardWidth));
-                    for (let board = 0; board < boards; board++) {
-                        const localX = -width / 2 + boardWidth / 2 + board * boardWidth;
-                        addFrontBack(boardWidth * .82, height * .96, localX, 0, face * (depth / 2 + bump / 2));
-                    }
-                    continue;
-                }
-                for (let row = 0; row < rows; row++)
-                    for (let col = 0; col < cols; col++) {
-                        const offset = "brick" === patternType && row % 2 ? cellWidth / 2 : 0;
-                        const localX = clamp(-width / 2 + cellWidth / 2 + col * cellWidth + offset, -width / 2 + cellWidth / 2, width / 2 - cellWidth / 2);
-                        const localY = -height / 2 + cellHeight / 2 + row * cellHeight;
-                        const sx = "naturalstone" === patternType ? cellWidth * (.55 + col % 3 * .12) : cellWidth * .88;
-                        const sy = "naturalstone" === patternType ? cellHeight * (.62 + row % 2 * .14) : cellHeight * .72;
-                        addFrontBack(sx, sy, localX, localY, face * (depth / 2 + bump / 2));
-                    }
-            }
-        }
-
-        function createPatternedDetailBox(detail, size, mode) {
-            const group = new globalState.THREE.Group;
-            group.add(createDetailBox(size, createDetailMaterial(detail), [0, 0, 0]));
-            addDetailPattern(group, detail, size, mode);
-            return group;
-        }
-
-        function createWindowDetailGroup(detail) {
-            const size = getDetailSize(detail, [1.2, 1.4, .16]);
-            const width = size[0];
-            const height = size[1];
-            const depth = size[2];
-            const frameThickness = Math.max(.04, Math.min(width, height) * .09);
-            const group = new globalState.THREE.Group;
-            const frameMaterial = createDetailMaterial({
-                color: null != detail.frameColor ? detail.frameColor : VISUAL_CONFIG.windowFrameColor,
-                materialKind: "metal",
-                opacity: 1
-            }, {
-                color: null != detail.frameColor ? detail.frameColor : VISUAL_CONFIG.windowFrameColor,
-                transparent: !1,
-                opacity: 1
-            });
-            const glassMaterial = createDetailMaterial({
-                color: null != detail.glassColor ? detail.glassColor : VISUAL_CONFIG.windowGlassColor,
-                materialKind: "glass",
-                opacity: null != detail.opacity ? detail.opacity : .55
-            }, {
-                color: null != detail.glassColor ? detail.glassColor : VISUAL_CONFIG.windowGlassColor,
-                transparent: !0,
-                opacity: clamp(null != detail.opacity ? Number(detail.opacity) || 0 : .55, .05, .95)
-            });
-            group.add(createDetailBox([width, frameThickness, depth], frameMaterial, [0, height / 2 - frameThickness / 2, 0]));
-            group.add(createDetailBox([width, frameThickness, depth], frameMaterial, [0, -height / 2 + frameThickness / 2, 0]));
-            group.add(createDetailBox([frameThickness, height - 2 * frameThickness, depth], frameMaterial, [-width / 2 + frameThickness / 2, 0, 0]));
-            group.add(createDetailBox([frameThickness, height - 2 * frameThickness, depth], frameMaterial, [width / 2 - frameThickness / 2, 0, 0]));
-            group.add(createDetailBox([Math.max(.1, width - 2 * frameThickness), Math.max(.1, height - 2 * frameThickness), Math.max(.03, depth * .45)], glassMaterial, [0, 0, 0]));
-            return group;
-        }
-
-        function createDoorDetailGroup(detail) {
-            const size = getDetailSize(detail, [1, 2.1, .12]);
-            const width = size[0];
-            const height = size[1];
-            const depth = size[2];
-            const frameThickness = Math.max(.05, Math.min(width, height) * .08);
-            const group = new globalState.THREE.Group;
-            const frameMaterial = createDetailMaterial({
-                color: null != detail.frameColor ? detail.frameColor : 0xece0cb,
-                materialKind: "wood",
-                opacity: 1
-            }, {
-                color: null != detail.frameColor ? detail.frameColor : 0xece0cb,
-                transparent: !1,
-                opacity: 1
-            });
-            group.add(createDetailBox([width, frameThickness, depth], frameMaterial, [0, height / 2 - frameThickness / 2, 0]));
-            group.add(createDetailBox([frameThickness, height, depth], frameMaterial, [-width / 2 + frameThickness / 2, 0, 0]));
-            group.add(createDetailBox([frameThickness, height, depth], frameMaterial, [width / 2 - frameThickness / 2, 0, 0]));
-            const pivot = new globalState.THREE.Group;
-            const hingeLeft = "right" !== String(detail && detail.hingeSide || "left").toLowerCase();
-            pivot.position.set(hingeLeft ? -width / 2 + frameThickness / 2 : width / 2 - frameThickness / 2, 0, 0);
-            const angle = detail && detail.isOpen ? clamp(Number(detail.openAngle) || 90, 0, 180) : 0;
-            pivot.rotation.y = (hingeLeft ? -1 : 1) * angle * Math.PI / 180;
-            pivot.add(createDetailBox([width - 1.5 * frameThickness, height - 1.5 * frameThickness, Math.max(.03, depth * .82)], createDetailMaterial(detail), [hingeLeft ? (width - 1.5 * frameThickness) / 2 : -(width - 1.5 * frameThickness) / 2, 0, 0]));
-            group.add(pivot);
-            return group;
-        }
-
-        function createFurnitureDetailGroup(detail) {
-            const size = getDetailSize(detail, [1, 1, 1]);
-            const width = size[0];
-            const height = size[1];
-            const depth = size[2];
-            const type = String(detail && detail.type || "").toLowerCase();
-            const group = new globalState.THREE.Group;
-            const material = createDetailMaterial(detail);
-            const metal = createDetailMaterial({
-                color: null != detail.color ? detail.color : 12632256,
-                materialKind: "metal"
-            }, {
-                color: null != detail.color ? detail.color : 12632256,
-                transparent: !1,
-                opacity: 1
-            });
-            const addLegs = (topY, legHeight, inset, legWidth) => {
-                const x = width / 2 - inset - legWidth / 2;
-                const z = depth / 2 - inset - legWidth / 2;
-                for (const sx of [-1, 1])
-                    for (const sz of [-1, 1])
-                        group.add(createDetailBox([legWidth, legHeight, legWidth], metal, [sx * x, topY - legHeight / 2, sz * z]));
-            };
-            if ("chair" === type) {
-                group.add(createDetailBox([width, height * .18, depth], material, [0, -.1, 0]));
-                group.add(createDetailBox([width, height * .5, depth * .18], material, [0, height * .25, -depth / 2 + depth * .09]));
-                addLegs(-.1, height * .55, .08, Math.max(.05, width * .08));
-            } else if ("table" === type) {
-                group.add(createDetailBox([width, height * .14, depth], material, [0, height * .42, 0]));
-                addLegs(height * .35, height * .82, .1, Math.max(.05, width * .06));
-            } else if ("sofa" === type) {
-                group.add(createDetailBox([width, height * .28, depth * .75], material, [0, -.08, depth * .06]));
-                group.add(createDetailBox([width, height * .46, depth * .2], material, [0, height * .2, -depth / 2 + depth * .1]));
-                group.add(createDetailBox([width * .13, height * .34, depth * .72], material, [-width / 2 + width * .065, .02, depth * .03]));
-                group.add(createDetailBox([width * .13, height * .34, depth * .72], material, [width / 2 - width * .065, .02, depth * .03]));
-            } else if ("bed" === type) {
-                group.add(createDetailBox([width, height * .28, depth], material, [0, -.1, 0]));
-                group.add(createDetailBox([width * .94, height * .2, depth * .92], createDetailMaterial({
-                    color: 0xddd5c8,
-                    materialKind: "plaster"
-                }), [0, height * .08, 0]));
-                group.add(createDetailBox([width, height * .52, depth * .08], material, [0, height * .2, -depth / 2 + depth * .04]));
-            } else if ("cabinet" === type) {
-                group.add(createDetailBox([width, height, depth], material, [0, 0, 0]));
-                group.add(createDetailBox([width * .02, height * .8, depth * .12], metal, [0, 0, depth / 2 + depth * .02]));
-            } else if ("counter" === type) {
-                group.add(createDetailBox([width, height * .86, depth], material, [0, -height * .05, 0]));
-                group.add(createDetailBox([width * 1.02, height * .12, depth * 1.04], createDetailMaterial({
-                    color: 0xebe6de,
-                    materialKind: "concrete"
-                }), [0, height * .42, 0]));
-            } else if ("shelf" === type) {
-                group.add(createDetailBox([width * .08, height, depth], material, [-width / 2 + width * .04, 0, 0]));
-                group.add(createDetailBox([width * .08, height, depth], material, [width / 2 - width * .04, 0, 0]));
-                for (let index = 0; index < 4; index++) {
-                    const y = -height / 2 + height * .12 + index * height * .26;
-                    group.add(createDetailBox([width, height * .05, depth], material, [0, y, 0]));
-                }
-            } else if ("stove" === type) {
-                group.add(createDetailBox([width, height, depth], material, [0, 0, 0]));
-                group.add(createDetailBox([width * .92, height * .06, depth * .92], metal, [0, height / 2 + height * .03, 0]));
-                group.add(createDetailBox([width * .56, height * .36, depth * .04], metal, [0, -.05, depth / 2 + depth * .03]));
-            } else if ("chimney" === type) {
-                group.add(createDetailBox([width, height, depth], material, [0, 0, 0]));
-                group.add(createDetailBox([width * 1.25, height * .06, depth * 1.25], material, [0, height / 2 + height * .03, 0]));
-            }
-            return group;
-        }
-
-        function applyDetailTransform(object, detail, anchorPoint) {
+        function createDoorDetailObject(detail, anchorPoint) {
+            if (!globalState.THREE || !detail)
+                return null;
+            const THREE = globalState.THREE;
+            const size = getDetailSize(detail, [1.05, 2.25, .1]);
             const position = detail.position || [0, 0, 0];
             const rotation = detail.rotation || [0, 0, 0];
             const offsetX = detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.x) || 0;
             const offsetZ = detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.z) || 0;
-            object.position.set(offsetX + (Number(position[0]) || 0), Number(position[1]) || 0, offsetZ + (Number(position[2]) || 0));
-            object.rotation.set((Number(rotation[0]) || 0) * Math.PI / 180, (Number(rotation[1]) || 0) * Math.PI / 180, (Number(rotation[2]) || 0) * Math.PI / 180);
-            return object;
+            const center = new THREE.Vector3(offsetX + (Number(position[0]) || 0), Number(position[1]) || 0, offsetZ + (Number(position[2]) || 0));
+            const rx = (Number(rotation[0]) || 0) * Math.PI / 180;
+            const ry = (Number(rotation[1]) || 0) * Math.PI / 180;
+            const rz = (Number(rotation[2]) || 0) * Math.PI / 180;
+            const hingeRight = "right" === String(detail.hinge || detail.hingeSide || "").toLowerCase();
+            const openOut = !1 !== detail.openOut;
+            const sideSign = hingeRight ? -1 : 1;
+            const localPivotOffset = new THREE.Vector3(-sideSign * size[0] / 2,0,0).applyEuler(new THREE.Euler(rx,ry,rz));
+            const pivot = center.clone().add(localPivotOffset);
+            const group = new THREE.Group;
+            group.name = "__tmCustomBuildingDoor";
+            group.position.copy(pivot);
+            group.rotation.set(rx, ry, rz);
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(size[0], size[1], size[2]), createDetailMaterial(Object.assign({
+                color: 0x3a2a1f
+            }, detail)));
+            mesh.position.set(sideSign * size[0] / 2, 0, 0);
+            mesh.userData.tmDynamicDoor = !0;
+            group.add(mesh);
+            const openAngle = (Number(detail.openAngle) || 82) * Math.PI / 180 * (openOut ? 1 : -1) * sideSign;
+            group.userData.tmDoor = {
+                closedY: ry,
+                openY: ry + openAngle,
+                current: 0,
+                radius: Math.max(4, Number(detail.openRadius) || 9),
+                speed: Math.max(.8, Number(detail.openSpeed) || 4.5)
+            };
+            group.userData.tmDynamicDoor = !0;
+            return group;
         }
 
         function createPrimitiveDetailMesh(detail, anchorPoint) {
             if (!globalState.THREE || !detail || !detail.type)
                 return null;
             const type = String(detail.type || "").toLowerCase();
-            let object = null;
-            if ("box" === type || "wall" === type) {
-                object = createPatternedDetailBox(detail, getDetailSize(detail), "wall");
-            } else if ("floor" === type) {
-                object = createPatternedDetailBox(detail, getDetailSize(detail, [4, .12, 4]), "floor");
-            } else if ("panel" === type || "roofpanel" === type) {
-                object = createPatternedDetailBox(detail, getDetailSize(detail, [1, 1, .04]), "roofpanel" === type ? "roof" : "wall");
-            } else if ("trianglewall" === type) {
-                object = new globalState.THREE.Mesh(createTriangleWallGeometry(detail), createDetailMaterial(detail));
-            } else if ("trianglefill" === type) {
-                object = new globalState.THREE.Mesh(createTriangleFillGeometry(detail), createDetailMaterial(detail));
-            } else if ("wedgefill" === type) {
-                object = new globalState.THREE.Mesh(createWedgeFillGeometry(detail), createDetailMaterial(detail));
-            } else if ("fillcylinder" === type) {
-                object = new globalState.THREE.Mesh(createFillCylinderGeometry(detail), createDetailMaterial(detail));
+            let geometry = null;
+            if (isDoorDetail(detail))
+                return createDoorDetailObject(detail, anchorPoint);
+            if ("box" === type || "wall" === type || "door" === type) {
+                const size = getDetailSize(detail);
+                geometry = new globalState.THREE.BoxGeometry(size[0], size[1], size[2]);
+            } else if ("panel" === type) {
+                const size = getDetailSize(detail, [1, 1, .04]);
+                geometry = new globalState.THREE.BoxGeometry(size[0], size[1], Math.max(.02, size[2]));
             } else if ("cylinder" === type || "cone" === type) {
                 const radius = Math.max(.05, Number(detail.radius) || Number(detail.a) || .25);
                 const radiusTop = "cone" === type ? 0 : null != detail.radiusTop ? Math.max(0, Number(detail.radiusTop) || 0) : radius;
                 const radiusBottom = null != detail.radiusBottom ? Math.max(.05, Number(detail.radiusBottom) || .05) : radius;
-                const geometry = new globalState.THREE.CylinderGeometry(radiusTop, radiusBottom, Math.max(.1, Number(detail.height) || Number(detail.b) || 1), Math.max(3, Number(detail.segments) || 16));
+                geometry = new globalState.THREE.CylinderGeometry(radiusTop, radiusBottom, Math.max(.1, Number(detail.height) || Number(detail.b) || 1), Math.max(3, Number(detail.segments) || 16));
                 if (detail.radiusX || detail.radiusZ || detail.c) {
                     const radiusX = Math.max(.05, Number(detail.radiusX) || radius);
                     const radiusZ = Math.max(.05, Number(detail.radiusZ) || Number(detail.c) || radius);
                     geometry.scale(radiusX / radius, 1, radiusZ / radius);
                 }
-                object = new globalState.THREE.Mesh(geometry, createDetailMaterial(detail));
             } else if ("sphere" === type) {
-                object = new globalState.THREE.Mesh(new globalState.THREE.SphereGeometry(Math.max(.05, Number(detail.radius) || .5), 12, 10), createDetailMaterial(detail));
+                geometry = new globalState.THREE.SphereGeometry(Math.max(.05, Number(detail.radius) || .5), 12, 10);
             } else if ("cylinderwall" === type || "arcwall" === type) {
-                object = new globalState.THREE.Mesh(createCylinderWallGeometry(detail), createDetailMaterial(detail));
+                geometry = createCylinderWallGeometry(detail);
             } else if ("pyramid" === type || "pyramidroof" === type || "roofpyramid" === type || "frustumroof" === type) {
-                object = new globalState.THREE.Mesh(createPyramidGeometry(detail), createDetailMaterial(detail));
-            } else if ("gableroof" === type) {
-                const size = getDetailSize(detail, [4, 2, 4]);
-                object = new globalState.THREE.Mesh(createRidgeRoofGeometry(detail, size[0], size[1], size[2], []), createDetailMaterial(detail));
-            } else if ("hiproof" === type) {
-                const size = getDetailSize(detail, [4, 2, 4]);
-                object = new globalState.THREE.Mesh(createFrustumRoofGeometry(size[0], size[1], size[2], Number(detail.topScale) || .22), createDetailMaterial(detail));
-            } else if ("flatroof" === type) {
-                object = createPatternedDetailBox(detail, getDetailSize(detail, [4, .2, 4]), "roof");
-            } else if ("shedroof" === type) {
-                object = new globalState.THREE.Mesh(createShedRoofGeometry(detail), createDetailMaterial(detail));
-            } else if ("mansardroof" === type) {
-                const size = getDetailSize(detail, [4, 2, 4]);
-                object = new globalState.THREE.Mesh(createFrustumRoofGeometry(size[0], size[1], size[2], Number(detail.topScale) || .55), createDetailMaterial(detail));
-            } else if ("domeroof" === type) {
-                const size = getDetailSize(detail, [4, 2, 4]);
-                const geometry = new globalState.THREE.SphereGeometry(1, 20, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-                geometry.scale(size[0] / 2, size[1], size[2] / 2);
-                object = new globalState.THREE.Mesh(geometry, createDetailMaterial(detail));
-            } else if ("roundroof" === type) {
-                object = new globalState.THREE.Mesh(createRoundRoofGeometry(detail), createDetailMaterial(detail));
-            } else if ("window" === type) {
-                object = createWindowDetailGroup(detail);
-            } else if ("door" === type) {
-                object = createDoorDetailGroup(detail);
-            } else if (["chair", "table", "sofa", "bed", "cabinet", "counter", "shelf", "stove", "chimney"].includes(type)) {
-                object = createFurnitureDetailGroup(detail);
+                geometry = createPyramidGeometry(detail);
             }
-            if (!object)
+            if (!geometry)
                 return null;
-            return applyDetailTransform(object, detail, anchorPoint);
+            const mesh = new globalState.THREE.Mesh(geometry, createDetailMaterial(detail));
+            const position = detail.position || [0, 0, 0];
+            const rotation = detail.rotation || [0, 0, 0];
+            const offsetX = detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.x) || 0;
+            const offsetZ = detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.z) || 0;
+            mesh.position.set(offsetX + (Number(position[0]) || 0), Number(position[1]) || 0, offsetZ + (Number(position[2]) || 0));
+            mesh.rotation.set((Number(rotation[0]) || 0) * Math.PI / 180, (Number(rotation[1]) || 0) * Math.PI / 180, (Number(rotation[2]) || 0) * Math.PI / 180);
+            return mesh;
         }
 
         function buildCustomBuildingObject(match) {
@@ -6956,120 +6744,6 @@
             return group;
         }
 
-        function chooseStandardFloorStyle(building) {
-            const seed = Number(building && building.index) || Number(building && building.houseCenterLocal && building.houseCenterLocal.x) || 0;
-            const options = [{
-                materialKind: "laminate",
-                color: 0xb98f61
-            }, {
-                materialKind: "tile",
-                color: 0xc8c5bd
-            }, {
-                materialKind: "checkerTile",
-                color: 0xd8d5ce
-            }, {
-                materialKind: "castFloor",
-                color: 0x85898c
-            }];
-            return options[Math.min(options.length - 1, Math.floor(seededUnit(seed, 43) * options.length))];
-        }
-
-        function buildStandardBuildingDetailsObject(building) {
-            if (!globalState.THREE || !building)
-                return null;
-            const points = getBuildingFootprint(building, {
-                base: {
-                    inset: .02
-                }
-            });
-            if (points.length < 3)
-                return null;
-            const floors = Math.max(1, Number(building.level) || 2);
-            const baseY = Number(building.y) || 0;
-            const bodyHeight = Math.max(2.8, floors * 2.85);
-            const group = new globalState.THREE.Group;
-            group.name = `tmStandardBuildingDetails:${building.index || "building"}`;
-            const seed = Number(building.index) || Number(building.houseCenterLocal && building.houseCenterLocal.x) || 0;
-            const wallPalette = [0xd8d0c2, 0xc9c2b4, 0xd2c2a7, 0xbfc4bd, 0xcdb79b];
-            const wallColor = wallPalette[Math.min(wallPalette.length - 1, Math.floor(seededUnit(seed, 31) * wallPalette.length))];
-            const roofPalette = [0x7f3d32, 0x6e4b38, 0x5f6670, 0x8a5134, 0x70423d];
-            const roofColor = roofPalette[Math.min(roofPalette.length - 1, Math.floor(seededUnit(seed, 37) * roofPalette.length))];
-            const body = createCustomBuildingBody(points, baseY, bodyHeight, wallColor, {
-                base: {
-                    color: wallColor
-                }
-            });
-            body && group.add(body);
-            createWallSurfaceDetails(group, points, baseY, bodyHeight, {
-                color: wallColor,
-                dark: seededUnit(seed, 19) > .5
-            });
-            const floor = createFloorForFootprint(points, baseY, chooseStandardFloorStyle(building));
-            floor && group.add(floor);
-            const roofSpec = {
-                enabled: !0,
-                type: seededUnit(seed, 41) > .18 ? "gable" : "flat",
-                color: roofColor,
-                height: Math.max(.8, Math.min(2.3, bodyHeight * .28)),
-                overhang: .22,
-                ridgeDirection: "longest"
-            };
-            const roof = createCustomRoof(points, baseY, bodyHeight, roofSpec);
-            roof && group.add(roof);
-            "flat" !== roofSpec.type && createRoofSurfaceDetails(group, points, baseY, bodyHeight, roofSpec);
-            createWindowsForFootprint(group, points, baseY, bodyHeight, {
-                enabled: !0,
-                width: .92,
-                height: 1.18,
-                rows: Math.max(1, Math.min(3, floors)),
-                gap: .68,
-                margin: .95,
-                sill: 1.18,
-                topPadding: .9,
-                frameColor: VISUAL_CONFIG.windowFrameColor,
-                glassColor: VISUAL_CONFIG.windowGlassColor,
-                opacity: .58
-            });
-            const door = createDoorForFootprint(points, baseY, bodyHeight, {
-                color: 0x875a34,
-                frameColor: 0xe7d8bf
-            });
-            door && group.add(door);
-            return group.children.length ? group : null;
-        }
-
-        function isBuildingTextureMap(map) {
-            const image = map && map.image || map && map.source && map.source.data;
-            const source = image && (image.currentSrc || image.src) || map && map.name || "";
-            return /textures\/building\//i.test(String(source)) || /^data:image\/svg\+xml/i.test(String(source)) && /d9d3c5/i.test(String(source));
-        }
-
-        function stripBuildingTextureMaps(chunk) {
-            const root = chunk && chunk.group;
-            if (!root || !root.traverse)
-                return;
-            root.traverse(node => {
-                if (!node || !node.isMesh || node.__tmBuildingTextureStripped)
-                    return;
-                const materials = Array.isArray(node.material) ? node.material : [node.material];
-                let touched = !1;
-                for (const material of materials) {
-                    if (!material || !isBuildingTextureMap(material.map))
-                        continue;
-                    material.map = null;
-                    if (material.color && "function" == typeof material.color.set)
-                        material.color.set(0xd9d3c5);
-                    material.roughness = null != material.roughness ? Math.max(material.roughness, .86) : material.roughness;
-                    material.needsUpdate = !0;
-                    touched = !0;
-                }
-                if (touched) {
-                    node.visible = !1;
-                    node.__tmBuildingTextureStripped = !0;
-                }
-            });
-        }
-
         async function ensureChunkCustomBuildingsPrepared(chunk) {
             if (!chunk)
                 return [];
@@ -7078,11 +6752,11 @@
             if (chunk.__tmCustomBuildingsPreparePromise)
                 return chunk.__tmCustomBuildingsPreparePromise;
             chunk.__tmOriginalCustomBuildings || (chunk.__tmOriginalCustomBuildings = cloneJson(toSafeArray(chunk.custome_buildings), []));
-            chunk.__tmCustomBuildingsPreparePromise = ensureBuildingCatalogLoaded().then((async catalog => {
+            chunk.__tmCustomBuildingsPreparePromise = ensureBuildingCatalogLoaded().then((catalog => {
                 const matched = [];
                 const suppressions = [];
                 for (const rawEntry of toSafeArray(catalog && catalog.buildings)) {
-                    const resolved = await resolveBuildingAddressMatch(resolveBuildingTemplate(rawEntry, catalog.templates));
+                    const resolved = resolveBuildingTemplate(rawEntry, catalog.templates);
                     for (const building of toSafeArray(chunk.buildings))
                         if (building && building.houseCenter && matchBuildingEntry(resolved, chunk, building)) {
                             const id = resolved.id || getBuildingDebugId(chunk, building);
@@ -7109,40 +6783,107 @@
             return chunk.__tmCustomBuildingsPreparePromise;
         }
 
+        function getChunkApproxCenter(chunk) {
+            if (!globalState.THREE || !chunk)
+                return null;
+            return chunk.centerVec && chunk.centerVec.clone ? chunk.centerVec.clone() : new globalState.THREE.Vector3(Number(chunk.cx) || 0,0,Number(chunk.cz) || 0);
+        }
+
+        function addCustomBuildingPriorityTarget(position, label) {
+            const target = cloneVector3(position);
+            if (!target)
+                return;
+            runtimeState.customBuildingPriorityTargets.push({
+                position: target,
+                label: label || "Adresse",
+                createdAt: performance.now()
+            });
+            runtimeState.customBuildingPriorityTargets = runtimeState.customBuildingPriorityTargets.filter((entry => entry && entry.position && performance.now() - (Number(entry.createdAt) || 0) < 10 * 60 * 1e3)).slice(-8);
+        }
+
+        function isPriorityCustomBuildingChunk(chunk) {
+            const center = getChunkApproxCenter(chunk);
+            if (!center)
+                return !1;
+            return runtimeState.customBuildingPriorityTargets.some((entry => entry && entry.position && getDistance2D(center, entry.position) <= 1800));
+        }
+
+        async function prepareCustomBuildingsForChunks(chunks, reason) {
+            const unique = Array.from(new Set(toSafeArray(chunks).filter(Boolean)));
+            if (!unique.length)
+                return;
+            for (let index = 0; index < unique.length; index++) {
+                const chunk = unique[index];
+                setCustomBuildingProgress(index, unique.length, reason === "address" ? "Adress-Haeuser vorbereiten" : "3D-Haeuser optimieren");
+                try {
+                    await ensureChunkCustomBuildingsPrepared(chunk);
+                    rebuildCustomBuildingsForChunk(chunk);
+                } catch (prepareError) {
+                    warn(`Custom-Haeuser konnten fuer Chunk ${chunk && chunk.cx}/${chunk && chunk.cz} nicht vorbereitet werden:`, prepareError);
+                }
+                setCustomBuildingProgress(index + 1, unique.length, reason === "address" ? "Adress-Haeuser vorbereiten" : "3D-Haeuser optimieren");
+            }
+            finishCustomBuildingProgress();
+        }
+
+        function prepareCustomBuildingsNearPosition(position, reason) {
+            if (!position)
+                return;
+            const chunks = getLoadedChunks().filter((chunk => {
+                const center = getChunkApproxCenter(chunk);
+                return center && getDistance2D(center, position) <= 2200;
+            }));
+            chunks.length && prepareCustomBuildingsForChunks(chunks, reason || "near");
+        }
+
+        function collectCustomBuildingDoorsForChunk(chunk, overlay) {
+            runtimeState.customBuildingDoorItems = runtimeState.customBuildingDoorItems.filter((item => item && item.chunk !== chunk && item.group && item.group.parent));
+            if (!overlay)
+                return;
+            overlay.traverse((node => {
+                if (node && node.userData && node.userData.tmDoor)
+                    runtimeState.customBuildingDoorItems.push({
+                        chunk,
+                        group: node
+                    });
+            }
+            ));
+        }
+
         function rebuildCustomBuildingsForChunk(chunk) {
             if (!chunk || !chunk.group || !globalState.THREE)
                 return;
             const matches = chunk.__tmMatchedCustomBuildings || runtimeState.customBuildingEntriesByChunk.get(chunk) || [];
-            const matchedBuildings = new Set(matches.map(match => match && match.building).filter(Boolean));
             let overlay = runtimeState.chunkCustomOverlayGroups.get(chunk);
             if (!overlay) {
                 overlay = new globalState.THREE.Group;
-                overlay.name = "__tmBuildingDetailsOverlay";
+                overlay.name = "__tmCustomBuildingsOverlay";
                 runtimeState.chunkCustomOverlayGroups.set(chunk, overlay);
             }
-            clearTownOverlayChildren(overlay);
+            runtimeState.customBuildingDoorItems = runtimeState.customBuildingDoorItems.filter((item => item && item.chunk !== chunk));
+            clearCustomBuildingOverlayChildren(overlay);
+            if (!matches.length) {
+                overlay.parent && overlay.parent.remove(overlay);
+                return;
+            }
             for (const match of matches) {
                 const object = buildCustomBuildingObject(match);
                 object && overlay.add(object);
             }
-            for (const building of toSafeArray(chunk.buildings)) {
-                if (!building || matchedBuildings.has(building))
-                    continue;
-                const object = buildStandardBuildingDetailsObject(building);
-                object && overlay.add(object);
-            }
-            if (!overlay.children.length) {
-                overlay.parent && overlay.parent.remove(overlay);
-                return;
-            }
+            optimizeCustomBuildingOverlay(overlay);
             overlay.parent !== chunk.group && chunk.group.add(overlay);
+            collectCustomBuildingDoorsForChunk(chunk, overlay);
         }
 
         function cleanupChunkCustomVisuals(chunk) {
             const overlay = chunk && runtimeState.chunkCustomOverlayGroups.get(chunk);
-            overlay && overlay.parent && overlay.parent.remove(overlay);
+            if (overlay) {
+                overlay.parent && overlay.parent.remove(overlay);
+                clearCustomBuildingOverlayChildren(overlay);
+            }
             runtimeState.chunkCustomOverlayGroups.delete(chunk);
             runtimeState.customBuildingEntriesByChunk.delete(chunk);
+            runtimeState.customBuildingDoorItems = runtimeState.customBuildingDoorItems.filter((item => item && item.chunk !== chunk));
             chunk && (chunk.__tmMatchedCustomBuildings = []);
         }
 
@@ -7163,11 +6904,7 @@
             if (!game.__tmRuntimeInitialized) {
                 game.__tmRuntimeInitialized = !0;
                 refreshCustomBuildingDebug();
-                ensureBuildingCatalogLoaded().then((() => {
-                    for (const chunk of getLoadedChunks())
-                        ensureChunkCustomBuildingsPrepared(chunk).finally((() => queueChunkVisualRefresh(chunk, "game_capture")));
-                }
-                ));
+                prepareCustomBuildingsForChunks(getLoadedChunks(), "game_capture");
             }
             ensureTownOverlayGroup();
             if (previousGame !== game || previousScene !== townSignsState.scene || previousChunkManager !== townSignsState.chunkManager)
@@ -7199,7 +6936,6 @@
                 const controllableModule = requireFn(REQUIRED_MODULES.CONTROLLABLE_CAR);
                 const roadModule = requireFn(REQUIRED_MODULES.ROAD_FACTORY);
                 const chunkModule = requireFn(REQUIRED_MODULES.CHUNK);
-                const buildingFactoryModule = requireFn(REQUIRED_MODULES.BUILDING_FACTORY);
                 const terrainModule = requireFn(REQUIRED_MODULES.TERRAIN);
                 const treeModule = requireFn(REQUIRED_MODULES.TREE_LIBRARY);
                 const biomModule = requireFn(REQUIRED_MODULES.BIOM);
@@ -7212,7 +6948,6 @@
                 const trafficProto = trafficModule && trafficModule.AiTrafficResolver && trafficModule.AiTrafficResolver.prototype;
                 const controllableProto = controllableModule && controllableModule.ControllableCar && controllableModule.ControllableCar.prototype;
                 const chunkProto = chunkModule && chunkModule.Chunk && chunkModule.Chunk.prototype;
-                const buildingFactoryProto = buildingFactoryModule && buildingFactoryModule.BuildingFactory && buildingFactoryModule.BuildingFactory.prototype;
                 const terrainProto = terrainModule && terrainModule.Terrain && terrainModule.Terrain.prototype;
                 const biomProto = biomModule && biomModule.Biom && biomModule.Biom.prototype;
                 const missionProto = missionModule && missionModule.MissionManager && missionModule.MissionManager.prototype;
@@ -7239,7 +6974,6 @@
                         controllableModule,
                         roadModule,
                         chunkModule,
-                        buildingFactoryModule,
                         terrainModule,
                         treeModule,
                         biomModule,
@@ -7249,22 +6983,6 @@
                         THREE
                     }
                 };
-
-                if (buildingFactoryProto && !buildingFactoryProto.__tmNoPngStandardBuildingsPatched) {
-                    const originalCreateNormalBuilding = buildingFactoryProto.createNormalBuilding;
-                    buildingFactoryProto.createNormalBuilding = function(houses) {
-                        this.__tmStandardBuildingMeshesSuppressed = !0;
-                        this.allHouses = Array.isArray(this.allHouses) ? this.allHouses.map((() => [])) : [];
-                        this.allRoofs = [];
-                        this.allBuildingWithouTex = [];
-                        this.allBasements = [];
-                        this.wallsLine = [];
-                        return [];
-                    };
-                    buildingFactoryProto.__tmOriginalCreateNormalBuilding = originalCreateNormalBuilding;
-                    buildingFactoryProto.__tmNoPngStandardBuildingsPatched = !0;
-                    log("Standardhaus-PNG-Meshes deaktiviert; TM baut alle Standardhaeuser als 3D-Overlay.");
-                }
 
                 if (terrainProto && !terrainProto.__tmTerrainVisualPatched) {
                     const originalCreateTerrainMesh = terrainProto.createTerrainMesh;
@@ -7373,7 +7091,7 @@
                         const result = originalBuild.apply(this, args);
                         refreshCustomBuildingDebug();
                         queueTownRebuild("chunk_build");
-                        queueChunkVisualRefresh(this, "chunk_build");
+                        ensureChunkCustomBuildingsPrepared(this).catch((customBuildingError => warn(`Custom-Building-Vorbereitung fehlgeschlagen fuer Chunk ${this.cx}/${this.cz}:`, customBuildingError))).finally((() => rebuildCustomBuildingsForChunk(this)));
                         return result;
                     };
                     chunkProto.__tmTownSignsBuildPatched = !0;
@@ -7395,16 +7113,26 @@
                     const originalCheckLoaded = chunkProto.checkLoaded;
                     chunkProto.checkLoaded = async function(...args) {
                         suppressRunwayBuildings(this);
+                        const showProgress = !this.__tmCustomBuildingsPrepared || isPriorityCustomBuildingChunk(this);
+                        showProgress && setCustomBuildingProgress(0, 2, isPriorityCustomBuildingChunk(this) ? "Adress-Haus vorbereiten" : "3D-Haeuser vorbereiten");
                         try {
                             await ensureChunkCustomBuildingsPrepared(this);
+                            showProgress && setCustomBuildingProgress(1, 2, isPriorityCustomBuildingChunk(this) ? "Adress-Haus vorbereiten" : "3D-Haeuser vorbereiten");
                         } catch (customBuildingError) {
                             warn(`Custom-Building-Vorbereitung fehlgeschlagen fuer Chunk ${this.cx}/${this.cz}:`, customBuildingError);
                         }
-                        const result = await originalCheckLoaded.apply(this, args);
-                        refreshCustomBuildingDebug();
-                        queueTownRebuild("chunk_check_loaded");
-                        queueChunkVisualRefresh(this, "chunk_check_loaded");
-                        return result;
+                        try {
+                            const result = await originalCheckLoaded.apply(this, args);
+                            refreshCustomBuildingDebug();
+                            queueTownRebuild("chunk_check_loaded");
+                            rebuildCustomBuildingsForChunk(this);
+                            showProgress && setCustomBuildingProgress(2, 2, isPriorityCustomBuildingChunk(this) ? "Adress-Haus vorbereiten" : "3D-Haeuser vorbereiten");
+                            showProgress && finishCustomBuildingProgress();
+                            return result;
+                        } catch (checkLoadedError) {
+                            showProgress && finishCustomBuildingProgress();
+                            throw checkLoadedError;
+                        }
                     };
                     chunkProto.__tmCustomBuildingsCheckLoadedPatched = !0;
                 }
@@ -7579,8 +7307,7 @@
                 globalThis.__tmTownSignsDebug = globalThis.__tmCollisionHookDebug.townSigns;
                 refreshCustomBuildingDebug();
                 globalThis.__tmCollisionHookDebug.game && captureTownSignsGame(globalThis.__tmCollisionHookDebug.game);
-                for (const chunk of getLoadedChunks())
-                    ensureChunkCustomBuildingsPrepared(chunk).finally((() => queueChunkVisualRefresh(chunk, "bundle_patch")));
+                prepareCustomBuildingsForChunks(getLoadedChunks(), "bundle_patch");
                 log("Hook erfolgreich installiert.");
                 log("Debug-Objekt verfuegbar unter window.__tmCollisionHookDebug");
                 log("Tuning-Objekt verfuegbar unter window.__tmCollisionHookConfig");

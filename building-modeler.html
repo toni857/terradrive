@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>TM Building Modeler</title>
+    <link rel="stylesheet" href="building-modeler.css">
+</head>
+<body>
+    <div class="app">
+        <aside class="sidebar sidebar-left">
+            <div class="brand">
+                <div class="brand-title">Building Modeler</div>
+                <div class="brand-subtitle">Terradrive parts</div>
+            </div>
+            <div class="panel-title">Elemente</div>
+            <div id="elementList" class="element-list"></div>
+        </aside>
+
+        <main class="workspace">
+            <div class="toolbar">
+                <button id="moveTool" class="tool-button" type="button">Move</button>
+                <button id="duplicateElement" class="tool-button" type="button">Duplicate</button>
+                <button id="deleteElement" class="tool-button danger" type="button">Delete</button>
+                <button id="copyCode" class="tool-button primary" type="button">Kopieren</button>
+                <span id="statusText" class="status">Bereit</span>
+            </div>
+            <div id="viewport" class="viewport"></div>
+            <textarea id="codeOutput" class="code-output" spellcheck="false" readonly></textarea>
+        </main>
+
+        <aside class="sidebar sidebar-right">
+            <div class="panel-title">Bauteile</div>
+            <div id="palette" class="palette">
+                <button type="button" draggable="true" data-type="wall">Quadratische Wand</button>
+                <button type="button" draggable="true" data-type="cylinderWall">Zylinderwand</button>
+                <button type="button" draggable="true" data-type="pyramidRoof">Pyramidisches Dach</button>
+                <button type="button" draggable="true" data-type="cone">Kegel</button>
+            </div>
+            <div class="panel-title">Inspector</div>
+            <form id="inspector" class="inspector"></form>
+        </aside>
+    </div>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module" src="building-modeler.js"></script>
+</body>
+</html>
