@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.1.7.8
+// @version      2.1.7.9
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -199,7 +199,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.1.7.8",
+            version: "2.1.7.9",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -5234,6 +5234,29 @@
             return offsetFootprintToWorld(local, offset);
         }
 
+        function getMatchCollisionLocalFootprint(match) {
+            if (Array.isArray(match && match.__tmCollisionLocalFootprint) && match.__tmCollisionLocalFootprint.length >= 3)
+                return match.__tmCollisionLocalFootprint;
+            const building = match && match.building;
+            const entry = match && match.entry;
+            const raw = getBuildingFootprint(building, entry || {});
+            if (!raw.length)
+                return [];
+            const fitted = fitBuildingFootprintToEnvironment(raw, match);
+            const output = Array.isArray(fitted) && fitted.length >= 3 ? fitted : raw;
+            match && (match.__tmCollisionLocalFootprint = output);
+            return output;
+        }
+
+        function getMatchCollisionWorldFootprint(match, chunk) {
+            const local = getMatchCollisionLocalFootprint(match);
+            if (!local.length)
+                return [];
+            const building = match && match.building;
+            const offset = building && building.chunkCenter || getChunkWorldOffset(chunk);
+            return offsetFootprintToWorld(local, offset);
+        }
+
         function getSegmentClosestPoint2D(point, start, end) {
             const px = Number(point && point.x) || 0;
             const pz = Number(point && point.z) || 0;
@@ -5483,8 +5506,8 @@
                 for (const match of toSafeArray(matches)) {
                     const entry = match && match.entry;
                     const building = match && match.building;
-                    const localPoints = getBuildingFootprint(building, entry);
-                    const points = getBuildingWorldFootprint(building, entry, chunk);
+                    const localPoints = getMatchCollisionLocalFootprint(match);
+                    const points = getMatchCollisionWorldFootprint(match, chunk);
                     if (points.length >= 3) {
                         building && customBuildings.add(building);
                         cache.buildingPolygons.push({
@@ -11501,6 +11524,7 @@
             group.name = `tmCustomBuilding:${match.id}`;
             const rawPoints = getBuildingFootprint(match.building, spec);
             const points = fitBuildingFootprintToEnvironment(rawPoints, match);
+            match.__tmCollisionLocalFootprint = points;
             const originalBaseY = Number(spec.base && spec.base.y) || Number(match.building.y) || 0;
             const bodyHeight = Math.max(1.4, Number(spec.base && spec.base.height) || Math.max(1, Number(spec.base && spec.base.floors) || 2) * Math.max(2.4, Number(spec.base && spec.base.floorHeight) || 3));
             const baseY = getRaisedCustomBuildingBaseY(points, originalBaseY, spec);
