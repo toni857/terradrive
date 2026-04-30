@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.1.7.7
+// @version      2.1.7.8
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -199,7 +199,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.1.7.7",
+            version: "2.1.7.8",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -5542,9 +5542,9 @@
                                     x: ox + start.x + dx * bU,
                                     z: oz + start.z + dz * bU
                                 },
-                                radius: .62
+                                radius: .18
                             };
-                            segment.bounds = getSegmentBounds2D(segment.start, segment.end, 6);
+                            segment.bounds = getSegmentBounds2D(segment.start, segment.end, 4);
                             cache.customWallSegments.push(segment);
                         }
                     }
@@ -5606,6 +5606,164 @@
             } : null;
         }
 
+        function getSegmentYAt(segment, progress) {
+            const startY = Number(segment && segment.start && segment.start.y) || 0;
+            const endY = Number(segment && segment.end && segment.end.y) || startY;
+            return startY + (endY - startY) * clamp(Number(progress) || 0, 0, 1);
+        }
+
+        function getChunkRoadSegments(chunk) {
+            const segments = [];
+            for (const edge of toSafeArray(chunk && chunk.newRoadGraph && chunk.newRoadGraph.edges)) {
+                if (!edge || !Array.isArray(edge.points) || edge.points.length < 2 || !isRoadEligibleForAutopilot(edge))
+                    continue;
+                for (let index = 0; index < edge.points.length - 1; index++) {
+                    const start = edge.points[index];
+                    const end = edge.points[index + 1];
+                    if (!start || !end)
+                        continue;
+                    segments.push({
+                        edge,
+                        start,
+                        end,
+                        layer: Number(edge.layer) || 0
+                    });
+                }
+            }
+            return segments;
+        }
+
+        function getBridgeRoadClearanceZones(chunk) {
+            const segments = getChunkRoadSegments(chunk);
+            const zones = [];
+            const maxSegments = Math.min(segments.length, 220);
+            for (let aIndex = 0; aIndex < maxSegments; aIndex++) {
+                const first = segments[aIndex];
+                for (let bIndex = aIndex + 1; bIndex < maxSegments; bIndex++) {
+                    const second = segments[bIndex];
+                    if (!first || !second || first.edge === second.edge)
+                        continue;
+                    const hit = segmentIntersection2D(first.start, first.end, second.start, second.end);
+                    if (!hit)
+                        continue;
+                    const firstY = getSegmentYAt(first, hit.t);
+                    const secondY = getSegmentYAt(second, hit.u);
+                    const layerDelta = first.layer - second.layer;
+                    const heightDelta = firstY - secondY;
+                    if (Math.abs(heightDelta) < 1.8 && 0 === layerDelta)
+                        continue;
+                    const lower = heightDelta > 0 || layerDelta > 0 ? second : first;
+                    const lowerY = heightDelta > 0 || layerDelta > 0 ? secondY : firstY;
+                    const key = `${Math.round(hit.x / 4)}:${Math.round(hit.z / 4)}`;
+                    if (zones.some(zone => zone.key === key))
+                        continue;
+                    zones.push({
+                        key,
+                        x: hit.x,
+                        z: hit.z,
+                        y: lowerY,
+                        radius: clamp(getRoadEdgeHalfWidth(lower.edge) + 2.8, 4.5, 11)
+                    });
+                    if (zones.length >= 80)
+                        return zones;
+                }
+            }
+            return zones;
+        }
+
+        function restoreWebsiteBridgePillarsForChunk(chunk) {
+            if (!chunk || !chunk.group)
+                return;
+            chunk.group.traverse && chunk.group.traverse(object => {
+                if (object && object.userData && object.userData.tmHiddenWebsiteBridgePillar) {
+                    object.visible = !0;
+                    delete object.userData.tmHiddenWebsiteBridgePillar;
+                }
+            });
+            chunk.__tmHiddenWebsiteBridgePillars = 0;
+        }
+
+        function getObjectChunkLocalBounds(object, chunk) {
+            if (!globalState.THREE || !globalState.THREE.Box3 || !object)
+                return null;
+            try {
+                object.updateMatrixWorld && object.updateMatrixWorld(!0);
+                const box = new globalState.THREE.Box3().setFromObject(object);
+                if (!Number.isFinite(box.min.x) || !Number.isFinite(box.max.x))
+                    return null;
+                const center = new globalState.THREE.Vector3;
+                const size = new globalState.THREE.Vector3;
+                box.getCenter(center);
+                box.getSize(size);
+                chunk && chunk.group && chunk.group.worldToLocal && chunk.group.worldToLocal(center);
+                return {
+                    center,
+                    size
+                };
+            } catch (boundsError) {
+                return null;
+            }
+        }
+
+        function getObjectNameStack(object, stopParent) {
+            const names = [];
+            let cursor = object;
+            while (cursor && cursor !== stopParent && names.length < 5) {
+                cursor.name && names.push(cursor.name);
+                cursor.userData && cursor.userData.name && names.push(cursor.userData.name);
+                cursor = cursor.parent;
+            }
+            const material = object && object.material;
+            material && material.name && names.push(material.name);
+            return names.join(" ").toLowerCase();
+        }
+
+        function isBridgePillarCandidate(object, bounds, zone, roadMeshSet, chunk) {
+            if (!object || !object.isMesh || !bounds || !zone || roadMeshSet && roadMeshSet.has(object))
+                return !1;
+            const center = bounds.center;
+            const size = bounds.size;
+            if (!center || !size || Math.hypot(center.x - zone.x, center.z - zone.z) > zone.radius)
+                return !1;
+            const horizontalMax = Math.max(Math.abs(size.x), Math.abs(size.z));
+            const horizontalMin = Math.min(Math.abs(size.x), Math.abs(size.z));
+            const tallNarrow = size.y > 1.6 && size.y > horizontalMax * 1.45 && horizontalMax <= Math.max(1.35, zone.radius * .72) && horizontalMin <= Math.max(.8, zone.radius * .42);
+            if (!tallNarrow)
+                return !1;
+            const nameText = getObjectNameStack(object, chunk && chunk.group);
+            const supportNamed = /(pillar|column|support|pier|pfeiler|stuetz|stütz)/i.test(nameText);
+            const bridgeNamed = /(bridge|bruecke|brücke|overpass|viaduct)/i.test(nameText);
+            const nearRoadHeight = center.y > zone.y - 2 && center.y < zone.y + 12;
+            return nearRoadHeight && (supportNamed || bridgeNamed || horizontalMax < 2.4);
+        }
+
+        function sanitizeWebsiteBridgePillarsForChunk(chunk) {
+            if (!chunk || !chunk.group || !globalState.THREE)
+                return;
+            restoreWebsiteBridgePillarsForChunk(chunk);
+            if (!featureState.enhancedRoads)
+                return;
+            const zones = getBridgeRoadClearanceZones(chunk);
+            if (!zones.length)
+                return;
+            const roadMeshSet = new Set(toSafeArray(chunk.roadMeshes));
+            let hidden = 0;
+            chunk.group.traverse && chunk.group.traverse(object => {
+                if (hidden >= 80 || !object || !object.isMesh || object.userData && object.userData.tmCollisionBridge)
+                    return;
+                const bounds = getObjectChunkLocalBounds(object, chunk);
+                if (!bounds)
+                    return;
+                if (!zones.some(zone => isBridgePillarCandidate(object, bounds, zone, roadMeshSet, chunk)))
+                    return;
+                object.visible = !1;
+                object.userData || (object.userData = {});
+                object.userData.tmHiddenWebsiteBridgePillar = !0;
+                hidden++;
+            });
+            chunk.__tmHiddenWebsiteBridgePillars = hidden;
+        }
+
         function createTunnelBridgeMesh(edge, start, end, intersection) {
             if (!globalState.THREE || !intersection)
                 return null;
@@ -5651,6 +5809,7 @@
                 return;
             let overlay = chunk.__tmTunnelBridgeOverlay;
             if (!featureState.enhancedRoads) {
+                restoreWebsiteBridgePillarsForChunk(chunk);
                 overlay && overlay.parent && overlay.parent.remove(overlay);
                 chunk.__tmTunnelBridgeOverlay = null;
                 return;
@@ -5695,6 +5854,7 @@
                     break;
             }
             overlay.children.length ? overlay.parent !== chunk.group && chunk.group.add(overlay) : overlay.parent && overlay.parent.remove(overlay);
+            sanitizeWebsiteBridgePillarsForChunk(chunk);
         }
 
         function getTunnelWallCollisionSegments(position) {
@@ -5702,7 +5862,7 @@
         }
 
         function collectBuildingCollisionPolygons(position, mode) {
-            const padding = "vehicle" === mode ? 10 : 3;
+            const padding = "vehicle" === mode ? 5 : 1.6;
             return toSafeArray(getWorldCollisionStaticCache().buildingPolygons).filter(item => isPositionInBounds2D(position, item.bounds, padding));
         }
 
@@ -5710,7 +5870,7 @@
             const cache = getWorldCollisionStaticCache();
             return {
                 segments: toSafeArray(cache.customWallSegments).filter(segment => isPositionInBounds2D(position, segment.bounds)),
-                fallbackPolygons: toSafeArray(cache.customFallbackPolygons).filter(item => isPositionInBounds2D(position, item.bounds, 4)).map(item => item.points)
+                fallbackPolygons: toSafeArray(cache.customFallbackPolygons).filter(item => isPositionInBounds2D(position, item.bounds, 1.8)).map(item => item.points)
             };
         }
 
@@ -5739,6 +5899,8 @@
                 return !1;
             let collided = !1;
             const vehicleMode = "vehicle" === mode;
+            const buildingRadius = vehicleMode ? clamp(radius * .55, .85, 1.65) : clamp(radius * .55, .22, .34);
+            const wallRadius = vehicleMode ? radius : clamp(radius * .55, .22, .34);
             for (let pass = 0; pass < 3; pass++) {
                 let passCollided = !1;
                 const applyPass = separation => {
@@ -5754,15 +5916,15 @@
                     applyPass(getCircleSegmentSeparation(position, wall.start, wall.end, radius + wall.radius));
                 if (vehicleMode) {
                     for (const item of collectBuildingCollisionPolygons(position, mode))
-                        applyPass(getCirclePolygonSeparation(position, item.points, radius));
+                        applyPass(getCirclePolygonSeparation(position, item.points, buildingRadius));
                 } else {
                     const wallData = collectCustomWallCollisionSegments(position);
                     for (const wall of wallData.segments)
-                        applyPass(getCircleSegmentSeparation(position, wall.start, wall.end, radius + wall.radius));
+                        applyPass(getCircleSegmentSeparation(position, wall.start, wall.end, wallRadius + wall.radius));
                     for (const polygon of wallData.fallbackPolygons)
-                        applyPass(getCirclePolygonSeparation(position, polygon, radius));
+                        applyPass(getCirclePolygonSeparation(position, polygon, buildingRadius));
                     for (const item of collectBuildingCollisionPolygons(position, mode))
-                        !item.custom && applyPass(getCirclePolygonSeparation(position, item.points, radius));
+                        !item.custom && applyPass(getCirclePolygonSeparation(position, item.points, buildingRadius));
                 }
                 if (!passCollided)
                     break;
