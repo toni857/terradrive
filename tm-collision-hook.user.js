@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.1.7.10
+// @version      2.1.7.13
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -200,7 +200,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.1.7.10",
+            version: "2.1.7.13",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -579,7 +579,8 @@
                 staticCacheAt: 0,
                 lastHumanCollisionAt: 0,
                 chunkIdCounter: 0,
-                chunkIds: new WeakMap
+                chunkIds: new WeakMap,
+                chunkStaticCaches: new WeakMap
             }, runtimeState.worldCollisionState && "object" == typeof runtimeState.worldCollisionState ? runtimeState.worldCollisionState : {}),
             moduleDisables: runtimeState.moduleDisables && "object" == typeof runtimeState.moduleDisables ? runtimeState.moduleDisables : {},
             moduleFaults: runtimeState.moduleFaults && "object" == typeof runtimeState.moduleFaults ? runtimeState.moduleFaults : {},
@@ -851,6 +852,19 @@
                 featureName ? markFeatureFault(featureName, featureError, context) : error(`${context || "Feature step"} fehlgeschlagen:`, featureError);
                 return fallback;
             }
+        }
+
+        function shouldRunRuntimeTask(name, intervalMs) {
+            runtimeState.runtimeTaskTimes && "object" == typeof runtimeState.runtimeTaskTimes || (runtimeState.runtimeTaskTimes = {});
+            const interval = Math.max(0, Number(intervalMs) || 0);
+            if (!interval)
+                return !0;
+            const now = performance.now();
+            const last = Number(runtimeState.runtimeTaskTimes[name]) || 0;
+            if (last && now - last < interval)
+                return !1;
+            runtimeState.runtimeTaskTimes[name] = now;
+            return !0;
         }
 
         const IMPACT_TUNING = {
@@ -2885,12 +2899,19 @@
         }
 
         function getLoadedChunks() {
-            return Object.values(townSignsState.chunkManager && townSignsState.chunkManager.loadedChunks || {}).filter(Boolean);
+            const state = getWorldCollisionState();
+            const now = performance.now();
+            if (Array.isArray(state.allLoadedChunks) && now - (Number(state.allLoadedChunksAt) || 0) < 240)
+                return state.allLoadedChunks;
+            state.allLoadedChunks = Object.values(townSignsState.chunkManager && townSignsState.chunkManager.loadedChunks || {}).filter(Boolean);
+            state.allLoadedChunksAt = now;
+            return state.allLoadedChunks;
         }
 
         function getWorldCollisionState() {
             runtimeState.worldCollisionState && "object" == typeof runtimeState.worldCollisionState || (runtimeState.worldCollisionState = {});
             runtimeState.worldCollisionState.chunkIds instanceof WeakMap || (runtimeState.worldCollisionState.chunkIds = new WeakMap);
+            runtimeState.worldCollisionState.chunkStaticCaches instanceof WeakMap || (runtimeState.worldCollisionState.chunkStaticCaches = new WeakMap);
             return runtimeState.worldCollisionState;
         }
 
@@ -2898,6 +2919,17 @@
             const state = getWorldCollisionState();
             state.loadedChunks = [];
             state.loadedChunksAt = 0;
+            state.allLoadedChunks = [];
+            state.allLoadedChunksAt = 0;
+            state.staticCache = null;
+            state.staticCacheSignature = "";
+            state.staticCacheAt = 0;
+        }
+
+        function invalidateWorldCollisionCacheForChunk(chunk) {
+            const state = getWorldCollisionState();
+            if (chunk && state.chunkStaticCaches instanceof WeakMap)
+                state.chunkStaticCaches.delete(chunk);
             state.staticCache = null;
             state.staticCacheSignature = "";
             state.staticCacheAt = 0;
@@ -2906,7 +2938,7 @@
         function getWorldCollisionLoadedChunks() {
             const state = getWorldCollisionState();
             const now = performance.now();
-            if (Array.isArray(state.loadedChunks) && now - (Number(state.loadedChunksAt) || 0) < 160)
+            if (Array.isArray(state.loadedChunks) && now - (Number(state.loadedChunksAt) || 0) < 260)
                 return state.loadedChunks;
             state.loadedChunks = getLoadedChunks();
             state.loadedChunksAt = now;
@@ -3620,27 +3652,6 @@
                 else if (car.speed < 0)
                     car.speed = Math.min(0, car.speed + brakeDelta);
             }
-        }
-
-        function applyStoppedVehicleHillHold(car, previousPosition) {
-            if (!car || !previousPosition || !car.cameraGroup || !car.cameraGroup.position)
-                return;
-            const manager = getControlManager();
-            if (!manager || !manager.inCar || manager.controllableCar !== car)
-                return;
-            if (manager.moveForward || manager.moveBackward || runtimeState.input.fullBrake)
-                return;
-            if ((Number(car.speeding) || 0) > .02 || (Number(car.breaking) || 0) > .02)
-                return;
-            const speed = speedAbs(car.speed);
-            const moved = getDistance2D(previousPosition, car.cameraGroup.position);
-            if (speed > 1.35 || moved > .42)
-                return;
-            car.cameraGroup.position.x = previousPosition.x;
-            car.cameraGroup.position.z = previousPosition.z;
-            car.speed = 0;
-            car.acc = 0;
-            "function" == typeof car.resetAcc && car.resetAcc();
         }
 
         function applyVehicleTuningHandlingAssist(car, dtSeconds) {
@@ -5482,6 +5493,31 @@
             }).sort().join("|");
         }
 
+        function appendWorldCollisionStaticCache(target, source) {
+            if (!target || !source)
+                return;
+            target.buildingPolygons.push(...toSafeArray(source.buildingPolygons));
+            target.customWallSegments.push(...toSafeArray(source.customWallSegments));
+            target.customFallbackPolygons.push(...toSafeArray(source.customFallbackPolygons));
+            target.tunnelWallSegments.push(...toSafeArray(source.tunnelWallSegments));
+        }
+
+        function getWallOpeningCollisionSignature(entry) {
+            const openings = entry && entry.__tmWallOpenings;
+            if (!openings || "object" != typeof openings)
+                return "no-openings";
+            const rectSignature = list => toSafeArray(list).map(opening => opening && (opening.rect || opening)).filter(Boolean).map(rect => [rect.x1, rect.x2, rect.y1, rect.y2].map(value => Math.round(100 * (Number(value) || 0))).join(":")).join(";");
+            return ["doors", "windows"].map(type => `${type}:${Object.entries(openings[type] || {}).map(([edge, list]) => `${edge}:${rectSignature(list)}`).sort().join(",")}`).join("|");
+        }
+
+        function getChunkStaticCollisionSignature(chunk) {
+            const baseSignature = getWorldCollisionChunkSignature([chunk]);
+            const matches = chunk && (chunk.__tmMatchedCustomBuildings || runtimeState.customBuildingEntriesByChunk.get(chunk)) || [];
+            const buildings = chunk && (chunk.__tmOriginalBuildings || chunk.buildings) || [];
+            const matchSignature = toSafeArray(matches).map(match => [match && match.id || "", getWallOpeningCollisionSignature(match && match.entry)].join(":")).join("|");
+            return [baseSignature, toSafeArray(buildings).length, matchSignature].join("::");
+        }
+
         function buildWorldCollisionStaticCache(chunks) {
             const cache = {
                 buildingPolygons: [],
@@ -5489,7 +5525,22 @@
                 customFallbackPolygons: [],
                 tunnelWallSegments: []
             };
+            const state = getWorldCollisionState();
             for (const chunk of toSafeArray(chunks)) {
+                if (!chunk)
+                    continue;
+                const chunkSignature = getChunkStaticCollisionSignature(chunk);
+                const cached = state.chunkStaticCaches.get(chunk);
+                if (cached && cached.signature === chunkSignature && cached.cache) {
+                    appendWorldCollisionStaticCache(cache, cached.cache);
+                    continue;
+                }
+                const chunkCache = {
+                    buildingPolygons: [],
+                    customWallSegments: [],
+                    customFallbackPolygons: [],
+                    tunnelWallSegments: []
+                };
                 const tunnelEdges = toSafeArray(chunk && chunk.newRoadGraph && chunk.newRoadGraph.edges);
                 for (const edge of tunnelEdges) {
                     if (!edge || Number(edge.layer) >= 0)
@@ -5519,7 +5570,7 @@
                                 radius: 1.15
                             };
                             segment.bounds = getSegmentBounds2D(segment.start, segment.end, 170);
-                            cache.tunnelWallSegments.push(segment);
+                            chunkCache.tunnelWallSegments.push(segment);
                         }
                     }
                 }
@@ -5532,7 +5583,7 @@
                     const points = getMatchCollisionWorldFootprint(match, chunk);
                     if (points.length >= 3) {
                         building && customBuildings.add(building);
-                        cache.buildingPolygons.push({
+                        chunkCache.buildingPolygons.push({
                             points,
                             bounds: getFootprintBounds(points),
                             custom: !0,
@@ -5546,7 +5597,7 @@
                     const offset = building && building.chunkCenter || getChunkWorldOffset(chunk);
                     const worldPoints = offsetFootprintToWorld(localPoints, offset);
                     if (!entry || !entry.__tmWallOpenings) {
-                        worldPoints.length >= 3 && cache.customFallbackPolygons.push({
+                        worldPoints.length >= 3 && chunkCache.customFallbackPolygons.push({
                             points: worldPoints,
                             bounds: getFootprintBounds(worldPoints)
                         });
@@ -5590,7 +5641,7 @@
                                 radius: .28
                             };
                             segment.bounds = getSegmentBounds2D(segment.start, segment.end, 4);
-                            cache.customWallSegments.push(segment);
+                            chunkCache.customWallSegments.push(segment);
                         }
                     }
                 }
@@ -5598,7 +5649,7 @@
                     if (!building || customBuildings.has(building))
                         continue;
                     const points = getBuildingWorldFootprint(building, null, chunk);
-                    points.length >= 3 && cache.buildingPolygons.push({
+                    points.length >= 3 && chunkCache.buildingPolygons.push({
                         points,
                         bounds: getFootprintBounds(points),
                         custom: !1,
@@ -5606,6 +5657,11 @@
                         chunk
                     });
                 }
+                state.chunkStaticCaches.set(chunk, {
+                    signature: chunkSignature,
+                    cache: chunkCache
+                });
+                appendWorldCollisionStaticCache(cache, chunkCache);
             }
             return cache;
         }
@@ -5615,7 +5671,7 @@
             const now = performance.now();
             const chunks = getWorldCollisionLoadedChunks();
             const signature = getWorldCollisionChunkSignature(chunks);
-            if (state.staticCache && state.staticCacheSignature === signature && now - (Number(state.staticCacheAt) || 0) < 220)
+            if (state.staticCache && state.staticCacheSignature === signature && now - (Number(state.staticCacheAt) || 0) < 420)
                 return state.staticCache;
             state.staticCache = buildWorldCollisionStaticCache(chunks);
             state.staticCacheSignature = signature;
@@ -6050,7 +6106,14 @@
         function enhanceVehicleAppearance(vehicle) {
             if (!vehicle || !vehicle.group)
                 return;
+            const now = performance.now();
+            if (vehicle.__tmAppearanceCheckedAt && now - vehicle.__tmAppearanceCheckedAt < 900)
+                return;
+            vehicle.__tmAppearanceCheckedAt = now;
+            if (!featureState.enhancedVehicles && vehicle.__tmAppearanceCleanupChecked)
+                return;
             const oldOverlays = vehicle.group.children.filter(child => child && "__tmRoundedVehicleDetails" === child.name);
+            vehicle.__tmAppearanceCleanupChecked = !featureState.enhancedVehicles && !oldOverlays.length;
             for (const overlay of oldOverlays) {
                 vehicle.group.remove(overlay);
                 disposeObject3D(overlay);
@@ -6058,20 +6121,115 @@
             vehicle.__tmAppearanceEnhanced = !1;
             if (!featureState.enhancedVehicles)
                 return;
+            vehicle.__tmAppearanceCleanupChecked = !1;
         }
 
         function isInTownArea(position) {
             if (!position)
                 return !1;
+            const px = Number(position.x) || 0;
+            const pz = Number(position.z) || 0;
             return toSafeArray(townSignsState.debugPlaces).some(place => {
-                const center = new globalState.THREE.Vector3(Number(place.center && place.center.x) || 0, 0, Number(place.center && place.center.z) || 0);
-                return getDistance2D(position, center) <= Math.max(Number(place.radius) || 0, 180) + 80;
+                const cx = Number(place.center && place.center.x) || 0;
+                const cz = Number(place.center && place.center.z) || 0;
+                return Math.hypot(px - cx, pz - cz) <= Math.max(Number(place.radius) || 0, 180) + 80;
             });
+        }
+
+        function textLooksPoliceLike(value) {
+            return /police|polizei|sheriff|patrol|cop|siren|lightbar|blaulicht/i.test(String(value || ""));
+        }
+
+        function materialLooksLikeEmergencyLight(material, type) {
+            const color = material && material.color;
+            if (!color)
+                return !1;
+            const r = Number(color.r) || 0;
+            const g = Number(color.g) || 0;
+            const b = Number(color.b) || 0;
+            return "red" === type ? r > .75 && g < .35 && b < .35 : b > .68 && r < .45 && g < .65;
+        }
+
+        function isPoliceLikeVehicle(vehicle) {
+            if (!vehicle)
+                return !1;
+            const now = performance.now();
+            if ("boolean" == typeof vehicle.__tmPoliceLike && (vehicle.__tmPoliceLike || now - (Number(vehicle.__tmPoliceLikeScanAt) || 0) < 2500))
+                return vehicle.__tmPoliceLike;
+            vehicle.__tmPoliceLikeScanAt = now;
+            const directText = [vehicle.name, vehicle.type, vehicle.kind, vehicle.vehicleType, vehicle.carType, vehicle.modelType, vehicle.mcs && vehicle.mcs.name, vehicle.group && vehicle.group.name, vehicle.cameraGroup && vehicle.cameraGroup.name].filter(Boolean).join(" ");
+            if (textLooksPoliceLike(directText))
+                return vehicle.__tmPoliceLike = !0;
+            let redLight = !1;
+            let blueLight = !1;
+            let namedMarker = !1;
+            let scanned = 0;
+            const root = vehicle.group || vehicle.cameraGroup;
+            root && root.traverse && root.traverse(node => {
+                if (scanned++ > 120 || namedMarker && redLight && blueLight)
+                    return;
+                namedMarker || (namedMarker = textLooksPoliceLike(node.name || node.userData && (node.userData.type || node.userData.kind)));
+                if (!node || !node.material || Number(node.position && node.position.y) < .95)
+                    return;
+                const materials = Array.isArray(node.material) ? node.material : [node.material];
+                for (const material of materials) {
+                    redLight || (redLight = materialLooksLikeEmergencyLight(material, "red"));
+                    blueLight || (blueLight = materialLooksLikeEmergencyLight(material, "blue"));
+                }
+            });
+            return vehicle.__tmPoliceLike = !!(namedMarker || redLight && blueLight);
+        }
+
+        function getVehicleFlatPosition(vehicle) {
+            if (!vehicle)
+                return null;
+            try {
+                if ("function" == typeof vehicle.getPosition) {
+                    const position = vehicle.getPosition();
+                    if (position)
+                        return position;
+                }
+            } catch (positionError) {}
+            return vehicle.cameraGroup && vehicle.cameraGroup.position || vehicle.group && vehicle.group.position || null;
+        }
+
+        function setVehicleFlatPosition(vehicle, position) {
+            if (!vehicle || !position)
+                return;
+            const target = vehicle.cameraGroup && vehicle.cameraGroup.position || vehicle.group && vehicle.group.position;
+            if (!target)
+                return;
+            target.x = Number(position.x) || 0;
+            target.z = Number(position.z) || 0;
+        }
+
+        function applyPoliceVehicleHillHold(resolver, aiId, aiCar, previousPosition) {
+            if (!resolver || !aiCar || !previousPosition || !isPoliceLikeVehicle(aiCar))
+                return;
+            const player = getPlayerCar();
+            const playerPos = player && getVehicleFlatPosition(player);
+            if (!playerPos || speedAbs(player.speed) > 1.4 || getDistance2D(playerPos, previousPosition) > 90)
+                return;
+            const currentPosition = getVehicleFlatPosition(aiCar);
+            if (!currentPosition)
+                return;
+            const aiSpeed = speedAbs((resolver.speeds && resolver.speeds[aiId]) ?? aiCar.speed);
+            const moved = getDistance2D(previousPosition, currentPosition);
+            if (aiSpeed > 1.8 || moved > 1.45)
+                return;
+            setVehicleFlatPosition(aiCar, previousPosition);
+            setAiSpeed(resolver, aiId, aiCar, 0);
+            resolver.freezeStates && (resolver.freezeStates[aiId] = Math.max(Number(resolver.freezeStates[aiId]) || 0, 12));
+            "function" == typeof aiCar.resetAcc && aiCar.resetAcc();
         }
 
         function applyTrafficEnvironmentPolicy(resolver, aiId, aiCar) {
             if (!resolver || !aiCar || !townSignsState.roadModule)
                 return;
+            const now = performance.now();
+            if (aiCar.__tmTrafficPolicyAt && now - aiCar.__tmTrafficPolicyAt < 450)
+                return;
+            aiCar.__tmTrafficPolicyAt = now;
             const road = resolver.carPaths && resolver.carPaths[aiId] && resolver.carPaths[aiId].pathSegments && resolver.carPaths[aiId].pathSegments[0] && resolver.carPaths[aiId].pathSegments[0].road;
             const rm = townSignsState.roadModule;
             let maxKmh = 70;
@@ -6483,9 +6641,14 @@
             panel.style.display = visible ? "block" : "none";
             const percent = Math.min(120, Math.round(damage));
             const ratio = clamp(damage / 100, 0, 1);
-            const value = panel.querySelector('[data-role="value"]');
-            const bar = panel.querySelector('[data-role="bar"]');
-            const state = panel.querySelector('[data-role="state"]');
+            const nodes = panel.__tmDamageNodes || (panel.__tmDamageNodes = {
+                value: panel.querySelector('[data-role="value"]'),
+                bar: panel.querySelector('[data-role="bar"]'),
+                state: panel.querySelector('[data-role="state"]')
+            });
+            const value = nodes.value;
+            const bar = nodes.bar;
+            const state = nodes.state;
             value && (value.textContent = `${percent}%`);
             if (bar) {
                 bar.style.width = `${Math.min(100, percent)}%`;
@@ -6597,7 +6760,7 @@
 
         function updateVehicleDamageVisuals(dtSeconds) {
             const car = getPlayerCar();
-            syncVehicleDamageDisplay(car);
+            shouldRunRuntimeTask("vehicleDamageDisplay", 180) && syncVehicleDamageDisplay(car);
             if (!car)
                 return;
             const group = ensureVehicleDamageVisuals(car);
@@ -6622,9 +6785,14 @@
                     puff.position.x = 1.1 + Math.sin(time * 1.7 + index) * .13 + index * .055;
                     puff.position.z = -.18 + Math.cos(time * 1.35 + index) * .16;
                     puff.scale.setScalar(.2 + ratio * .28 + wave * .1);
-                    puff.traverse && puff.traverse(node => {
-                        node.material && (node.material.opacity = clamp(.035 + ratio * .13 - wave * .06 + (node.position.length ? node.position.length() : 0) * .025, .015, .22));
-                    });
+                    const materials = puff.userData.opacityMaterials || (puff.userData.opacityMaterials = []);
+                    if (!materials.length && puff.traverse)
+                        puff.traverse(node => node.material && materials.push({
+                            material: node.material,
+                            offset: node.position && node.position.length ? node.position.length() : 0
+                        }));
+                    for (const item of materials)
+                        item.material.opacity = clamp(.035 + ratio * .13 - wave * .06 + item.offset * .025, .015, .22);
                 }
             }
             const sparks = group.userData.sparks;
@@ -6797,9 +6965,17 @@
             const overlay = ensureRuntimeOverlayGroup();
             if (!overlay || !featureState.shops)
                 return;
-            for (const chunk of getLoadedChunks())
+            const chunks = getLoadedChunks();
+            for (const chunk of chunks)
                 queuePoiFetch(chunk);
-            const existing = new Set(runtimeState.overlayItems.filter(item => item.kind === "poi").map(item => item.key));
+            const poiCounts = Array.from(runtimeState.poiCache, ([key, pois]) => `${key}:${toSafeArray(pois).length}`).sort();
+            const expectedPoiCount = poiCounts.reduce((count, entry) => count + (Number(entry.split(":").pop()) || 0), 0);
+            const signature = `${chunks.map(chunkPoiKey).sort().join("|")}::${poiCounts.join("|")}`;
+            const existingPoiItems = runtimeState.overlayItems.filter(item => item.kind === "poi");
+            if (runtimeState.poiOverlaySignature === signature && existingPoiItems.length >= expectedPoiCount)
+                return;
+            runtimeState.poiOverlaySignature = signature;
+            const existing = new Set(existingPoiItems.map(item => item.key));
             for (const [chunkKey, pois] of runtimeState.poiCache)
                 for (let index = 0; index < pois.length; index++) {
                     const key = `${chunkKey}:${index}`;
@@ -7016,8 +7192,13 @@
         }
 
         function getAirportEntries() {
+            const chunks = getLoadedChunks();
+            const signature = getWorldCollisionChunkSignature(chunks);
+            const now = performance.now();
+            if (Array.isArray(runtimeState.airportEntryCache) && runtimeState.airportEntrySignature === signature && now - (Number(runtimeState.airportEntryCacheAt) || 0) < 1800)
+                return runtimeState.airportEntryCache;
             const airports = [];
-            for (const chunk of getLoadedChunks()) {
+            for (const chunk of chunks) {
                 if (!chunk || !chunk.aerowayGraph || !chunk.centerVec)
                     continue;
                 const edges = toSafeArray(chunk.aerowayGraph.edges);
@@ -7048,6 +7229,9 @@
                 }
             }
             runtimeState.airports = airports;
+            runtimeState.airportEntryCache = airports;
+            runtimeState.airportEntrySignature = signature;
+            runtimeState.airportEntryCacheAt = now;
             return airports;
         }
 
@@ -7256,9 +7440,9 @@
                 group.userData.lights[index].visible = index === group.userData.lights.length - 1 || flash === index % 2;
         }
 
-        function createAirportOverlay(airport) {
+        function createAirportOverlay(airport, existingKeys) {
             const overlay = ensureRuntimeOverlayGroup();
-            if (!overlay || runtimeState.overlayItems.some(item => item.kind === "airport" && item.key === airport.key))
+            if (!overlay || existingKeys && existingKeys.has(airport.key) || !existingKeys && runtimeState.overlayItems.some(item => item.kind === "airport" && item.key === airport.key))
                 return;
             const group = new globalState.THREE.Group;
             group.name = `__tmAirport:${airport.key}`;
@@ -7278,6 +7462,7 @@
                 position: base,
                 data: airport
             });
+            existingKeys && existingKeys.add(airport.key);
             const types = ["passenger", "jet", "prop", "helicopter"];
             for (let index = 0; index < types.length; index++) {
                 const aircraft = createAircraftModel(types[index]);
@@ -7300,14 +7485,21 @@
                         airborne: !1
                     }
                 });
+                existingKeys && existingKeys.add(`${airport.key}:parked:${index}`);
             }
         }
 
         function ensureAirportSystems() {
             if (!featureState.aircraft)
                 return;
-            for (const airport of getAirportEntries())
-                createAirportOverlay(airport);
+            const airports = getAirportEntries();
+            const signature = airports.map(airport => airport.key).sort().join("|");
+            const existingKeys = new Set(runtimeState.overlayItems.filter(item => item && ("airport" === item.kind || "aircraft" === item.kind)).map(item => item.key));
+            if (runtimeState.airportOverlaySignature === signature && existingKeys.size >= airports.length * 5)
+                return;
+            for (const airport of airports)
+                createAirportOverlay(airport, existingKeys);
+            runtimeState.airportOverlaySignature = signature;
         }
 
         function maybeSpawnBotAircraft() {
@@ -7598,10 +7790,11 @@
             const playerPos = getPlayerPosition();
             if (!overlay || !playerPos)
                 return;
+            const existingKeys = new Set(runtimeState.overlayItems.map(item => item && item.key).filter(Boolean));
             if (featureState.birds) {
                 for (const chunk of getLoadedChunks()) {
                     const key = `birds:${chunkPoiKey(chunk)}`;
-                    if (runtimeState.overlayItems.some(item => item.key === key))
+                    if (existingKeys.has(key))
                         continue;
                     if (seededUnit(chunk.cx + chunk.cz, 21) < .42)
                         continue;
@@ -7614,12 +7807,15 @@
                         group: flock,
                         position: center
                     });
+                    existingKeys.add(key);
                 }
             }
             if (featureState.bees) {
-                for (const item of runtimeState.overlayItems.filter(item => item.kind === "poi" && item.type === "apiary")) {
+                for (const item of runtimeState.overlayItems) {
+                    if (!item || item.kind !== "poi" || item.type !== "apiary")
+                        continue;
                     const key = `bees:${item.key}`;
-                    if (runtimeState.overlayItems.some(existing => existing.key === key))
+                    if (existingKeys.has(key))
                         continue;
                     const bees = createBeeSwarm(item.position, item.position.x + item.position.z);
                     bees.position.copy(item.position);
@@ -7630,6 +7826,7 @@
                         group: bees,
                         position: item.position
                     });
+                    existingKeys.add(key);
                 }
             }
         }
@@ -7641,12 +7838,18 @@
             if (!playerPos)
                 return;
             runtimeState.overlayTick += dtSeconds;
+            runtimeState.overlayVisibilityAccumulator = (Number(runtimeState.overlayVisibilityAccumulator) || 0) + Math.max(.001, Number(dtSeconds) || .016);
+            const refreshVisibility = runtimeState.overlayVisibilityAccumulator >= .22;
+            refreshVisibility && (runtimeState.overlayVisibilityAccumulator = 0);
             for (const item of runtimeState.overlayItems) {
                 if (!item.group || !item.position)
                     continue;
-                const distance = getDistance2D(playerPos, item.group.position || item.position);
-                const limit = item.kind === "airport" || item.kind === "aircraft" ? 6500 : item.kind === "birds" ? 1800 : 900;
-                item.group.visible = !featureState.overlays || distance <= limit || item.data && item.data.active;
+                if (refreshVisibility || "boolean" != typeof item.__tmVisibleByDistance) {
+                    const distance = getDistance2D(playerPos, item.group.position || item.position);
+                    const limit = item.kind === "airport" || item.kind === "aircraft" ? 6500 : item.kind === "birds" ? 1800 : 900;
+                    item.__tmVisibleByDistance = !featureState.overlays || distance <= limit || item.data && item.data.active;
+                }
+                item.group.visible = item.__tmVisibleByDistance;
                 if (!item.group.visible)
                     continue;
                 if (item.kind === "birds") {
@@ -7704,8 +7907,10 @@
 
         function updateCustomBuildingDoors(dtSeconds) {
             if (!isAny3dBuildingFeatureEnabled()) {
-                runtimeState.customBuildingDoorItems = [];
-                runtimeState.customBuildingDoorAccumulator = 0;
+                if (runtimeState.customBuildingDoorItems.length || runtimeState.customBuildingDoorAccumulator) {
+                    runtimeState.customBuildingDoorItems = [];
+                    runtimeState.customBuildingDoorAccumulator = 0;
+                }
                 return;
             }
             if (!runtimeState.customBuildingDoorItems.length)
@@ -7782,25 +7987,33 @@
 
         function updateRuntimeSystems(game, dtSeconds) {
             runtimeState.game = game || runtimeState.game;
-            runInternalModule("featureMenuUi", (() => ensureFeatureMenu(game)), null, "Feature-Menue");
-            runFeatureModule("vehicleTuning", ensureVehicleTuningHotkey, null, "Vehicle tuning hotkey");
-            runInternalModule("featureMenuUi", ensureRuntimeInputHandlers, null, "Input-Handler");
+            shouldRunRuntimeTask("featureMenuUi", 700) && runInternalModule("featureMenuUi", (() => ensureFeatureMenu(game)), null, "Feature-Menue");
+            shouldRunRuntimeTask("vehicleTuningHotkey", 1200) && runFeatureModule("vehicleTuning", ensureVehicleTuningHotkey, null, "Vehicle tuning hotkey");
+            runtimeState.controlsPatched || runInternalModule("featureMenuUi", ensureRuntimeInputHandlers, null, "Input-Handler");
             const dt = Math.min(.08, Math.max(.001, Number(dtSeconds) || .016));
-            runInternalModule("autopilotRouting", updateAutopilotMapSelection, null, "Autopilot-Map");
-            runFeatureModule("shops", rebuildPoiOverlays, null, "POI overlays");
-            runFeatureModule("aircraft", ensureAirportSystems, null, "Airport systems");
-            runFeatureModule("aircraft", (() => updateBotAircraft(dt)), null, "Bot aircraft");
-            runInternalModule("wildlifeRuntime", ensureWildlife, null, "Wildlife runtime");
-            runFeatureModule("navigation", updateNaviGuidance, null, "Navi guidance");
-            runFeatureModule("aircraft", (() => updateActiveAircraft(dt)), null, "Active aircraft");
-            runFeatureModule("aircraft", (() => updateProjectiles(dt)), null, "Aircraft projectiles");
-            runInternalModule("overlayRuntime", (() => updateOverlayCullingAndAnimation(dt)), null, "Overlay runtime");
-            runInternalModule("customBuildingDoors", (() => updateCustomBuildingDoors(dt)), null, "Custom-building doors");
-            runInternalModule("worldCollision", updateWorldHitboxCollisions, null, "World hitboxes");
-            runFeatureModule("police", (() => updatePolice(dt)), null, "Police update");
-            runFeatureModule("survival", (() => updateSurvival(dt)), null, "Survival update");
-            runInternalModule("hardStartFlow", updateHardStartLock, null, "Hard start lock");
-            runFeatureModule("vehicleDamage", (() => updateVehicleDamageVisuals(dt)), null, "Vehicle damage visuals");
+            const autopilotState = getAutopilotState();
+            (autopilotState.enabled || autopilotState.pendingMapSelection) && runInternalModule("autopilotRouting", updateAutopilotMapSelection, null, "Autopilot-Map");
+            shouldRunRuntimeTask("poiOverlays", 900) && runFeatureModule("shops", rebuildPoiOverlays, null, "POI overlays");
+            shouldRunRuntimeTask("airportSystems", 1400) && runFeatureModule("aircraft", ensureAirportSystems, null, "Airport systems");
+            (runtimeState.botAircraft && runtimeState.botAircraft.length || shouldRunRuntimeTask("botAircraftSpawn", 950)) && runFeatureModule("aircraft", (() => updateBotAircraft(dt)), null, "Bot aircraft");
+            shouldRunRuntimeTask("wildlifeRuntime", 1200) && runInternalModule("wildlifeRuntime", ensureWildlife, null, "Wildlife runtime");
+            shouldRunRuntimeTask("navigationGuidance", 120) && runFeatureModule("navigation", updateNaviGuidance, null, "Navi guidance");
+            runtimeState.activeAircraft && runFeatureModule("aircraft", (() => updateActiveAircraft(dt)), null, "Active aircraft");
+            runtimeState.projectileModels.length && runFeatureModule("aircraft", (() => updateProjectiles(dt)), null, "Aircraft projectiles");
+            runtimeState.overlayItems.length && runInternalModule("overlayRuntime", (() => updateOverlayCullingAndAnimation(dt)), null, "Overlay runtime");
+            (runtimeState.customBuildingDoorItems.length || isAny3dBuildingFeatureEnabled()) && runInternalModule("customBuildingDoors", (() => updateCustomBuildingDoors(dt)), null, "Custom-building doors");
+            featureState.collisionHook && runInternalModule("worldCollision", updateWorldHitboxCollisions, null, "World hitboxes");
+            (runtimeState.policeCars.length || runtimeState.policeState) && updatePolice(dt);
+            if (featureState.survival) {
+                runtimeState.survivalUpdateAccumulator = (Number(runtimeState.survivalUpdateAccumulator) || 0) + dt;
+                if (runtimeState.survivalUpdateAccumulator >= .25) {
+                    const survivalDt = Math.min(1.5, runtimeState.survivalUpdateAccumulator);
+                    runtimeState.survivalUpdateAccumulator = 0;
+                    runFeatureModule("survival", (() => updateSurvival(survivalDt)), null, "Survival update");
+                }
+            }
+            runtimeState.hardStartLocked && runInternalModule("hardStartFlow", updateHardStartLock, null, "Hard start lock");
+            featureState.vehicleDamage && runFeatureModule("vehicleDamage", (() => updateVehicleDamageVisuals(dt)), null, "Vehicle damage visuals");
             runtimeState.input.fire = !1;
         }
 
@@ -8107,7 +8320,7 @@
             const timer = setTimeout((() => {
                 runtimeState.visualRefreshTimers.delete(chunk);
                 try {
-                    invalidateWorldCollisionCache();
+                    invalidateWorldCollisionCacheForChunk(chunk);
                     enhanceTerrainMesh(chunk);
                     enhanceRoadMeshes(chunk);
                     rebuildTunnelBridgeOverlay(chunk);
@@ -8759,6 +8972,8 @@
 
         function applyOriginalBuildingMeshVisibilityForChunk(chunk) {
             const visible = !shouldHideOriginalBuildingMeshesForChunk(chunk);
+            if (chunk && chunk.__tmOriginalBuildingMeshesVisible === visible)
+                return;
             for (const mesh of getOriginalBuildingMeshesForChunk(chunk)) {
                 if (!mesh)
                     continue;
@@ -8767,6 +8982,7 @@
                     child.visible = visible;
                 }));
             }
+            chunk && (chunk.__tmOriginalBuildingMeshesVisible = visible);
         }
 
         function markOriginalBuildingMesh(factory, object) {
@@ -8810,6 +9026,7 @@
                     group.add = originalAdd;
                     for (const object of captured)
                         markOriginalBuildingMesh(this, object);
+                    this.__tmOwnerChunk && (this.__tmOwnerChunk.__tmOriginalBuildingMeshesVisible = null);
                     this.__tmOwnerChunk && applyOriginalBuildingMeshVisibilityForChunk(this.__tmOwnerChunk);
                 }
             };
@@ -8819,7 +9036,7 @@
         function resetCustomBuildingPreparationForChunk(chunk) {
             if (!chunk)
                 return;
-            invalidateWorldCollisionCache();
+            invalidateWorldCollisionCacheForChunk(chunk);
             if (chunk.__tmOriginalCustomBuildings)
                 chunk.custome_buildings = cloneJson(chunk.__tmOriginalCustomBuildings, []);
             if (Array.isArray(chunk.__tmOriginalBuildings))
@@ -8830,6 +9047,7 @@
             chunk.__tmMatchedCustomBuildings = [];
             chunk.__tmCustomBuildingOverlayReady = !1;
             runtimeState.customBuildingEntriesByChunk.delete(chunk);
+            chunk.__tmOriginalBuildingMeshesVisible = null;
             applyOriginalBuildingMeshVisibilityForChunk(chunk);
         }
 
@@ -11541,7 +11759,7 @@
                 chunk.__tmCustomBuildingOverlayReady = !1;
                 runtimeState.customBuildingEntriesByChunk.set(chunk, matched);
                 applyOriginalBuildingMeshVisibilityForChunk(chunk);
-                invalidateWorldCollisionCache();
+                invalidateWorldCollisionCacheForChunk(chunk);
                 return matched;
             }
             const addCustomBuildingMatch = (id, entry, building, options={}) => {
@@ -11593,7 +11811,7 @@
             chunk.__tmCustomBuildingOverlayReady = !1;
             runtimeState.customBuildingEntriesByChunk.set(chunk, matched);
             applyOriginalBuildingMeshVisibilityForChunk(chunk);
-            invalidateWorldCollisionCache();
+            invalidateWorldCollisionCacheForChunk(chunk);
             log(`3D-Haeuser vorbereitet fuer Chunk ${chunk.cx}/${chunk.cz}: ${matched.length} ersetzt, ${chunk.buildings.length} PNG-Haeuser bleiben.`);
             return matched;
         }
@@ -11638,12 +11856,25 @@
             return runtimeState.customBuildingPriorityTargets.some((entry => entry && entry.position && getDistance2D(center, entry.position) <= 1800));
         }
 
+        function needsCustomBuildingChunkWork(chunk) {
+            if (!chunk || !isAny3dBuildingFeatureEnabled())
+                return !1;
+            if (!chunk.__tmCustomBuildingsPrepared)
+                return !0;
+            const matches = chunk.__tmMatchedCustomBuildings || runtimeState.customBuildingEntriesByChunk.get(chunk) || [];
+            if (!toSafeArray(matches).length)
+                return !1;
+            const overlay = runtimeState.chunkCustomOverlayGroups.get(chunk);
+            const signature = getCustomBuildingOverlaySignature(matches);
+            return !(overlay && overlay.parent === chunk.group && overlay.userData && overlay.userData.tmBuildSignature === signature && chunk.__tmCustomBuildingOverlayReady);
+        }
+
         async function prepareCustomBuildingsForChunks(chunks, reason) {
             if (!isAny3dBuildingFeatureEnabled()) {
                 clearCustomBuildingVisualsForLoadedChunks();
                 return;
             }
-            const unique = Array.from(new Set(toSafeArray(chunks).filter(Boolean)));
+            const unique = Array.from(new Set(toSafeArray(chunks).filter(Boolean))).filter(needsCustomBuildingChunkWork);
             if (!unique.length)
                 return;
             const showProgress = featureState.customBuildings || "address" === reason;
@@ -11721,7 +11952,7 @@
             if (!matches.length || !isAny3dBuildingFeatureEnabled()) {
                 overlay.parent && overlay.parent.remove(overlay);
                 applyOriginalBuildingMeshVisibilityForChunk(chunk);
-                invalidateWorldCollisionCache();
+                invalidateWorldCollisionCacheForChunk(chunk);
                 return;
             }
             let builtCount = 0;
@@ -11739,7 +11970,7 @@
             if (!builtCount) {
                 overlay.parent && overlay.parent.remove(overlay);
                 applyOriginalBuildingMeshVisibilityForChunk(chunk);
-                invalidateWorldCollisionCache();
+                invalidateWorldCollisionCacheForChunk(chunk);
                 return;
             }
             try {
@@ -11752,11 +11983,11 @@
             collectCustomBuildingDoorsForChunk(chunk, overlay);
             chunk.__tmCustomBuildingOverlayReady = !0;
             applyOriginalBuildingMeshVisibilityForChunk(chunk);
-            invalidateWorldCollisionCache();
+            invalidateWorldCollisionCacheForChunk(chunk);
         }
 
         function cleanupChunkCustomVisuals(chunk) {
-            invalidateWorldCollisionCache();
+            invalidateWorldCollisionCacheForChunk(chunk);
             const overlay = chunk && runtimeState.chunkCustomOverlayGroups.get(chunk);
             if (overlay) {
                 overlay.parent && overlay.parent.remove(overlay);
@@ -12073,6 +12304,11 @@
                     const originalUpdateCar = trafficProto.updateCar;
                     trafficProto.updateCar = function(dt, aiId) {
                         const aiCar = this.carMaps && this.carMaps.get(aiId);
+                        const previousPolicePosition = aiCar && isPoliceLikeVehicle(aiCar) && getVehicleFlatPosition(aiCar);
+                        const previousPolicePositionClone = previousPolicePosition && previousPolicePosition.clone ? previousPolicePosition.clone() : previousPolicePosition ? {
+                            x: previousPolicePosition.x,
+                            z: previousPolicePosition.z
+                        } : null;
                         if (aiCar && aiCar.__tmPathRecoverState)
                             try {
                                 return updateAiPathRecover(this, aiId, aiCar, dt);
@@ -12090,6 +12326,7 @@
                         if (aiCar && !aiCar.__tmImpactState) {
                             enhanceVehicleAppearance(aiCar);
                             applyTrafficEnvironmentPolicy(this, aiId, aiCar);
+                            applyPoliceVehicleHillHold(this, aiId, aiCar, previousPolicePositionClone);
                         }
                         if (aiCar && aiCar.__tmImpactState)
                             try {
@@ -12175,12 +12412,10 @@
                             return result;
                         }
                         const previousSpeed = Number(this.speed) || 0;
-                        const previousPosition = this.cameraGroup && this.cameraGroup.position && this.cameraGroup.position.clone ? this.cameraGroup.position.clone() : null;
                         runInternalModule("vehicleTuningHandling", (() => applyExtendedVehicleControls(this, dtSeconds)), null, "Erweiterte Fahrzeugsteuerung");
                         runFeatureModule("enhancedVehicles", (() => enhanceVehicleAppearance(this)), null, "Enhanced vehicle appearance");
                         const result = originalMoveGroup.apply(this, arguments);
                         runInternalModule("vehicleTuningHandling", (() => applyExtendedVehicleControls(this, dtSeconds)), null, "Erweiterte Fahrzeugsteuerung");
-                        runInternalModule("vehicleTuningHandling", (() => applyStoppedVehicleHillHold(this, previousPosition)), null, "Stand-Hold gegen Hangrollen");
                         runInternalModule("vehicleTuningHandling", (() => applyVehicleTuning(this, dtSeconds, previousSpeed)), null, "Vehicle tuning handling");
                         runFeatureModule("autopilot", (() => applyAutopilotToCar(this, dtSeconds)), !1, "Autopilot drive");
                         return result;
