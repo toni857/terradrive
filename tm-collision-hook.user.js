@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.1.7.0
+// @version      2.1.7.6
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -199,7 +199,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.1.7.0",
+            version: "2.1.7.6",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -446,7 +446,8 @@
             customBuildingAddressCache: new Map,
             customBuildingDoorItems: [],
             customBuildingProgress: null,
-            customBuildingPriorityTargets: []
+            customBuildingPriorityTargets: [],
+            worldCollisionState: null
         });
         const vehicleTuningState = globalThis.__tmVehicleTuningState || (globalThis.__tmVehicleTuningState = {
             installed: !1,
@@ -485,13 +486,29 @@
             faults: {}
         });
 
+        function readCookieValue(name) {
+            const prefix = `${name}=`;
+            const cookie = document.cookie.split(";").map((part => part.trim())).find((part => part.startsWith(prefix)));
+            return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : "";
+        }
+
+        function getFeatureStateSnapshot() {
+            const snapshot = {};
+            for (const key of Object.keys(featureState))
+                snapshot[key] = !!featureState[key];
+            return snapshot;
+        }
+
         function loadFeatureStateFromCookies() {
             try {
-                const cookieValue = document.cookie.split(';').find(c => c.trim().startsWith('tmFeatures='));
-                if (cookieValue) {
-                    const features = JSON.parse(decodeURIComponent(cookieValue.split('=')[1]));
-                    Object.assign(featureState, features);
-                }
+                const cookieValue = readCookieValue("tmFeatures");
+                if (!cookieValue)
+                    return;
+                const features = JSON.parse(cookieValue);
+                if (!features || "object" != typeof features || Array.isArray(features))
+                    return;
+                for (const key of Object.keys(featureState))
+                    key in features && (featureState[key] = !!features[key]);
             } catch (e) {
                 console.warn('[TM] Failed to load feature state from cookies:', e);
             }
@@ -501,7 +518,7 @@
             try {
                 const expires = new Date();
                 expires.setFullYear(expires.getFullYear() + 1);
-                document.cookie = `tmFeatures=${encodeURIComponent(JSON.stringify(featureState))}; expires=${expires.toUTCString()}; path=/`;
+                document.cookie = `tmFeatures=${encodeURIComponent(JSON.stringify(getFeatureStateSnapshot()))}; expires=${expires.toUTCString()}; path=/`;
             } catch (e) {
                 console.warn('[TM] Failed to save feature state to cookies:', e);
             }
@@ -509,11 +526,11 @@
 
         function loadFeatureFaultStateFromCookies() {
             try {
-                const cookieValue = document.cookie.split(';').find(c => c.trim().startsWith('tmFeatureFaults='));
-                if (cookieValue) {
-                    const faults = JSON.parse(decodeURIComponent(cookieValue.split('=').slice(1).join('=')));
-                    featureFaultState.faults = faults && "object" == typeof faults ? faults : {};
-                }
+                const cookieValue = readCookieValue("tmFeatureFaults");
+                if (!cookieValue)
+                    return;
+                const faults = JSON.parse(cookieValue);
+                featureFaultState.faults = faults && "object" == typeof faults && !Array.isArray(faults) ? faults : {};
             } catch (e) {
                 console.warn('[TM] Failed to load feature fault state from cookies:', e);
             }
@@ -553,6 +570,16 @@
             customBuildingDoorItems: Array.isArray(runtimeState.customBuildingDoorItems) ? runtimeState.customBuildingDoorItems : [],
             customBuildingProgress: runtimeState.customBuildingProgress || null,
             customBuildingPriorityTargets: Array.isArray(runtimeState.customBuildingPriorityTargets) ? runtimeState.customBuildingPriorityTargets : [],
+            worldCollisionState: Object.assign({
+                loadedChunks: [],
+                loadedChunksAt: 0,
+                staticCache: null,
+                staticCacheSignature: "",
+                staticCacheAt: 0,
+                lastHumanCollisionAt: 0,
+                chunkIdCounter: 0,
+                chunkIds: new WeakMap
+            }, runtimeState.worldCollisionState && "object" == typeof runtimeState.worldCollisionState ? runtimeState.worldCollisionState : {}),
             moduleDisables: runtimeState.moduleDisables && "object" == typeof runtimeState.moduleDisables ? runtimeState.moduleDisables : {},
             moduleFaults: runtimeState.moduleFaults && "object" == typeof runtimeState.moduleFaults ? runtimeState.moduleFaults : {},
             autopilot: Object.assign({
@@ -668,6 +695,10 @@
             vehicleTuningHandling: {
                 label: "Vehicle tuning handling",
                 feature: "vehicleTuning"
+            },
+            worldCollision: {
+                label: "World hitboxes",
+                feature: "collisionHook"
             },
             autopilotRouting: {
                 label: "Autopilot routing",
@@ -1997,13 +2028,6 @@
             return out.multiplyScalar(1 / points.length);
         }
 
-        function getEdgeWorldPoints(edge) {
-            const center = edge && edge.chunk && edge.chunk.centerVec;
-            if (!edge || !edge.points || !center)
-                return [];
-            return edge.points.map(point => point.clone().add(center));
-        }
-
         let runtimeRoadEdgeId = 0;
 
         function getRoadEdgeId(edge) {
@@ -2863,6 +2887,31 @@
             return Object.values(townSignsState.chunkManager && townSignsState.chunkManager.loadedChunks || {}).filter(Boolean);
         }
 
+        function getWorldCollisionState() {
+            runtimeState.worldCollisionState && "object" == typeof runtimeState.worldCollisionState || (runtimeState.worldCollisionState = {});
+            runtimeState.worldCollisionState.chunkIds instanceof WeakMap || (runtimeState.worldCollisionState.chunkIds = new WeakMap);
+            return runtimeState.worldCollisionState;
+        }
+
+        function invalidateWorldCollisionCache() {
+            const state = getWorldCollisionState();
+            state.loadedChunks = [];
+            state.loadedChunksAt = 0;
+            state.staticCache = null;
+            state.staticCacheSignature = "";
+            state.staticCacheAt = 0;
+        }
+
+        function getWorldCollisionLoadedChunks() {
+            const state = getWorldCollisionState();
+            const now = performance.now();
+            if (Array.isArray(state.loadedChunks) && now - (Number(state.loadedChunksAt) || 0) < 160)
+                return state.loadedChunks;
+            state.loadedChunks = getLoadedChunks();
+            state.loadedChunksAt = now;
+            return state.loadedChunks;
+        }
+
         function seededUnit(seed, salt=0) {
             const base = Number(seed) || 0;
             const value = Math.sin(12.9898 * (base + 1) + 78.233 * (salt + 1)) * 43758.5453;
@@ -3547,18 +3596,18 @@
             if (!car)
                 return;
             const tuningActive = featureState.vehicleTuning && vehicleTuningState.active;
-            const handlingBoost = tuningActive ? 1.85 : 1;
-            const leftStrength = ((runtimeState.input.slowLeft ? .65 : 0) + (runtimeState.input.fastLeft ? 2.8 : 0)) * handlingBoost;
-            const rightStrength = ((runtimeState.input.slowRight ? .65 : 0) + (runtimeState.input.fastRight ? 2.8 : 0)) * handlingBoost;
+            const handlingBoost = tuningActive ? 1.22 : 1;
+            const leftStrength = ((runtimeState.input.slowLeft ? .65 : 0) + (runtimeState.input.fastLeft ? 2.15 : 0)) * handlingBoost;
+            const rightStrength = ((runtimeState.input.slowRight ? .65 : 0) + (runtimeState.input.fastRight ? 2.15 : 0)) * handlingBoost;
             const steer = Math.sign(leftStrength - rightStrength);
             if (steer) {
                 const maxAngle = Number(car.mcs && car.mcs.maxSteeringAngle) || .5;
-                car.delayMode = Math.max(tuningActive ? .025 : .12, Math.min(tuningActive ? 2.2 : 2.2, Math.abs(leftStrength - rightStrength)));
+                car.delayMode = Math.max(tuningActive ? .08 : .12, Math.min(tuningActive ? 1.35 : 2.2, Math.abs(leftStrength - rightStrength)));
                 if (typeof car.setSteeringTarget === "function")
-                    car.setSteeringTarget(steer * (tuningActive ? 2.2 : 1));
+                    car.setSteeringTarget(steer * (tuningActive ? 1.25 : 1));
                 else
-                    car.steeringTarget = steer * maxAngle * (tuningActive ? 2.25 : 1);
-                tuningActive && "number" == typeof car.steeringAngle && (car.steeringAngle = clamp(Number(car.steeringAngle) + steer * (Number(dtSeconds) || .016) * maxAngle * 4.8, -maxAngle * 2.15, maxAngle * 2.15));
+                    car.steeringTarget = steer * maxAngle * (tuningActive ? 1.28 : 1);
+                tuningActive && "number" == typeof car.steeringAngle && (car.steeringAngle = clamp(Number(car.steeringAngle) + steer * (Number(dtSeconds) || .016) * maxAngle * 1.65, -maxAngle * 1.22, maxAngle * 1.22));
             }
             if (runtimeState.input.fullBrake) {
                 if (typeof car.toBreak === "function")
@@ -3577,11 +3626,12 @@
                 return;
             const dt = Math.max(1e-3, Number(dtSeconds) || 0);
             const steeringValue = Number(car.steeringTarget) || Number(car.steeringAngle) || 0;
-            const steerInput = Math.sign(steeringValue);
             const steerMagnitude = clamp(Math.abs(steeringValue) / Math.max(.2, Number(car.mcs && car.mcs.maxSteeringAngle) || .5), 0, 1.8);
-            const speedRatio = clamp(speedAbs(car.speed) / Math.max(12, getVehicleTuningMaxSpeedMs() * .42), 0, 1.6);
-            if (steerInput)
-                car.cameraGroup.rotation.y = normalizeAngleRad(car.cameraGroup.rotation.y + steerInput * (.42 + .92 * speedRatio) * Math.max(.45, steerMagnitude) * dt);
+            const speed = speedAbs(car.speed);
+            if (steerMagnitude > .18 && speed > 18) {
+                const gripDrag = clamp((speed - 18) / 90, 0, .18) * steerMagnitude;
+                car.speed *= Math.max(.88, 1 - gripDrag * dt);
+            }
             car.group && (car.group.rotation.z *= Math.pow(.012, dt));
         }
 
@@ -4860,6 +4910,7 @@
         }
 
         function clearCustomBuildingVisualsForLoadedChunks() {
+            invalidateWorldCollisionCache();
             const loadedChunks = getLoadedChunks();
             const loadedSet = new Set(loadedChunks);
             for (const chunk of loadedChunks) {
@@ -4887,6 +4938,7 @@
 
         function applyFeatureSideEffects(name) {
             if ("customBuildings" === name || "auto3dBuildings" === name) {
+                invalidateWorldCollisionCache();
                 for (const chunk of getLoadedChunks())
                     resetCustomBuildingPreparationForChunk(chunk);
                 if (isAny3dBuildingFeatureEnabled())
@@ -4921,8 +4973,11 @@
             } else if ("enhancedTrees" === name) {
                 notifyRuntime("Enhanced trees gelten fuer neue Chunks oder nach Reload.");
             } else if ("enhancedTerrain" === name || "enhancedRoads" === name) {
+                "enhancedRoads" === name && invalidateWorldCollisionCache();
                 for (const chunk of getLoadedChunks())
                     queueChunkVisualRefresh(chunk, `feature_${name}`);
+            } else if ("collisionHook" === name) {
+                invalidateWorldCollisionCache();
             }
         }
 
@@ -5156,6 +5211,174 @@
             return fallback;
         }
 
+        function getChunkWorldOffset(chunk) {
+            if (!globalState.THREE)
+                return null;
+            return chunk && chunk.centerVec && chunk.centerVec.clone ? chunk.centerVec.clone() : new globalState.THREE.Vector3(Number(chunk && chunk.cx) || 0,0,Number(chunk && chunk.cz) || 0);
+        }
+
+        function offsetFootprintToWorld(points, offset) {
+            const ox = Number(offset && offset.x) || 0;
+            const oz = Number(offset && offset.z) || 0;
+            return toSafeArray(points).map(point => ({
+                x: (Number(point && point.x) || 0) + ox,
+                z: (Number(point && point.z) || 0) + oz
+            })).filter(point => Number.isFinite(point.x) && Number.isFinite(point.z));
+        }
+
+        function getBuildingWorldFootprint(building, spec, chunk) {
+            const local = getBuildingFootprint(building, spec || {});
+            if (!local.length)
+                return [];
+            const offset = building && building.chunkCenter || getChunkWorldOffset(chunk);
+            return offsetFootprintToWorld(local, offset);
+        }
+
+        function getSegmentClosestPoint2D(point, start, end) {
+            const px = Number(point && point.x) || 0;
+            const pz = Number(point && point.z) || 0;
+            const ax = Number(start && start.x) || 0;
+            const az = Number(start && start.z) || 0;
+            const bx = Number(end && end.x) || 0;
+            const bz = Number(end && end.z) || 0;
+            const abx = bx - ax;
+            const abz = bz - az;
+            const lengthSq = abx * abx + abz * abz || 1;
+            const t = clamp(((px - ax) * abx + (pz - az) * abz) / lengthSq, 0, 1);
+            return {
+                x: ax + abx * t,
+                z: az + abz * t,
+                t
+            };
+        }
+
+        function getCirclePolygonSeparation(point, polygon, radius) {
+            if (!point || !Array.isArray(polygon) || polygon.length < 3)
+                return null;
+            const safeRadius = Math.max(.05, Number(radius) || .05);
+            const inside = isPointInsideFootprint(point, polygon);
+            let best = null;
+            for (let index = 0; index < polygon.length; index++) {
+                const a = polygon[index];
+                const b = polygon[(index + 1) % polygon.length];
+                const closest = getSegmentClosestPoint2D(point, a, b);
+                const distance = Math.hypot((Number(point.x) || 0) - closest.x, (Number(point.z) || 0) - closest.z);
+                if (!best || distance < best.distance)
+                    best = {
+                        distance,
+                        closest,
+                        a,
+                        b
+                    };
+            }
+            if (!best)
+                return null;
+            if (!inside && best.distance >= safeRadius)
+                return null;
+            let dx = inside ? best.closest.x - (Number(point.x) || 0) : (Number(point.x) || 0) - best.closest.x;
+            let dz = inside ? best.closest.z - (Number(point.z) || 0) : (Number(point.z) || 0) - best.closest.z;
+            let length = Math.hypot(dx, dz);
+            if (length < 1e-5) {
+                const center = getFootprintCenter(polygon);
+                dx = (Number(point.x) || 0) - center.x;
+                dz = (Number(point.z) || 0) - center.z;
+                length = Math.hypot(dx, dz) || 1;
+            }
+            const amount = inside ? best.distance + safeRadius : safeRadius - best.distance;
+            return amount > .001 ? {
+                x: dx / length * amount,
+                z: dz / length * amount,
+                amount
+            } : null;
+        }
+
+        function getCircleSegmentSeparation(point, start, end, radius) {
+            const closest = getSegmentClosestPoint2D(point, start, end);
+            let dx = (Number(point && point.x) || 0) - closest.x;
+            let dz = (Number(point && point.z) || 0) - closest.z;
+            let distance = Math.hypot(dx, dz);
+            const safeRadius = Math.max(.05, Number(radius) || .05);
+            if (distance >= safeRadius)
+                return null;
+            if (distance < 1e-5) {
+                dx = -((Number(end && end.z) || 0) - (Number(start && start.z) || 0));
+                dz = (Number(end && end.x) || 0) - (Number(start && start.x) || 0);
+                distance = Math.hypot(dx, dz) || 1;
+            }
+            const amount = safeRadius - distance;
+            return {
+                x: dx / distance * amount,
+                z: dz / distance * amount,
+                amount
+            };
+        }
+
+        function getCircleObbSeparation(point, center, halfX, halfZ, rotationY, radius) {
+            if (!point || !center)
+                return null;
+            const cos = Math.cos(Number(rotationY) || 0);
+            const sin = Math.sin(Number(rotationY) || 0);
+            const axisX = {
+                x: cos,
+                z: -sin
+            };
+            const axisZ = {
+                x: sin,
+                z: cos
+            };
+            const dxWorld = (Number(point.x) || 0) - (Number(center.x) || 0);
+            const dzWorld = (Number(point.z) || 0) - (Number(center.z) || 0);
+            const localX = dxWorld * axisX.x + dzWorld * axisX.z;
+            const localZ = dxWorld * axisZ.x + dzWorld * axisZ.z;
+            const hx = Math.max(.05, Number(halfX) || .05);
+            const hz = Math.max(.05, Number(halfZ) || .05);
+            const clampedX = clamp(localX, -hx, hx);
+            const clampedZ = clamp(localZ, -hz, hz);
+            let sepX = localX - clampedX;
+            let sepZ = localZ - clampedZ;
+            let distance = Math.hypot(sepX, sepZ);
+            const inside = Math.abs(localX) <= hx && Math.abs(localZ) <= hz;
+            const safeRadius = Math.max(.05, Number(radius) || .05);
+            if (!inside && distance >= safeRadius)
+                return null;
+            if (inside) {
+                const sideX = hx - Math.abs(localX);
+                const sideZ = hz - Math.abs(localZ);
+                if (sideX < sideZ) {
+                    sepX = Math.sign(localX || 1);
+                    sepZ = 0;
+                    distance = sideX;
+                } else {
+                    sepX = 0;
+                    sepZ = Math.sign(localZ || 1);
+                    distance = sideZ;
+                }
+            } else if (distance < 1e-5) {
+                sepX = Math.sign(localX || 1);
+                sepZ = 0;
+                distance = 1;
+            }
+            const amount = inside ? distance + safeRadius : safeRadius - distance;
+            if (amount <= .001)
+                return null;
+            const len = Math.hypot(sepX, sepZ) || 1;
+            const localPushX = sepX / len * amount;
+            const localPushZ = sepZ / len * amount;
+            return {
+                x: axisX.x * localPushX + axisZ.x * localPushZ,
+                z: axisX.z * localPushX + axisZ.z * localPushZ,
+                amount
+            };
+        }
+
+        function applyCollisionSeparation(position, separation) {
+            if (!position || !separation)
+                return !1;
+            position.x += separation.x;
+            position.z += separation.z;
+            return !0;
+        }
+
         function createBox(size, color, position) {
             const THREE = globalState.THREE;
             const mesh = new THREE.Mesh(new THREE.BoxGeometry(size[0], size[1], size[2]), new THREE.MeshLambertMaterial({
@@ -5164,6 +5387,432 @@
             position && mesh.position.set(position[0], position[1], position[2]);
             return mesh;
         }
+
+        function getRoadEdgeHalfWidth(edge) {
+            try {
+                const left = "function" == typeof edge.getLeftSize ? Math.abs(Number(edge.getLeftSize()) || 0) : 0;
+                const right = "function" == typeof edge.getRightSize ? Math.abs(Number(edge.getRightSize()) || 0) : 0;
+                if (left + right > .1)
+                    return Math.max(2.4, (left + right) / 2);
+            } catch (roadWidthError) {}
+            return Math.max(2.4, (Number(edge && edge.width) || 8) / 2);
+        }
+
+        function getSegmentBounds2D(start, end, padding=0) {
+            const px = Math.max(0, Number(padding) || 0);
+            return {
+                minX: Math.min(Number(start && start.x) || 0, Number(end && end.x) || 0) - px,
+                maxX: Math.max(Number(start && start.x) || 0, Number(end && end.x) || 0) + px,
+                minZ: Math.min(Number(start && start.z) || 0, Number(end && end.z) || 0) - px,
+                maxZ: Math.max(Number(start && start.z) || 0, Number(end && end.z) || 0) + px
+            };
+        }
+
+        function isPositionInBounds2D(position, bounds, padding=0) {
+            if (!position || !bounds)
+                return !1;
+            const px = Math.max(0, Number(padding) || 0);
+            return position.x >= bounds.minX - px && position.x <= bounds.maxX + px && position.z >= bounds.minZ - px && position.z <= bounds.maxZ + px;
+        }
+
+        function getWorldCollisionChunkSignature(chunks) {
+            const state = getWorldCollisionState();
+            return toSafeArray(chunks).map(chunk => {
+                let chunkId = chunk && state.chunkIds.get(chunk);
+                if (chunk && !chunkId) {
+                    state.chunkIdCounter = (Number(state.chunkIdCounter) || 0) + 1;
+                    chunkId = state.chunkIdCounter;
+                    state.chunkIds.set(chunk, chunkId);
+                }
+                const matches = chunk && (chunk.__tmMatchedCustomBuildings || runtimeState.customBuildingEntriesByChunk.get(chunk)) || [];
+                const edges = chunk && chunk.newRoadGraph && chunk.newRoadGraph.edges || [];
+                return [
+                    chunkId || 0,
+                    Math.round(Number(chunk && chunk.cx) || 0),
+                    Math.round(Number(chunk && chunk.cz) || 0),
+                    toSafeArray(matches).length,
+                    toSafeArray(edges).length,
+                    chunk && chunk.__tmCustomBuildingOverlayReady ? 1 : 0
+                ].join(":");
+            }).sort().join("|");
+        }
+
+        function buildWorldCollisionStaticCache(chunks) {
+            const cache = {
+                buildingPolygons: [],
+                customWallSegments: [],
+                customFallbackPolygons: [],
+                tunnelWallSegments: []
+            };
+            for (const chunk of toSafeArray(chunks)) {
+                const tunnelEdges = toSafeArray(chunk && chunk.newRoadGraph && chunk.newRoadGraph.edges);
+                for (const edge of tunnelEdges) {
+                    if (!edge || Number(edge.layer) >= 0)
+                        continue;
+                    const worldPoints = getEdgeWorldPoints(edge);
+                    const halfWidth = getRoadEdgeHalfWidth(edge) + 1.15;
+                    for (let index = 0; index < worldPoints.length - 1; index++) {
+                        const start = worldPoints[index];
+                        const end = worldPoints[index + 1];
+                        if (!start || !end)
+                            continue;
+                        const dx = end.x - start.x;
+                        const dz = end.z - start.z;
+                        const length = Math.hypot(dx, dz) || 1;
+                        const nx = -dz / length;
+                        const nz = dx / length;
+                        for (const side of [-1, 1]) {
+                            const segment = {
+                                start: {
+                                    x: start.x + nx * halfWidth * side,
+                                    z: start.z + nz * halfWidth * side
+                                },
+                                end: {
+                                    x: end.x + nx * halfWidth * side,
+                                    z: end.z + nz * halfWidth * side
+                                },
+                                radius: 1.15
+                            };
+                            segment.bounds = getSegmentBounds2D(segment.start, segment.end, 170);
+                            cache.tunnelWallSegments.push(segment);
+                        }
+                    }
+                }
+                const matches = chunk && (chunk.__tmMatchedCustomBuildings || runtimeState.customBuildingEntriesByChunk.get(chunk)) || [];
+                const customBuildings = new WeakSet;
+                for (const match of toSafeArray(matches)) {
+                    const entry = match && match.entry;
+                    const building = match && match.building;
+                    const localPoints = getBuildingFootprint(building, entry);
+                    const points = getBuildingWorldFootprint(building, entry, chunk);
+                    if (points.length >= 3) {
+                        building && customBuildings.add(building);
+                        cache.buildingPolygons.push({
+                            points,
+                            bounds: getFootprintBounds(points),
+                            custom: !0,
+                            entry,
+                            building,
+                            chunk
+                        });
+                    }
+                    if (localPoints.length < 3)
+                        continue;
+                    const offset = building && building.chunkCenter || getChunkWorldOffset(chunk);
+                    const worldPoints = offsetFootprintToWorld(localPoints, offset);
+                    if (!entry || !entry.__tmWallOpenings) {
+                        worldPoints.length >= 3 && cache.customFallbackPolygons.push({
+                            points: worldPoints,
+                            bounds: getFootprintBounds(worldPoints)
+                        });
+                        continue;
+                    }
+                    for (let edgeIndex = 0; edgeIndex < localPoints.length; edgeIndex++) {
+                        const start = localPoints[edgeIndex];
+                        const end = localPoints[(edgeIndex + 1) % localPoints.length];
+                        const dx = end.x - start.x;
+                        const dz = end.z - start.z;
+                        const length = Math.hypot(dx, dz);
+                        if (length < .4)
+                            continue;
+                        const doors = getWallOpenings(entry, "doors", edgeIndex).map(opening => opening.rect || opening).filter(Boolean).map(rect => ({
+                            x1: clamp((Number(rect.x1) || 0) - .34, 0, length),
+                            x2: clamp((Number(rect.x2) || 0) + .34, 0, length)
+                        })).sort((a, b) => a.x1 - b.x1);
+                        let cursor = 0;
+                        const spans = [];
+                        for (const door of doors) {
+                            if (door.x1 - cursor > .22)
+                                spans.push([cursor, door.x1]);
+                            cursor = Math.max(cursor, door.x2);
+                        }
+                        if (length - cursor > .22)
+                            spans.push([cursor, length]);
+                        const ox = Number(offset && offset.x) || 0;
+                        const oz = Number(offset && offset.z) || 0;
+                        for (const span of spans) {
+                            const aU = span[0] / length;
+                            const bU = span[1] / length;
+                            const segment = {
+                                start: {
+                                    x: ox + start.x + dx * aU,
+                                    z: oz + start.z + dz * aU
+                                },
+                                end: {
+                                    x: ox + start.x + dx * bU,
+                                    z: oz + start.z + dz * bU
+                                },
+                                radius: .62
+                            };
+                            segment.bounds = getSegmentBounds2D(segment.start, segment.end, 6);
+                            cache.customWallSegments.push(segment);
+                        }
+                    }
+                }
+                for (const building of toSafeArray(chunk && (chunk.__tmOriginalBuildings || chunk.buildings))) {
+                    if (!building || customBuildings.has(building))
+                        continue;
+                    const points = getBuildingWorldFootprint(building, null, chunk);
+                    points.length >= 3 && cache.buildingPolygons.push({
+                        points,
+                        bounds: getFootprintBounds(points),
+                        custom: !1,
+                        building,
+                        chunk
+                    });
+                }
+            }
+            return cache;
+        }
+
+        function getWorldCollisionStaticCache() {
+            const state = getWorldCollisionState();
+            const now = performance.now();
+            const chunks = getWorldCollisionLoadedChunks();
+            const signature = getWorldCollisionChunkSignature(chunks);
+            if (state.staticCache && state.staticCacheSignature === signature && now - (Number(state.staticCacheAt) || 0) < 220)
+                return state.staticCache;
+            state.staticCache = buildWorldCollisionStaticCache(chunks);
+            state.staticCacheSignature = signature;
+            state.staticCacheAt = now;
+            return state.staticCache;
+        }
+
+        function segmentIntersection2D(a, b, c, d) {
+            const ax = Number(a && a.x) || 0;
+            const az = Number(a && a.z) || 0;
+            const bx = Number(b && b.x) || 0;
+            const bz = Number(b && b.z) || 0;
+            const cx = Number(c && c.x) || 0;
+            const cz = Number(c && c.z) || 0;
+            const dx = Number(d && d.x) || 0;
+            const dz = Number(d && d.z) || 0;
+            const rX = bx - ax;
+            const rZ = bz - az;
+            const sX = dx - cx;
+            const sZ = dz - cz;
+            const denom = rX * sZ - rZ * sX;
+            if (Math.abs(denom) < 1e-5)
+                return null;
+            const qX = cx - ax;
+            const qZ = cz - az;
+            const t = (qX * sZ - qZ * sX) / denom;
+            const u = (qX * rZ - qZ * rX) / denom;
+            return t > .02 && t < .98 && u > .02 && u < .98 ? {
+                x: ax + rX * t,
+                z: az + rZ * t,
+                t,
+                u
+            } : null;
+        }
+
+        function createTunnelBridgeMesh(edge, start, end, intersection) {
+            if (!globalState.THREE || !intersection)
+                return null;
+            const dx = (Number(end && end.x) || 0) - (Number(start && start.x) || 0);
+            const dz = (Number(end && end.z) || 0) - (Number(start && start.z) || 0);
+            const length = Math.hypot(dx, dz);
+            if (length < 3)
+                return null;
+            const bridgeLength = clamp(Math.max(18, getRoadEdgeHalfWidth(edge) * 3.2), 18, Math.min(42, length + 8));
+            const bridgeWidth = Math.max(8, getRoadEdgeHalfWidth(edge) * 2 + 2.2);
+            const y = (Number(start && start.y) || 0) + ((Number(end && end.y) || 0) - (Number(start && start.y) || 0)) * clamp(intersection.t, 0, 1) + .38;
+            const material = createDetailStandardMaterial({
+                materialKind: "concrete",
+                color: 0x7f837d
+            }, {
+                color: 0x7f837d,
+                materialKind: "concrete"
+            });
+            const group = new globalState.THREE.Group;
+            group.name = "__tmTunnelCrossingBridge";
+            const slab = createRuntimeBox([bridgeLength, .45, bridgeWidth], material, [intersection.x, y, intersection.z]);
+            slab.rotation.y = Math.atan2(-dz, dx);
+            group.add(slab);
+            const railMaterial = createDetailStandardMaterial({
+                materialKind: "metal",
+                color: 0x2f3436
+            }, {
+                color: 0x2f3436,
+                materialKind: "metal"
+            });
+            const sideOffset = bridgeWidth / 2 + .18;
+            for (const side of [-1, 1]) {
+                const rail = createRuntimeBox([bridgeLength, .35, .22], railMaterial, [intersection.x + Math.sin(slab.rotation.y) * sideOffset * side, y + .4, intersection.z + Math.cos(slab.rotation.y) * sideOffset * side]);
+                rail.rotation.y = slab.rotation.y;
+                group.add(rail);
+            }
+            group.userData.tmCollisionBridge = !0;
+            return group;
+        }
+
+        function rebuildTunnelBridgeOverlay(chunk) {
+            if (!chunk || !chunk.group || !globalState.THREE)
+                return;
+            let overlay = chunk.__tmTunnelBridgeOverlay;
+            if (!featureState.enhancedRoads) {
+                overlay && overlay.parent && overlay.parent.remove(overlay);
+                chunk.__tmTunnelBridgeOverlay = null;
+                return;
+            }
+            if (!overlay) {
+                overlay = new globalState.THREE.Group;
+                overlay.name = "__tmTunnelBridgeOverlay";
+                chunk.__tmTunnelBridgeOverlay = overlay;
+            }
+            clearCustomBuildingOverlayChildren(overlay);
+            const tunnelSegments = [];
+            const surfaceSegments = [];
+            for (const edge of toSafeArray(chunk.newRoadGraph && chunk.newRoadGraph.edges)) {
+                if (!edge || !Array.isArray(edge.points) || edge.points.length < 2)
+                    continue;
+                const target = Number(edge.layer) < 0 ? tunnelSegments : 0 === Number(edge.layer || 0) && isRoadEligibleForAutopilot(edge) ? surfaceSegments : null;
+                if (!target)
+                    continue;
+                for (let index = 0; index < edge.points.length - 1; index++)
+                    target.push({
+                        edge,
+                        start: edge.points[index],
+                        end: edge.points[index + 1]
+                    });
+            }
+            const seen = new Set;
+            for (const surface of surfaceSegments) {
+                for (const tunnel of tunnelSegments) {
+                    const hit = segmentIntersection2D(surface.start, surface.end, tunnel.start, tunnel.end);
+                    if (!hit)
+                        continue;
+                    const key = `${Math.round(hit.x / 6)}:${Math.round(hit.z / 6)}`;
+                    if (seen.has(key))
+                        continue;
+                    seen.add(key);
+                    const bridge = createTunnelBridgeMesh(surface.edge, surface.start, surface.end, hit);
+                    bridge && overlay.add(bridge);
+                    if (overlay.children.length >= 28)
+                        break;
+                }
+                if (overlay.children.length >= 28)
+                    break;
+            }
+            overlay.children.length ? overlay.parent !== chunk.group && chunk.group.add(overlay) : overlay.parent && overlay.parent.remove(overlay);
+        }
+
+        function getTunnelWallCollisionSegments(position) {
+            return toSafeArray(getWorldCollisionStaticCache().tunnelWallSegments).filter(segment => isPositionInBounds2D(position, segment.bounds) && distancePointToSegment2D(position, segment.start, segment.end).distance <= 160);
+        }
+
+        function collectBuildingCollisionPolygons(position, mode) {
+            const padding = "vehicle" === mode ? 10 : 3;
+            return toSafeArray(getWorldCollisionStaticCache().buildingPolygons).filter(item => isPositionInBounds2D(position, item.bounds, padding));
+        }
+
+        function collectCustomWallCollisionSegments(position) {
+            const cache = getWorldCollisionStaticCache();
+            return {
+                segments: toSafeArray(cache.customWallSegments).filter(segment => isPositionInBounds2D(position, segment.bounds)),
+                fallbackPolygons: toSafeArray(cache.customFallbackPolygons).filter(item => isPositionInBounds2D(position, item.bounds, 4)).map(item => item.points)
+            };
+        }
+
+        function getTrainCollisionBoxes(position) {
+            const boxes = [];
+            const trains = runtimeState.game && runtimeState.game.trainTraffic && runtimeState.game.trainTraffic.trains || [];
+            for (const train of toSafeArray(trains))
+                for (const wagon of toSafeArray(train && train.wagons)) {
+                    const center = wagon && wagon.position;
+                    if (!center || getDistance2D(position, center) > 170)
+                        continue;
+                    const config = wagon.cs || {};
+                    boxes.push({
+                        center,
+                        halfX: Math.max(2, Number(config.length) / 2 || 8),
+                        halfZ: Math.max(1.2, Number(config.width) / 2 || 1.7),
+                        rotationY: Number(wagon.rotation && wagon.rotation.y) || 0,
+                        radius: .8
+                    });
+                }
+            return boxes;
+        }
+
+        function resolveWorldCollisionPosition(position, radius, mode) {
+            if (!position || !featureState.collisionHook)
+                return !1;
+            let collided = !1;
+            const vehicleMode = "vehicle" === mode;
+            for (let pass = 0; pass < 3; pass++) {
+                let passCollided = !1;
+                const applyPass = separation => {
+                    if (separation) {
+                        applyCollisionSeparation(position, separation);
+                        collided = !0;
+                        passCollided = !0;
+                    }
+                };
+                for (const box of getTrainCollisionBoxes(position))
+                    applyPass(getCircleObbSeparation(position, box.center, box.halfX + box.radius, box.halfZ + box.radius, box.rotationY, radius));
+                for (const wall of getTunnelWallCollisionSegments(position))
+                    applyPass(getCircleSegmentSeparation(position, wall.start, wall.end, radius + wall.radius));
+                if (vehicleMode) {
+                    for (const item of collectBuildingCollisionPolygons(position, mode))
+                        applyPass(getCirclePolygonSeparation(position, item.points, radius));
+                } else {
+                    const wallData = collectCustomWallCollisionSegments(position);
+                    for (const wall of wallData.segments)
+                        applyPass(getCircleSegmentSeparation(position, wall.start, wall.end, radius + wall.radius));
+                    for (const polygon of wallData.fallbackPolygons)
+                        applyPass(getCirclePolygonSeparation(position, polygon, radius));
+                    for (const item of collectBuildingCollisionPolygons(position, mode))
+                        !item.custom && applyPass(getCirclePolygonSeparation(position, item.points, radius));
+                }
+                if (!passCollided)
+                    break;
+            }
+            return collided;
+        }
+
+        function resolveVehicleWorldHitboxes(car) {
+            if (!car || !car.cameraGroup || !car.cameraGroup.position)
+                return;
+            const position = car.cameraGroup.position;
+            const radius = clamp(Math.max(Number(car.mcs && car.mcs.width) || Number(car.width) || 2.2, (Number(car.mcs && car.mcs.length) || Number(car.length) || 4.8) * .46), 1.35, 4.6);
+            const previousSafe = car.__tmLastWorldCollisionSafePosition && car.__tmLastWorldCollisionSafePosition.clone ? car.__tmLastWorldCollisionSafePosition.clone() : null;
+            const collided = resolveWorldCollisionPosition(position, radius, "vehicle");
+            if (collided) {
+                if (previousSafe && speedAbs(car.speed) > 12 && getDistance2D(previousSafe, position) < 75)
+                    position.copy(previousSafe);
+                setPlayerSpeed(car, 0);
+                "function" == typeof car.resetAcc && car.resetAcc();
+                "function" == typeof car.turnOffCruiseControl && car.turnOffCruiseControl();
+            } else
+                car.__tmLastWorldCollisionSafePosition = position.clone();
+        }
+
+        function resolveHumanWorldHitboxes(human) {
+            if (!human)
+                return;
+            const state = getWorldCollisionState();
+            const now = performance.now();
+            if (now - (Number(state.lastHumanCollisionAt) || 0) < 35)
+                return;
+            state.lastHumanCollisionAt = now;
+            const group = "function" == typeof human.getGroup ? human.getGroup() : human.cameraGroup || human.group;
+            const position = group && group.position;
+            if (!position)
+                return;
+            const collided = resolveWorldCollisionPosition(position, .48, "human");
+            if (collided)
+                "function" == typeof human.resetAcc && human.resetAcc();
+        }
+
+        function updateWorldHitboxCollisions() {
+            if (!featureState.collisionHook || !globalState.THREE)
+                return;
+            const manager = getControlManager();
+            if (!manager)
+                return;
+            manager.inCar ? resolveVehicleWorldHitboxes(manager.controllableCar) : resolveHumanWorldHitboxes(manager.controlableHuman);
+        }
+
 
         function createEllipsoid(size, color, position, material) {
             const THREE = globalState.THREE;
@@ -6765,6 +7414,8 @@
         }
 
         function ensureWildlife() {
+            if (!featureState.birds && !featureState.bees)
+                return;
             const overlay = ensureRuntimeOverlayGroup();
             const playerPos = getPlayerPosition();
             if (!overlay || !playerPos)
@@ -6806,6 +7457,8 @@
         }
 
         function updateOverlayCullingAndAnimation(dtSeconds) {
+            if (!runtimeState.overlayItems.length)
+                return;
             const playerPos = getPlayerPosition();
             if (!playerPos)
                 return;
@@ -6872,6 +7525,11 @@
         }
 
         function updateCustomBuildingDoors(dtSeconds) {
+            if (!isAny3dBuildingFeatureEnabled()) {
+                runtimeState.customBuildingDoorItems = [];
+                runtimeState.customBuildingDoorAccumulator = 0;
+                return;
+            }
             if (!runtimeState.customBuildingDoorItems.length)
                 return;
             runtimeState.customBuildingDoorAccumulator = (Number(runtimeState.customBuildingDoorAccumulator) || 0) + Math.max(.001, Number(dtSeconds) || .016);
@@ -6960,6 +7618,7 @@
             runFeatureModule("aircraft", (() => updateProjectiles(dt)), null, "Aircraft projectiles");
             runInternalModule("overlayRuntime", (() => updateOverlayCullingAndAnimation(dt)), null, "Overlay runtime");
             runInternalModule("customBuildingDoors", (() => updateCustomBuildingDoors(dt)), null, "Custom-building doors");
+            runInternalModule("worldCollision", updateWorldHitboxCollisions, null, "World hitboxes");
             runFeatureModule("police", (() => updatePolice(dt)), null, "Police update");
             runFeatureModule("survival", (() => updateSurvival(dt)), null, "Survival update");
             runInternalModule("hardStartFlow", updateHardStartLock, null, "Hard start lock");
@@ -7270,8 +7929,10 @@
             const timer = setTimeout((() => {
                 runtimeState.visualRefreshTimers.delete(chunk);
                 try {
+                    invalidateWorldCollisionCache();
                     enhanceTerrainMesh(chunk);
                     enhanceRoadMeshes(chunk);
+                    rebuildTunnelBridgeOverlay(chunk);
                     isAny3dBuildingFeatureEnabled() ? rebuildCustomBuildingsForChunk(chunk) : cleanupChunkCustomVisuals(chunk);
                 } catch (visualError) {
                     error(`Fehler beim Visual-Refresh fuer Chunk ${chunk.cx}/${chunk.cz}:`, visualError);
@@ -7732,6 +8393,24 @@
             return (new Function(`return (${source});`))();
         }
 
+        function normalizeBuildingCatalogId(value, index) {
+            const text = String(null == value ? "" : value).trim();
+            return text || `entry_${index}`;
+        }
+
+        function assignUniqueBuildingCatalogIds(buildings) {
+            const seen = new Map;
+            return toSafeArray(buildings).map((entry, index) => {
+                const baseId = normalizeBuildingCatalogId(entry && entry.id, index);
+                const count = Number(seen.get(baseId)) || 0;
+                seen.set(baseId, count + 1);
+                const id = count ? `${baseId}_${count + 1}` : baseId;
+                return entry && entry.id === id ? entry : Object.assign({}, entry || {}, {
+                    id
+                });
+            });
+        }
+
         function normalizeBuildingCatalog(rawCatalog) {
             if (!rawCatalog || "object" != typeof rawCatalog)
                 return {
@@ -7747,7 +8426,7 @@
             }, entry)));
             return {
                 templates,
-                buildings
+                buildings: assignUniqueBuildingCatalogIds(buildings)
             };
         }
 
@@ -7879,6 +8558,7 @@
         function reloadCustomBuildingCatalog() {
             runtimeState.buildingConfigPromise = null;
             runtimeState.buildingConfig = null;
+            invalidateWorldCollisionCache();
             for (const chunk of getLoadedChunks()) {
                 resetCustomBuildingPreparationForChunk(chunk);
                 queueChunkVisualRefresh(chunk, "custom_building_reload");
@@ -7961,6 +8641,7 @@
         function resetCustomBuildingPreparationForChunk(chunk) {
             if (!chunk)
                 return;
+            invalidateWorldCollisionCache();
             if (chunk.__tmOriginalCustomBuildings)
                 chunk.custome_buildings = cloneJson(chunk.__tmOriginalCustomBuildings, []);
             if (Array.isArray(chunk.__tmOriginalBuildings))
@@ -9011,8 +9692,9 @@
             const minCenterY = baseY + height / 2;
             const maxCenterY = baseY + Math.max(height / 2 + .02, bodyHeight - height / 2 - .08);
             const centerY = grounded ? minCenterY : clamp(rawCenterY || baseY + 1.25 + height / 2, minCenterY + .45, maxCenterY);
-            const y1 = grounded ? 0 : Math.max(.025, centerY - baseY - height / 2 - .05);
-            const y2 = Math.min(bodyHeight - .025, centerY - baseY + height / 2 + .05);
+            const openingPad = grounded ? .035 : .018;
+            const y1 = grounded ? 0 : Math.max(.025, centerY - baseY - height / 2 - openingPad);
+            const y2 = Math.min(bodyHeight - .025, centerY - baseY + height / 2 + openingPad);
             return {
                 edgeIndex: frame.index,
                 position: [localX, centerY, localZ],
@@ -9021,8 +9703,8 @@
                 normalZ: frame.normalZ,
                 wallDepth,
                 rect: {
-                    x1: Math.max(.025, centerU - width / 2 - .08),
-                    x2: Math.min(frame.length - .025, centerU + width / 2 + .08),
+                    x1: Math.max(.025, centerU - width / 2 - openingPad),
+                    x2: Math.min(frame.length - .025, centerU + width / 2 + openingPad),
                     y1,
                     y2
                 }
@@ -9064,29 +9746,32 @@
                 doors: [],
                 windows: []
             };
+            const parts = toSafeArray(spec.parts);
+            const placePart = (part, kind) => {
+                const size = getDetailSize(part, "door" === kind ? [1.05, 2.25, .1] : [1.2, 1.4, .16]);
+                const placement = computeWallDetailPlacement(points, baseY, bodyHeight, spec, anchorPoint, part, size, kind);
+                if (!placement)
+                    return null;
+                part.__tmWallPlacement = placement;
+                return placement;
+            };
             let hasDoor = !1;
-            for (const part of toSafeArray(spec.parts)) {
-                const type = String(part && part.type || "").toLowerCase();
-                const isDoor = isDoorDetail(part);
-                const isWindow = "window" === type;
-                if (!isDoor && !isWindow)
+            for (const part of parts) {
+                if (!isDoorDetail(part))
                     continue;
-                const size = getDetailSize(part, isDoor ? [1.05, 2.25, .1] : [1.2, 1.4, .16]);
-                const placement = computeWallDetailPlacement(points, baseY, bodyHeight, spec, anchorPoint, part, size, isDoor ? "door" : "window");
+                const placement = placePart(part, "door");
                 if (!placement)
                     continue;
-                part.__tmWallPlacement = placement;
-                openings[isDoor ? "doors" : "windows"].push({
+                openings.doors.push({
                     edgeIndex: placement.edgeIndex,
                     rect: placement.rect
                 });
-                hasDoor || (hasDoor = isDoor);
+                hasDoor = !0;
             }
             if (!hasDoor) {
                 const fallback = createFallbackDoorDetailForFootprint(points, baseY, bodyHeight, spec, anchorPoint);
                 if (fallback) {
-                    const size = getDetailSize(fallback, [1.05, 2.25, .1]);
-                    const placement = computeWallDetailPlacement(points, baseY, bodyHeight, spec, anchorPoint, fallback, size, "door");
+                    const placement = placePart(fallback, "door");
                     if (placement) {
                         fallback.__tmWallPlacement = placement;
                         spec.__tmFallbackDoorDetail = fallback;
@@ -9094,8 +9779,27 @@
                             edgeIndex: placement.edgeIndex,
                             rect: placement.rect
                         });
+                        hasDoor = !0;
                     }
                 }
+            }
+            for (const part of parts) {
+                const type = String(part && part.type || "").toLowerCase();
+                if ("window" !== type)
+                    continue;
+                part.__tmSkipRender = !1;
+                const placement = placePart(part, "window");
+                if (!placement)
+                    continue;
+                if (!isRectClearOfWallOpenings(placement.rect, openings.doors.filter(opening => opening.edgeIndex === placement.edgeIndex), .18)) {
+                    part.__tmWallPlacement = null;
+                    part.__tmSkipRender = !0;
+                    continue;
+                }
+                openings.windows.push({
+                    edgeIndex: placement.edgeIndex,
+                    rect: placement.rect
+                });
             }
             spec.__tmWallOpenings = openings;
         }
@@ -9185,9 +9889,9 @@
             const height = y2 - y1;
             if (!group || width <= .045 || height <= .045)
                 return;
-            const overlapX = .055;
-            const overlapY = .035;
-            const overlapZ = .045;
+            const overlapX = .16;
+            const overlapY = .085;
+            const overlapZ = .12;
             const centerU = (x1 + x2) / 2 - frame.length / 2;
             const centerY = baseY + (y1 + y2) / 2;
             const mesh = createRuntimeBox([width + overlapX, height + overlapY, wallDepth + overlapZ], material, [0, 0, 0]);
@@ -10442,7 +11146,7 @@
                     };
                     if (cutouts.some(rect => rectsOverlap2D(pointRect, rect, -.012)))
                         continue;
-                    group.add(createRuntimeBox([x2 - x1 + .045, y2 - y1 + .035, wallDepth + .035], material, [(x1 + x2) / 2, (y1 + y2) / 2, 0]));
+                    group.add(createRuntimeBox([x2 - x1 + .12, y2 - y1 + .07, wallDepth + .09], material, [(x1 + x2) / 2, (y1 + y2) / 2, 0]));
                 }
             return group.children.length ? positionDetailObject(group, Object.assign({}, detail, {
                 size: [wallWidth, wallHeight, wallDepth]
@@ -10451,6 +11155,8 @@
 
         function createPrimitiveDetailMesh(detail, anchorPoint, spec) {
             if (!globalState.THREE || !detail || !detail.type)
+                return null;
+            if (detail.__tmSkipRender)
                 return null;
             const type = String(detail.type || "").toLowerCase();
             const THREE = globalState.THREE;
@@ -10464,12 +11170,13 @@
             if ("box" === type || "wall" === type || "floor" === type || "panel" === type || "roofpanel" === type) {
                 const fallback = "panel" === type || "roofpanel" === type ? [1, 1, .04] : [1, 1, .1];
                 const size = getDetailSize(detail, fallback);
+                const renderSize = "wall" === type || "panel" === type ? [size[0] + .1, size[1] + .06, Math.max(.02, size[2] + .08)] : size;
                 if ("wall" === type || "panel" === type || "box" === type) {
-                    const cutWall = createWallDetailWithOpenings(detail, anchorPoint, spec, size);
+                    const cutWall = createWallDetailWithOpenings(detail, anchorPoint, spec, renderSize);
                     if (cutWall)
                         return cutWall;
                 }
-                const box = createDetailPatternBoxGroup(detail, [size[0], size[1], Math.max(.02, size[2])], "floor" === type ? "floor" : "roofpanel" === type ? "roof" : "wall");
+                const box = createDetailPatternBoxGroup(detail, [renderSize[0], renderSize[1], Math.max(.02, renderSize[2])], "floor" === type ? "floor" : "roofpanel" === type ? "roof" : "wall");
                 return positionDetailObject(box, detail, anchorPoint);
             }
             if ("flatroof" === type) {
@@ -10595,7 +11302,9 @@
                 roof && group.add(roof);
                 createWindowsForFootprint(group, points, baseY, bodyHeight, deepMergeConfig(spec.windows, {
                     sides: spec.sides || {},
-                    __tmWorldOffset: spec.__tmWorldOffset
+                    __tmWorldOffset: spec.__tmWorldOffset,
+                    __tmWallOpenings: spec.__tmWallOpenings,
+                    base: spec.base
                 }));
             }
             for (const part of toSafeArray(spec.parts)) {
@@ -10628,6 +11337,7 @@
                 chunk.__tmCustomBuildingOverlayReady = !1;
                 runtimeState.customBuildingEntriesByChunk.set(chunk, matched);
                 applyOriginalBuildingMeshVisibilityForChunk(chunk);
+                invalidateWorldCollisionCache();
                 return matched;
             }
             const addCustomBuildingMatch = (id, entry, building, options={}) => {
@@ -10679,6 +11389,7 @@
             chunk.__tmCustomBuildingOverlayReady = !1;
             runtimeState.customBuildingEntriesByChunk.set(chunk, matched);
             applyOriginalBuildingMeshVisibilityForChunk(chunk);
+            invalidateWorldCollisionCache();
             log(`3D-Haeuser vorbereitet fuer Chunk ${chunk.cx}/${chunk.cz}: ${matched.length} ersetzt, ${chunk.buildings.length} PNG-Haeuser bleiben.`);
             return matched;
         }
@@ -10806,6 +11517,7 @@
             if (!matches.length || !isAny3dBuildingFeatureEnabled()) {
                 overlay.parent && overlay.parent.remove(overlay);
                 applyOriginalBuildingMeshVisibilityForChunk(chunk);
+                invalidateWorldCollisionCache();
                 return;
             }
             let builtCount = 0;
@@ -10823,6 +11535,7 @@
             if (!builtCount) {
                 overlay.parent && overlay.parent.remove(overlay);
                 applyOriginalBuildingMeshVisibilityForChunk(chunk);
+                invalidateWorldCollisionCache();
                 return;
             }
             try {
@@ -10835,9 +11548,11 @@
             collectCustomBuildingDoorsForChunk(chunk, overlay);
             chunk.__tmCustomBuildingOverlayReady = !0;
             applyOriginalBuildingMeshVisibilityForChunk(chunk);
+            invalidateWorldCollisionCache();
         }
 
         function cleanupChunkCustomVisuals(chunk) {
+            invalidateWorldCollisionCache();
             const overlay = chunk && runtimeState.chunkCustomOverlayGroups.get(chunk);
             if (overlay) {
                 overlay.parent && overlay.parent.remove(overlay);
@@ -11080,6 +11795,7 @@
                                 warn(`Custom-Building-Vorbereitung vor Build fehlgeschlagen fuer Chunk ${this.cx}/${this.cz}:`, syncCustomBuildingError);
                             }
                         const result = originalBuild.apply(this, args);
+                        rebuildTunnelBridgeOverlay(this);
                         refreshCustomBuildingDebug();
                         queueTownRebuild("chunk_build");
                         isAny3dBuildingFeatureEnabled() ? ensureChunkCustomBuildingsPrepared(this).catch((customBuildingError => warn(`Custom-Building-Vorbereitung fehlgeschlagen fuer Chunk ${this.cx}/${this.cz}:`, customBuildingError))).finally((() => rebuildCustomBuildingsForChunk(this))) : cleanupChunkCustomVisuals(this);
@@ -11119,6 +11835,7 @@
                             const result = await originalCheckLoaded.apply(this, args);
                             refreshCustomBuildingDebug();
                             queueTownRebuild("chunk_check_loaded");
+                            rebuildTunnelBridgeOverlay(this);
                             isAny3dBuildingFeatureEnabled() ? rebuildCustomBuildingsForChunk(this) : cleanupChunkCustomVisuals(this);
                             showProgress && setCustomBuildingProgress(2, 2, isPriorityCustomBuildingChunk(this) ? "Adress-Haus vorbereiten" : "3D-Haeuser vorbereiten");
                             showProgress && finishCustomBuildingProgress();

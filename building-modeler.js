@@ -7,7 +7,7 @@ import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.164.1/exampl
  * the editing tools, and the final buildings.js export format.
  */
 const MODEL_DEBUG_PREFIX = "[TM Building Modeler]";
-const MODEL_VERBOSE_LOGS = true;
+const MODEL_VERBOSE_LOGS = !!window.__tmBuildingModelerVerbose || /\btmModelerDebug=1\b/.test(window.location.search);
 
 function modelLog(...args) {
     MODEL_VERBOSE_LOGS && console.log(MODEL_DEBUG_PREFIX, ...args);
@@ -19,6 +19,16 @@ function modelWarn(...args) {
 
 function modelError(...args) {
     console.error(MODEL_DEBUG_PREFIX, ...args);
+}
+
+function escapeHtml(value) {
+    return String(null == value ? "" : value).replace(/[&<>"']/g, char => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        "\"": "&quot;",
+        "'": "&#39;"
+    }[char]));
 }
 
 // Catch browser/runtime errors early so modeler problems show up next to the startup health table.
@@ -1604,22 +1614,22 @@ function renderElementList() {
         button.type = "button";
         button.className = `element-item${getSourceElement(getSelectedElement()) && getSourceElement(getSelectedElement()).id === element.id ? " selected" : ""}`;
         button.dataset.id = element.id;
-        button.innerHTML = `<span class="element-swatch" style="background:${element.color}"></span><span>${element.name}${element.mirrorGroupId ? " - Spiegel" : ""}</span>`;
+        button.innerHTML = `<span class="element-swatch" style="background:${escapeHtml(element.color)}"></span><span>${escapeHtml(element.name)}${element.mirrorGroupId ? " - Spiegel" : ""}</span>`;
         button.addEventListener("click", () => selectElement(element.id));
         elementList.appendChild(button);
     }
 }
 
 function fieldHtml(prop, label, value, type = "number", attrs = "") {
-    return `<div class="field"><label>${label}</label><input data-prop="${prop}" type="${type}" value="${value ?? ""}" ${attrs}></div>`;
+    return `<div class="field"><label>${escapeHtml(label)}</label><input data-prop="${escapeHtml(prop)}" type="${escapeHtml(type)}" value="${escapeHtml(value ?? "")}" ${attrs}></div>`;
 }
 
 function selectHtml(prop, label, value, options) {
-    return `<div class="field"><label>${label}</label><select data-prop="${prop}">${options.map(option => `<option value="${option.value}"${String(option.value) === String(value) ? " selected" : ""}>${option.label}</option>`).join("")}</select></div>`;
+    return `<div class="field"><label>${escapeHtml(label)}</label><select data-prop="${escapeHtml(prop)}">${options.map(option => `<option value="${escapeHtml(option.value)}"${String(option.value) === String(value) ? " selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select></div>`;
 }
 
 function checkboxHtml(prop, label, checked) {
-    return `<div class="checkbox-row"><input data-prop="${prop}" type="checkbox"${checked ? " checked" : ""}><label>${label}</label></div>`;
+    return `<div class="checkbox-row"><input data-prop="${escapeHtml(prop)}" type="checkbox"${checked ? " checked" : ""}><label>${escapeHtml(label)}</label></div>`;
 }
 
 function getDimensionLabels(type) {
@@ -1686,11 +1696,11 @@ function renderInspector() {
     }
     const [labelA,labelB,labelC] = getDimensionLabels(selected.type);
     let html = `
-        ${selected.mirrorGroupId ? `<div class="info-chip">Spiegelquelle - ${selected.mirrorMode || "off"}</div>` : ""}
-        ${selected.linkedTo ? `<div class="info-chip">Verknuepft mit ${selected.linkedTo}</div>` : ""}
-        <div class="field-wide"><label>Name</label><input data-prop="name" type="text" value="${selected.name}"></div>
+        ${selected.mirrorGroupId ? `<div class="info-chip">Spiegelquelle - ${escapeHtml(selected.mirrorMode || "off")}</div>` : ""}
+        ${selected.linkedTo ? `<div class="info-chip">Verknuepft mit ${escapeHtml(selected.linkedTo)}</div>` : ""}
+        <div class="field-wide"><label>Name</label><input data-prop="name" type="text" value="${escapeHtml(selected.name)}"></div>
         <div class="field-grid">
-            <div class="field"><label>Farbe</label><input data-prop="color" type="color" value="${selected.color}"></div>
+            <div class="field"><label>Farbe</label><input data-prop="color" type="color" value="${escapeHtml(selected.color)}"></div>
             ${fieldHtml("opacity", "Opacity", selected.opacity, "number", 'min="0.05" max="1" step="0.05"')}
             ${selectHtml("materialKind", "Material", selected.materialKind, materialKinds)}
             ${selectHtml("patternType", "Muster", selected.patternType || "none", patternOptions)}
@@ -1773,8 +1783,8 @@ function renderInspector() {
     if (selected.type === "window")
         html += `
             <div class="section field-grid">
-                <div class="field"><label>Rahmenfarbe</label><input data-prop="frameColor" type="color" value="${selected.frameColor || selected.color}"></div>
-                <div class="field"><label>Glasfarbe</label><input data-prop="glassColor" type="color" value="${selected.glassColor || "#9dd5ff"}"></div>
+                <div class="field"><label>Rahmenfarbe</label><input data-prop="frameColor" type="color" value="${escapeHtml(selected.frameColor || selected.color)}"></div>
+                <div class="field"><label>Glasfarbe</label><input data-prop="glassColor" type="color" value="${escapeHtml(selected.glassColor || "#9dd5ff")}"></div>
                 ${fieldHtml("opacity", "Transparenz", selected.opacity, "number", 'min="0.05" max="1" step="0.05"')}
             </div>
         `;
@@ -1782,7 +1792,7 @@ function renderInspector() {
     if (selected.type === "door")
         html += `
             <div class="section field-grid">
-                <div class="field"><label>Rahmenfarbe</label><input data-prop="frameColor" type="color" value="${selected.frameColor || "#ece0cb"}"></div>
+                <div class="field"><label>Rahmenfarbe</label><input data-prop="frameColor" type="color" value="${escapeHtml(selected.frameColor || "#ece0cb")}"></div>
                 ${selectHtml("hingeSide", "Bandseite", selected.hingeSide || "left", [{ value: "left", label: "Links" }, { value: "right", label: "Rechts" }])}
                 ${fieldHtml("openAngle", "Oeffnungswinkel", selected.openAngle, "number", 'min="0" max="180" step="1"')}
             </div>
@@ -1831,9 +1841,9 @@ function setActiveTab(name) {
 function renderPalette() {
     palette.innerHTML = paletteGroups.map(group => `
         <div class="palette-group">
-            <div class="palette-group-title">${group.title}</div>
+            <div class="palette-group-title">${escapeHtml(group.title)}</div>
             <div class="palette-group-grid">
-                ${group.items.map(item => `<button type="button" draggable="true" data-type="${item.type}">${item.label}</button>`).join("")}
+                ${group.items.map(item => `<button type="button" draggable="true" data-type="${escapeHtml(item.type)}">${escapeHtml(item.label)}</button>`).join("")}
             </div>
         </div>
     `).join("");
@@ -2785,9 +2795,32 @@ function buildMatchConfig() {
     };
 }
 
+function slugifyExportId(value) {
+    const slug = String(value || "")
+        .trim()
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/ß/g, "ss")
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+    return slug || "custom_house";
+}
+
+function getExportEntryId() {
+    const configured = String(modelSettings.exportId || "").trim();
+    if (configured && configured !== "modeler_house_replace_me")
+        return configured;
+    if (modelSettings.targetMode === "address")
+        return `modeler_house_${slugifyExportId(modelSettings.targetText || "address")}`;
+    if (modelSettings.targetMode === "debugId" && modelSettings.targetText && modelSettings.targetText !== "REPLACE_WITH_DEBUG_ID")
+        return `modeler_house_${slugifyExportId(modelSettings.targetText)}`;
+    return configured || "modeler_house_replace_me";
+}
+
 function exportEntry() {
     const entry = {
-        id: String(modelSettings.exportId || "modeler_house_replace_me").trim() || "modeler_house_replace_me",
+        id: getExportEntryId(),
         match: buildMatchConfig(),
         base: {
             enabled: !!modelSettings.baseEnabled
@@ -2829,32 +2862,85 @@ async function copyCode() {
         modelLog("Copy/export code copied via Clipboard API");
     } catch (error) {
         modelWarn("Clipboard API failed, fallback to execCommand", error);
-        document.execCommand("copy");
-        setStatus("Code konvertiert und markiert");
+        try {
+            const copied = document.execCommand("copy");
+            setStatus(copied ? "Code konvertiert und kopiert" : "Code konvertiert und markiert");
+        } catch (fallbackError) {
+            modelWarn("Clipboard fallback failed", fallbackError);
+            setStatus("Code konvertiert und markiert");
+        }
     }
+}
+
+function getSettingInputValue(input) {
+    if (!input)
+        return "";
+    if (input.type === "checkbox")
+        return input.checked;
+    if (numericSettingFields.has(input.dataset.setting))
+        return input.value === "" ? "" : roundNumber(input.value);
+    return input.value;
+}
+
+function syncSettingInputs(sourceInput) {
+    const key = sourceInput && sourceInput.dataset && sourceInput.dataset.setting;
+    if (!key)
+        return;
+    for (const input of settingsPanel.querySelectorAll("[data-setting]")) {
+        if (input === sourceInput || input.dataset.setting !== key)
+            continue;
+        if (input.type === "checkbox")
+            input.checked = !!modelSettings[key];
+        else
+            input.value = modelSettings[key] ?? "";
+    }
+}
+
+function handleSettingInput(input) {
+    const key = input && input.dataset && input.dataset.setting;
+    if (!key)
+        return;
+    const nextValue = getSettingInputValue(input);
+    if (Object.is(modelSettings[key], nextValue))
+        return;
+    modelSettings[key] = nextValue;
+    if (key === "targetMode")
+        renderSettings();
+    else
+        syncSettingInputs(input);
+    refreshCode();
 }
 
 function renderSettings() {
     const mode = modelSettings.targetMode;
+    const exportIdValue = escapeHtml(modelSettings.exportId);
+    const targetTextValue = escapeHtml(modelSettings.targetText);
+    const matchChunkXValue = escapeHtml(modelSettings.matchChunkX);
+    const matchChunkZValue = escapeHtml(modelSettings.matchChunkZ);
+    const matchIndexValue = escapeHtml(modelSettings.matchIndex);
+    const matchNearXValue = escapeHtml(modelSettings.matchNearX);
+    const matchNearZValue = escapeHtml(modelSettings.matchNearZ);
+    const matchRadiusValue = escapeHtml(modelSettings.matchRadius);
+    const applyChanceValue = escapeHtml(modelSettings.applyChance);
     let targetFields = "";
     if (mode === "debugId")
-        targetFields = `<div class="field-wide"><label>Debug-ID</label><input data-setting="targetText" type="text" value="${modelSettings.targetText}" placeholder="REPLACE_WITH_DEBUG_ID"></div>`;
+        targetFields = `<div class="field-wide"><label>Debug-ID</label><input data-setting="targetText" type="text" value="${targetTextValue}" placeholder="REPLACE_WITH_DEBUG_ID"></div>`;
     else if (mode === "address")
-        targetFields = `<div class="field-wide"><label>Adresse</label><input data-setting="targetText" type="text" value="${modelSettings.targetText}" placeholder="3970 Lauterbach 20"></div>`;
+        targetFields = `<div class="field-wide"><label>Adresse</label><input data-setting="targetText" type="text" value="${targetTextValue}" placeholder="3970 Lauterbach 20"></div>`;
     else if (mode === "chunkIndex")
         targetFields = `
             <div class="field-grid">
-                <div class="field"><label>Chunk X</label><input data-setting="matchChunkX" type="number" value="${modelSettings.matchChunkX}" step="1"></div>
-                <div class="field"><label>Chunk Z</label><input data-setting="matchChunkZ" type="number" value="${modelSettings.matchChunkZ}" step="1"></div>
-                <div class="field"><label>Index</label><input data-setting="matchIndex" type="number" value="${modelSettings.matchIndex}" step="1"></div>
+                <div class="field"><label>Chunk X</label><input data-setting="matchChunkX" type="number" value="${matchChunkXValue}" step="1"></div>
+                <div class="field"><label>Chunk Z</label><input data-setting="matchChunkZ" type="number" value="${matchChunkZValue}" step="1"></div>
+                <div class="field"><label>Index</label><input data-setting="matchIndex" type="number" value="${matchIndexValue}" step="1"></div>
             </div>
         `;
     else if (mode === "near")
         targetFields = `
             <div class="field-grid">
-                <div class="field"><label>Near X</label><input data-setting="matchNearX" type="number" value="${modelSettings.matchNearX}" step="0.1"></div>
-                <div class="field"><label>Near Z</label><input data-setting="matchNearZ" type="number" value="${modelSettings.matchNearZ}" step="0.1"></div>
-                <div class="field"><label>Radius</label><input data-setting="matchRadius" type="number" value="${modelSettings.matchRadius}" min="1" step="1"></div>
+                <div class="field"><label>Near X</label><input data-setting="matchNearX" type="number" value="${matchNearXValue}" step="0.1"></div>
+                <div class="field"><label>Near Z</label><input data-setting="matchNearZ" type="number" value="${matchNearZValue}" step="0.1"></div>
+                <div class="field"><label>Radius</label><input data-setting="matchRadius" type="number" value="${matchRadiusValue}" min="1" step="1"></div>
             </div>
         `;
     else
@@ -2865,7 +2951,7 @@ function renderSettings() {
             <option value="complete"${modelSettings.exportMode === "complete" ? " selected" : ""}>Komplette buildings.js</option>
             <option value="entry"${modelSettings.exportMode === "entry" ? " selected" : ""}>Nur Eintrag</option>
         </select></div>
-        <div class="field-wide"><label>Export-ID</label><input data-setting="exportId" type="text" value="${modelSettings.exportId}"></div>
+        <div class="field-wide"><label>Export-ID</label><input data-setting="exportId" type="text" value="${exportIdValue}"></div>
         <div class="field-wide"><label>Zielmodus</label><select data-setting="targetMode">
             <option value="debugId"${mode === "debugId" ? " selected" : ""}>Debug-ID</option>
             <option value="address"${mode === "address" ? " selected" : ""}>Adresse</option>
@@ -2875,8 +2961,8 @@ function renderSettings() {
         </select></div>
         ${targetFields}
         <div class="section field-grid">
-            <div class="field"><label>Apply Chance</label><input data-setting="applyChance" type="number" value="${modelSettings.applyChance}" min="0.01" max="1" step="0.05"></div>
-            <div class="field"><label>Fallback Radius</label><input data-setting="matchRadius" type="number" value="${modelSettings.matchRadius}" min="1" step="1"></div>
+            <div class="field"><label>Apply Chance</label><input data-setting="applyChance" type="number" value="${applyChanceValue}" min="0.01" max="1" step="0.05"></div>
+            <div class="field"><label>Fallback Radius</label><input data-setting="matchRadius" type="number" value="${matchRadiusValue}" min="1" step="1"></div>
         </div>
         <div class="checkbox-row"><input data-setting="baseEnabled" type="checkbox"${modelSettings.baseEnabled ? " checked" : ""}><label>Original-Basis aktiv lassen</label></div>
         <div class="checkbox-row"><input data-setting="roofEnabled" type="checkbox"${modelSettings.roofEnabled ? " checked" : ""}><label>Original-Dach aktiv lassen</label></div>
@@ -2884,18 +2970,11 @@ function renderSettings() {
         <div class="settings-note">Der Standardexport bleibt einzeilig: <code>const tmBuildingsConfig={buildings:[...]};</code></div>
     `;
 
-    for (const input of settingsPanel.querySelectorAll("[data-setting]"))
-        input.addEventListener("input", () => {
-            const key = input.dataset.setting;
-            if (input.type === "checkbox")
-                modelSettings[key] = input.checked;
-            else if (numericSettingFields.has(key))
-                modelSettings[key] = input.value === "" ? "" : roundNumber(input.value);
-            else
-                modelSettings[key] = input.value;
-            renderSettings();
-            refreshCode();
-        });
+    for (const input of settingsPanel.querySelectorAll("[data-setting]")) {
+        const onSettingChange = () => handleSettingInput(input);
+        input.addEventListener("input", onSettingChange);
+        input.addEventListener("change", onSettingChange);
+    }
 }
 
 function resize() {
