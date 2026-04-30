@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.1.7.9
+// @version      2.1.7.10
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -186,6 +186,7 @@
             AI_CAR: 3803,
             TRAFFIC_RESOLVER: 4258,
             CONTROLLABLE_CAR: 7818,
+            CONTROL_MANAGER: 6385,
             ROAD_FACTORY: 5263,
             CHUNK: 4763,
             TERRAIN: 5367,
@@ -199,7 +200,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.1.7.9",
+            version: "2.1.7.10",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -3621,6 +3622,27 @@
             }
         }
 
+        function applyStoppedVehicleHillHold(car, previousPosition) {
+            if (!car || !previousPosition || !car.cameraGroup || !car.cameraGroup.position)
+                return;
+            const manager = getControlManager();
+            if (!manager || !manager.inCar || manager.controllableCar !== car)
+                return;
+            if (manager.moveForward || manager.moveBackward || runtimeState.input.fullBrake)
+                return;
+            if ((Number(car.speeding) || 0) > .02 || (Number(car.breaking) || 0) > .02)
+                return;
+            const speed = speedAbs(car.speed);
+            const moved = getDistance2D(previousPosition, car.cameraGroup.position);
+            if (speed > 1.35 || moved > .42)
+                return;
+            car.cameraGroup.position.x = previousPosition.x;
+            car.cameraGroup.position.z = previousPosition.z;
+            car.speed = 0;
+            car.acc = 0;
+            "function" == typeof car.resetAcc && car.resetAcc();
+        }
+
         function applyVehicleTuningHandlingAssist(car, dtSeconds) {
             if (!car || !featureState.vehicleTuning || !vehicleTuningState.active || !car.cameraGroup)
                 return;
@@ -5565,7 +5587,7 @@
                                     x: ox + start.x + dx * bU,
                                     z: oz + start.z + dz * bU
                                 },
-                                radius: .18
+                                radius: .28
                             };
                             segment.bounds = getSegmentBounds2D(segment.start, segment.end, 4);
                             cache.customWallSegments.push(segment);
@@ -5922,8 +5944,8 @@
                 return !1;
             let collided = !1;
             const vehicleMode = "vehicle" === mode;
-            const buildingRadius = vehicleMode ? clamp(radius * .55, .85, 1.65) : clamp(radius * .55, .22, .34);
-            const wallRadius = vehicleMode ? radius : clamp(radius * .55, .22, .34);
+            const buildingRadius = vehicleMode ? clamp(radius * .64, 1.02, 1.95) : clamp(radius * .62, .34, .48);
+            const wallRadius = vehicleMode ? radius + .18 : clamp(radius * .62, .34, .48);
             for (let pass = 0; pass < 3; pass++) {
                 let passCollided = !1;
                 const applyPass = separation => {
@@ -6407,22 +6429,13 @@
         }
 
         function startPoliceChase(reason, count=1, duration=60) {
-            if (!featureState.police)
-                return;
-            const playerPos = getPlayerPosition();
-            if (!playerPos)
-                return;
-            runtimeState.policeState = {
-                startedAt: performance.now() / 1e3,
-                lastTouchAt: performance.now() / 1e3,
-                reinforcementAt: performance.now() / 1e3 + duration,
-                reason,
-                escapedOnce: runtimeState.policeState && runtimeState.policeState.escapedOnce || !1,
-                duration
-            };
-            for (let index = runtimeState.policeCars.length; index < count; index++)
-                spawnPoliceCar(playerPos, index);
-            notifyRuntime(`Police chase started: ${reason}`);
+            clearPoliceCars();
+            runtimeState.policeState = null;
+            const now = performance.now();
+            if (!runtimeState.__tmExtensionPoliceDisabledLogAt || now - runtimeState.__tmExtensionPoliceDisabledLogAt > 5000) {
+                runtimeState.__tmExtensionPoliceDisabledLogAt = now;
+                log(`Extension-Polizeiautos deaktiviert; Website-Polizei bleibt aktiv (${reason || "no reason"}).`);
+            }
         }
 
         function clearPoliceCars() {
@@ -6432,68 +6445,9 @@
         }
 
         function updatePolice(dtSeconds) {
-            const player = getPlayerCar();
-            const playerPos = player && player.getPosition && player.getPosition();
-            if (!featureState.police || !player || !playerPos) {
+            if (runtimeState.policeCars.length || runtimeState.policeState) {
                 clearPoliceCars();
                 runtimeState.policeState = null;
-                return;
-            }
-            const playerSpeedKmh = speedAbs(player.speed) * 3.6;
-            const inTown = isInTownArea(playerPos);
-            if (!runtimeState.policeState && inTown && playerSpeedKmh > 60) {
-                if (runtimeState.__tmEscapedPoliceOnce)
-                    return resetPlayerWorld("Repeated speeding in town after escaping police");
-                startPoliceChase("speeding in town", 1, 60);
-            }
-            const state = runtimeState.policeState;
-            if (!state)
-                return;
-            if (!runtimeState.policeCars.length)
-                spawnPoliceCar(playerPos, 0);
-            const now = performance.now() / 1e3;
-            for (const car of runtimeState.policeCars) {
-                const group = car.group;
-                if (!group)
-                    continue;
-                const dir = playerPos.clone().sub(group.position);
-                dir.y = 0;
-                const distance = dir.length();
-                if (distance > 1e-3) {
-                    dir.normalize();
-                    const step = Math.min(distance, car.speed * dtSeconds);
-                    group.position.addScaledVector(dir, step);
-                    group.position.y = getTerrainYWorld(group.position, group.position.y);
-                    group.rotation.y = getYawFromVector(dir);
-                    const radius = Number(group.userData.wheelRadius) || .38;
-                    for (const wheel of toSafeArray(group.userData.wheels))
-                        wheel.rotation.z -= step / radius;
-                }
-                const flash = Math.floor(now * 9 + car.index) % 2;
-                group.userData.lightRed && (group.userData.lightRed.visible = 0 === flash);
-                group.userData.lightBlue && (group.userData.lightBlue.visible = 1 === flash);
-                if (distance < 4.2) {
-                    applyVehicleDamage(24, "police hit");
-                    payPlayerMoney(100);
-                    state.lastTouchAt = now;
-                    notifyRuntime("Police hit you: -100 EUR", "error");
-                    clearPoliceCars();
-                    runtimeState.policeState = null;
-                    syncFeatureMenu();
-                    return;
-                }
-            }
-            if (now >= state.reinforcementAt) {
-                if (runtimeState.policeCars.length < 5) {
-                    spawnPoliceCar(playerPos, runtimeState.policeCars.length);
-                    state.reinforcementAt = now + state.duration;
-                    notifyRuntime("Police reinforcement arrived");
-                } else {
-                    runtimeState.__tmEscapedPoliceOnce = !0;
-                    notifyRuntime("You escaped the police.");
-                    clearPoliceCars();
-                    runtimeState.policeState = null;
-                }
             }
         }
 
@@ -11862,6 +11816,10 @@
                 const aiModule = requireFn(REQUIRED_MODULES.AI_CAR);
                 const trafficModule = requireFn(REQUIRED_MODULES.TRAFFIC_RESOLVER);
                 const controllableModule = requireFn(REQUIRED_MODULES.CONTROLLABLE_CAR);
+                let controlManagerModule = null;
+                try {
+                    controlManagerModule = requireFn(REQUIRED_MODULES.CONTROL_MANAGER);
+                } catch (controlManagerError) {}
                 const roadModule = requireFn(REQUIRED_MODULES.ROAD_FACTORY);
                 const chunkModule = requireFn(REQUIRED_MODULES.CHUNK);
                 const terrainModule = requireFn(REQUIRED_MODULES.TERRAIN);
@@ -11876,6 +11834,7 @@
                 const aiProto = aiModule && aiModule.BetterAiCar && aiModule.BetterAiCar.prototype;
                 const trafficProto = trafficModule && trafficModule.AiTrafficResolver && trafficModule.AiTrafficResolver.prototype;
                 const controllableProto = controllableModule && controllableModule.ControllableCar && controllableModule.ControllableCar.prototype;
+                const controlManagerProto = controlManagerModule && controlManagerModule.ControllManager && controlManagerModule.ControllManager.prototype;
                 const chunkProto = chunkModule && chunkModule.Chunk && chunkModule.Chunk.prototype;
                 const terrainProto = terrainModule && terrainModule.Terrain && terrainModule.Terrain.prototype;
                 const biomProto = biomModule && biomModule.Biom && biomModule.Biom.prototype;
@@ -11901,6 +11860,7 @@
                         aiModule,
                         trafficModule,
                         controllableModule,
+                        controlManagerModule,
                         roadModule,
                         chunkModule,
                         terrainModule,
@@ -12149,6 +12109,53 @@
                     trafficProto.__tmUpdateCarPatched = !0;
                 }
 
+                if (controlManagerProto && !controlManagerProto.__tmSReverseDrivePatched) {
+                    const originalControlUpdate = controlManagerProto.update;
+                    controlManagerProto.update = function(...args) {
+                        const car = this && this.controllableCar;
+                        if (car && this.inCar && !this.__tmSReverseDriveActive) {
+                            const speed = Number(car.speed) || 0;
+                            const wantsReverse = this.moveBackward && !this.moveForward;
+                            const wantsForward = this.moveForward && !this.moveBackward;
+                            if (wantsReverse && speed <= .55) {
+                                const oldBackward = this.moveBackward;
+                                const oldForward = this.moveForward;
+                                try {
+                                    "function" == typeof car.turnOffCruiseControl && car.turnOffCruiseControl();
+                                    "function" == typeof car.gearSet && car.gearSet(0);
+                                    this.moveBackward = !1;
+                                    this.moveForward = !0;
+                                    this.__tmSReverseDriveActive = !0;
+                                    return originalControlUpdate.apply(this, args);
+                                } finally {
+                                    this.__tmSReverseDriveActive = !1;
+                                    this.moveBackward = oldBackward;
+                                    this.moveForward = oldForward;
+                                }
+                            }
+                            if (wantsForward && 0 === Number(car.gear)) {
+                                if (speed < -.55) {
+                                    const oldBackward = this.moveBackward;
+                                    const oldForward = this.moveForward;
+                                    try {
+                                        this.moveForward = !1;
+                                        this.moveBackward = !0;
+                                        this.__tmSReverseDriveActive = !0;
+                                        return originalControlUpdate.apply(this, args);
+                                    } finally {
+                                        this.__tmSReverseDriveActive = !1;
+                                        this.moveBackward = oldBackward;
+                                        this.moveForward = oldForward;
+                                    }
+                                }
+                                "function" == typeof car.gearSet && car.gearSet(2);
+                            }
+                        }
+                        return originalControlUpdate.apply(this, args);
+                    };
+                    controlManagerProto.__tmSReverseDrivePatched = !0;
+                }
+
                 if (!controllableProto.__tmMoveGroupPatched) {
                     const originalMoveGroup = controllableProto.moveGroup;
                     controllableProto.moveGroup = function(dtMs) {
@@ -12168,10 +12175,12 @@
                             return result;
                         }
                         const previousSpeed = Number(this.speed) || 0;
+                        const previousPosition = this.cameraGroup && this.cameraGroup.position && this.cameraGroup.position.clone ? this.cameraGroup.position.clone() : null;
                         runInternalModule("vehicleTuningHandling", (() => applyExtendedVehicleControls(this, dtSeconds)), null, "Erweiterte Fahrzeugsteuerung");
                         runFeatureModule("enhancedVehicles", (() => enhanceVehicleAppearance(this)), null, "Enhanced vehicle appearance");
                         const result = originalMoveGroup.apply(this, arguments);
                         runInternalModule("vehicleTuningHandling", (() => applyExtendedVehicleControls(this, dtSeconds)), null, "Erweiterte Fahrzeugsteuerung");
+                        runInternalModule("vehicleTuningHandling", (() => applyStoppedVehicleHillHold(this, previousPosition)), null, "Stand-Hold gegen Hangrollen");
                         runInternalModule("vehicleTuningHandling", (() => applyVehicleTuning(this, dtSeconds, previousSpeed)), null, "Vehicle tuning handling");
                         runFeatureModule("autopilot", (() => applyAutopilotToCar(this, dtSeconds)), !1, "Autopilot drive");
                         return result;
