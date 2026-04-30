@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.1.7.6
+// @version      2.1.7.7
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -199,7 +199,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.1.7.6",
+            version: "2.1.7.7",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -6358,6 +6358,39 @@
             }
         }
 
+        function getDamageSmokeTexture() {
+            if (runtimeState.damageSmokeTexture)
+                return runtimeState.damageSmokeTexture;
+            if (!globalState.THREE || !globalState.THREE.CanvasTexture || !globalThis.document)
+                return null;
+            const canvas = document.createElement("canvas");
+            canvas.width = 96;
+            canvas.height = 96;
+            const ctx = canvas.getContext("2d");
+            if (!ctx)
+                return null;
+            const gradient = ctx.createRadialGradient(48, 48, 4, 48, 48, 46);
+            gradient.addColorStop(0, "rgba(220,224,222,0.5)");
+            gradient.addColorStop(.42, "rgba(160,168,166,0.22)");
+            gradient.addColorStop(1, "rgba(80,86,88,0)");
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 96, 96);
+            const texture = new globalState.THREE.CanvasTexture(canvas);
+            texture.needsUpdate = !0;
+            runtimeState.damageSmokeTexture = texture;
+            return texture;
+        }
+
+        function createDamageSmokeMote(material, size, position) {
+            if (globalState.THREE && globalState.THREE.Sprite) {
+                const sprite = new globalState.THREE.Sprite(material);
+                sprite.scale.set(size, size, 1);
+                position && sprite.position.set(position[0], position[1], position[2]);
+                return sprite;
+            }
+            return createEllipsoid([size, size * .8, size], 0x9da4a3, position, material);
+        }
+
         function ensureVehicleDamageVisuals(car) {
             if (!car || !car.cameraGroup || !globalState.THREE)
                 return null;
@@ -6372,11 +6405,12 @@
                 opacity: .78
             });
             const smokeMaterial = new THREE.MeshBasicMaterial({
-                color: 0x5f6468,
+                color: 0xa9b1af,
                 transparent: !0,
-                opacity: .28,
+                opacity: .16,
                 depthWrite: !1
             });
+            const smokeTexture = getDamageSmokeTexture();
             const sparkMaterial = new THREE.MeshBasicMaterial({
                 color: 0xffa331
             });
@@ -6389,18 +6423,23 @@
                 group.add(dent);
             const smoke = new THREE.Group;
             smoke.name = "__tmDamageSmoke";
-            for (let index = 0; index < 12; index++) {
+            for (let index = 0; index < 10; index++) {
                 const puff = new THREE.Group;
                 puff.userData.phase = seededUnit(index, 37);
-                for (let part = 0; part < 3; part++) {
-                    const spread = .08 + part * .035;
-                    const material = smokeMaterial.clone();
-                    material.opacity = .18 + .04 * part;
+                for (let part = 0; part < 2; part++) {
+                    const spread = .06 + part * .045;
+                    const material = smokeTexture && THREE.SpriteMaterial ? new THREE.SpriteMaterial({
+                        map: smokeTexture,
+                        color: 0xb6bcbb,
+                        transparent: !0,
+                        opacity: .1 + .025 * part,
+                        depthWrite: !1
+                    }) : smokeMaterial.clone();
                     const waver = seededUnit(index, part + 11) * Math.PI * 2;
-                    const mote = createEllipsoid([.16 + .035 * index + .03 * part, .1 + .025 * index, .14 + .03 * index + .025 * part], 0x5f6468, [Math.cos(waver) * spread, Math.sin(waver * 1.7) * spread, Math.sin(waver) * spread], material);
+                    const mote = createDamageSmokeMote(material, .18 + .018 * index + .04 * part, [Math.cos(waver) * spread, Math.sin(waver * 1.7) * spread, Math.sin(waver) * spread]);
                     puff.add(mote);
                 }
-                puff.position.set(1.35 + .08 * index, 1.42 + .16 * index, -.25 + Math.sin(index) * .2);
+                puff.position.set(1.25 + .06 * index, 1.38 + .13 * index, -.22 + Math.sin(index) * .16);
                 smoke.add(puff);
             }
             group.add(smoke);
@@ -6440,12 +6479,12 @@
                 for (let index = 0; index < smoke.children.length; index++) {
                     const puff = smoke.children[index];
                     const wave = (time * (.8 + ratio) + index * .37 + (puff.userData.phase || 0)) % 1;
-                    puff.position.y = 1.35 + index * .18 + wave * .55;
-                    puff.position.x = 1.15 + Math.sin(time * 2 + index) * .18 + index * .08;
-                    puff.position.z = -.2 + Math.cos(time * 1.7 + index) * .22;
-                    puff.scale.setScalar(.25 + ratio * .45 + wave * .18);
+                    puff.position.y = 1.32 + index * .14 + wave * .42;
+                    puff.position.x = 1.1 + Math.sin(time * 1.7 + index) * .13 + index * .055;
+                    puff.position.z = -.18 + Math.cos(time * 1.35 + index) * .16;
+                    puff.scale.setScalar(.2 + ratio * .28 + wave * .1);
                     puff.traverse && puff.traverse(node => {
-                        node.material && (node.material.opacity = clamp(.08 + ratio * .22 - wave * .08 + (node.position.length ? node.position.length() : 0) * .06, .04, .42));
+                        node.material && (node.material.opacity = clamp(.035 + ratio * .13 - wave * .06 + (node.position.length ? node.position.length() : 0) * .025, .015, .22));
                     });
                 }
             }
@@ -9681,7 +9720,7 @@
                 return null;
             const width = Math.max(.2, Number(size && size[0]) || 1);
             const height = Math.max(.2, Number(size && size[1]) || 1);
-            const wallDepth = Math.max(.28, Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .34);
+            const wallDepth = Math.max(.42, Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .42);
             const margin = Math.min(frame.length / 2, width / 2 + .18);
             const projected = projectPointToWallFrame(desired, frame);
             const centerU = clamp(projected * frame.length, margin, Math.max(margin, frame.length - margin));
@@ -9692,8 +9731,9 @@
             const minCenterY = baseY + height / 2;
             const maxCenterY = baseY + Math.max(height / 2 + .02, bodyHeight - height / 2 - .08);
             const centerY = grounded ? minCenterY : clamp(rawCenterY || baseY + 1.25 + height / 2, minCenterY + .45, maxCenterY);
-            const openingPad = grounded ? .035 : .018;
-            const y1 = grounded ? 0 : Math.max(.025, centerY - baseY - height / 2 - openingPad);
+            const openingPad = grounded ? .018 : .018;
+            const yPad = grounded ? .075 : openingPad;
+            const y1 = grounded ? -.08 : Math.max(.025, centerY - baseY - height / 2 - yPad);
             const y2 = Math.min(bodyHeight - .025, centerY - baseY + height / 2 + openingPad);
             return {
                 edgeIndex: frame.index,
@@ -9702,6 +9742,7 @@
                 normalX: frame.normalX,
                 normalZ: frame.normalZ,
                 wallDepth,
+                kind,
                 rect: {
                     x1: Math.max(.025, centerU - width / 2 - openingPad),
                     x2: Math.min(frame.length - .025, centerU + width / 2 + openingPad),
@@ -9718,7 +9759,7 @@
             const bestFrame = frames.sort((a, b) => b.length - a.length)[0];
             if (!bestFrame)
                 return null;
-            const wallDepth = Math.max(.28, Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .34);
+            const wallDepth = Math.max(.42, Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .42);
             return {
                 type: "door",
                 wallIndex: bestFrame.index,
@@ -9764,7 +9805,8 @@
                     continue;
                 openings.doors.push({
                     edgeIndex: placement.edgeIndex,
-                    rect: placement.rect
+                    rect: placement.rect,
+                    kind: "door"
                 });
                 hasDoor = !0;
             }
@@ -9777,7 +9819,8 @@
                         spec.__tmFallbackDoorDetail = fallback;
                         openings.doors.push({
                             edgeIndex: placement.edgeIndex,
-                            rect: placement.rect
+                            rect: placement.rect,
+                            kind: "door"
                         });
                         hasDoor = !0;
                     }
@@ -9791,14 +9834,15 @@
                 const placement = placePart(part, "window");
                 if (!placement)
                     continue;
-                if (!isRectClearOfWallOpenings(placement.rect, openings.doors.filter(opening => opening.edgeIndex === placement.edgeIndex), .18)) {
+                if (!isRectClearOfWallOpenings(placement.rect, openings.doors.filter(opening => opening.edgeIndex === placement.edgeIndex), .72)) {
                     part.__tmWallPlacement = null;
                     part.__tmSkipRender = !0;
                     continue;
                 }
                 openings.windows.push({
                     edgeIndex: placement.edgeIndex,
-                    rect: placement.rect
+                    rect: placement.rect,
+                    kind: "window"
                 });
             }
             spec.__tmWallOpenings = openings;
@@ -9866,7 +9910,8 @@
         function collectWallCutoutsForEdge(index, edgeFrame, baseY, bodyHeight, sideSpec, layout, spec) {
             const edgeLength = edgeFrame && edgeFrame.length || 0;
             const cutouts = [];
-            const explicitOpenings = getWallOpenings(spec, "doors", index).concat(getWallOpenings(spec, "windows", index));
+            const doorOpenings = getWallOpenings(spec, "doors", index);
+            const explicitOpenings = doorOpenings.concat(getWallOpenings(spec, "windows", index));
             for (const opening of explicitOpenings) {
                 const rect = clampWallCutoutRect(opening.rect || opening, edgeLength, bodyHeight);
                 rect && cutouts.push(rect);
@@ -9875,6 +9920,8 @@
                 return cutouts;
             for (const rect of toSafeArray(layout && layout.rects)) {
                 if (!isWindowRectClearOfTerrain(rect, edgeFrame, baseY, spec))
+                    continue;
+                if (!isRectClearOfWallOpenings(rect, doorOpenings, .72))
                     continue;
                 if (!isRectClearOfWallOpenings(rect, explicitOpenings, .28))
                     continue;
@@ -9889,9 +9936,9 @@
             const height = y2 - y1;
             if (!group || width <= .045 || height <= .045)
                 return;
-            const overlapX = .16;
-            const overlapY = .085;
-            const overlapZ = .12;
+            const overlapX = .24;
+            const overlapY = .13;
+            const overlapZ = .18;
             const centerU = (x1 + x2) / 2 - frame.length / 2;
             const centerY = baseY + (y1 + y2) / 2;
             const mesh = createRuntimeBox([width + overlapX, height + overlapY, wallDepth + overlapZ], material, [0, 0, 0]);
@@ -9952,7 +9999,7 @@
             const windowsSpec = deepMergeConfig(spec && spec.windows || {}, {
                 sides: spec && spec.sides || {}
             });
-            const wallDepth = Math.max(.28, Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .34);
+            const wallDepth = Math.max(.42, Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .42);
             for (let index = 0; index < points.length; index++) {
                 const current = points[index];
                 const next = points[(index + 1) % points.length];
@@ -10055,6 +10102,20 @@
         }
 
         function createFlatCustomRoof(points, baseY, bodyHeight, colorValue) {
+            const slab = createCustomBuildingSlab(points, baseY + bodyHeight - .06, .18, colorValue, {
+                base: {
+                    solid: !0
+                },
+                windows: {
+                    enabled: !1,
+                    cutHoles: !1
+                },
+                roof: {
+                    enabled: !1
+                }
+            }, "__tmCustomBuildingFlatRoof");
+            if (slab)
+                return slab;
             // Irregular footprints use an exact footprint roof so L-shaped houses do not get a floating rectangle.
             const shape = createShapeFromFootprint(points);
             if (!shape)
@@ -10081,7 +10142,7 @@
             if (!globalState.THREE || points.length < 3 || !roofSpec || !1 === roofSpec.enabled)
                 return null;
             const roofType = roofSpec.type || "gable";
-            const overhang = Number(roofSpec.overhang) || 0;
+            const overhang = Math.max(.18, Number(roofSpec.overhang) || 0);
             const colorValue = null != roofSpec.color ? roofSpec.color : 8606516;
             if ("flat" === roofType || shouldUseFootprintRoof(points))
                 return createFlatCustomRoof(points, baseY, bodyHeight, colorValue);
@@ -10220,13 +10281,16 @@
                     roughness: .08,
                     metalness: .05
                 });
-                const wallDepth = Math.max(.28, Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .34);
-                const frameDepth = clamp(Number(sideSpec.frameDepth) || Math.max(.08, wallDepth * .72), .05, Math.max(.08, wallDepth * .9));
+                const wallDepth = Math.max(.42, Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .42);
+                const frameDepth = Math.max(wallDepth + .08, Number(sideSpec.frameDepth) || 0);
                 const frameNormalOffset = wallDepth / 2;
                 const glassNormalOffset = wallDepth / 2;
-                const reservedOpenings = getWallOpenings(spec, "doors", index).concat(getWallOpenings(spec, "windows", index));
+                const doorOpenings = getWallOpenings(spec, "doors", index);
+                const reservedOpenings = doorOpenings.concat(getWallOpenings(spec, "windows", index));
                 for (const rect of layout.rects) {
                     if (!isWindowRectClearOfTerrain(rect, frame, baseY, spec))
+                        continue;
+                    if (!isRectClearOfWallOpenings(rect, doorOpenings, .72))
                         continue;
                     if (!isRectClearOfWallOpenings(rect, reservedOpenings, .28))
                         continue;
@@ -10831,7 +10895,7 @@
             const width = Math.max(.2, size[0]);
             const height = Math.max(.2, size[1]);
             const placementWallDepth = detail.__tmWallPlacement && Number(detail.__tmWallPlacement.wallDepth);
-            const depth = placementWallDepth ? clamp(Math.max(.05, size[2]), .08, placementWallDepth * .82) : Math.max(.05, size[2]);
+            const depth = placementWallDepth ? Math.max(.08, size[2], placementWallDepth + .08) : Math.max(.05, size[2]);
             const frameThickness = Math.max(.04, Math.min(width, height) * .09);
             const group = new THREE.Group;
             group.name = "__tmCustomBuildingWindow";
@@ -10899,7 +10963,7 @@
                 const width = Math.max(.25, size[0]);
                 const height = Math.max(.25, size[1]);
                 const placementWallDepth = detail.__tmWallPlacement && Number(detail.__tmWallPlacement.wallDepth);
-                const depth = placementWallDepth ? clamp(Math.max(.06, size[2]), .08, placementWallDepth * .78) : Math.max(.04, size[2]);
+                const depth = placementWallDepth ? Math.max(.08, size[2], placementWallDepth + .08) : Math.max(.04, size[2]);
                 const frameThickness = Math.max(.05, Math.min(width, height) * .08);
                 const group = new THREE.Group;
                 group.name = "__tmCustomBuildingDoorFrame";
@@ -10920,8 +10984,8 @@
                 pivot.name = "__tmCustomBuildingDoor";
                 pivot.position.set(hingeLeft ? -width / 2 + frameThickness / 2 : width / 2 - frameThickness / 2, 0, 0);
                 const leafWidth = Math.max(.08, width - frameThickness * 1.5);
-                const leafHeight = Math.max(.08, height - frameThickness * 1.5);
-                const leaf = createRuntimeBox([leafWidth, leafHeight, Math.max(.03, depth * .82)], leafMaterial, [hingeLeft ? leafWidth / 2 : -leafWidth / 2, 0, 0]);
+                const leafHeight = Math.max(.08, height - frameThickness);
+                const leaf = createRuntimeBox([leafWidth, leafHeight, Math.max(.03, depth * .82)], leafMaterial, [hingeLeft ? leafWidth / 2 : -leafWidth / 2, -frameThickness / 2, 0]);
                 detail.staticDoor || (leaf.userData.tmDynamicDoor = !0);
                 pivot.add(leaf);
                 const modelerOpen = detail.isOpen ? clamp(Number(detail.openAngle) || 90, 0, 180) : 0;
@@ -11092,7 +11156,7 @@
             const wallCenterY = (detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.y) || 0) + (Number(position[1]) || 0);
             const wallWidth = Math.max(.08, Number(size && size[0]) || 1);
             const wallHeight = Math.max(.08, Number(size && size[1]) || 1);
-            const wallDepth = Math.max(.28, Number(size && size[2]) || Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .34);
+            const wallDepth = Math.max(.42, Number(size && size[2]) || Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .42);
             const desired = {
                 x: (Number(anchorPoint.x) || 0) + (Number(position[0]) || 0),
                 z: (Number(anchorPoint.z) || 0) + (Number(position[2]) || 0)
@@ -11146,7 +11210,7 @@
                     };
                     if (cutouts.some(rect => rectsOverlap2D(pointRect, rect, -.012)))
                         continue;
-                    group.add(createRuntimeBox([x2 - x1 + .12, y2 - y1 + .07, wallDepth + .09], material, [(x1 + x2) / 2, (y1 + y2) / 2, 0]));
+                    group.add(createRuntimeBox([x2 - x1 + .22, y2 - y1 + .12, wallDepth + .16], material, [(x1 + x2) / 2, (y1 + y2) / 2, 0]));
                 }
             return group.children.length ? positionDetailObject(group, Object.assign({}, detail, {
                 size: [wallWidth, wallHeight, wallDepth]
@@ -11288,7 +11352,7 @@
             prepareWallOpeningsForSpec(points, baseY, bodyHeight, spec, anchorPoint);
             const baseEnabled = !(spec.base && !1 === spec.base.enabled);
             if (!hasExplicitFloorPart(spec)) {
-                const floor = createCustomBuildingSlab(points, baseY - .08, .14, spec.floor && spec.floor.color || 0xb88f61, spec.floor || spec, "__tmCustomBuildingFloor");
+                const floor = createCustomBuildingSlab(points, baseY - .12, .2, spec.floor && spec.floor.color || 0xb88f61, spec.floor || spec, "__tmCustomBuildingFloor");
                 floor && group.add(floor);
             }
             if (baseEnabled) {
@@ -11296,7 +11360,7 @@
                 foundation && group.add(foundation);
                 const body = createCustomBuildingBody(points, baseY, bodyHeight, spec.base && spec.base.color, spec);
                 body && group.add(body);
-                const ceiling = createCustomBuildingSlab(points, baseY + bodyHeight - .055, .11, spec.ceiling && spec.ceiling.color || spec.base && spec.base.color, spec.ceiling || spec, "__tmCustomBuildingCeiling");
+                const ceiling = createCustomBuildingSlab(points, baseY + bodyHeight - .09, .18, spec.ceiling && spec.ceiling.color || spec.base && spec.base.color, spec.ceiling || spec, "__tmCustomBuildingCeiling");
                 ceiling && group.add(ceiling);
                 const roof = createCustomRoof(points, baseY, bodyHeight, spec.roof);
                 roof && group.add(roof);
