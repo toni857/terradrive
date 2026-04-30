@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.1.6.9
+// @version      2.1.7.0
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -199,7 +199,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.1.6.9",
+            version: "2.1.7.0",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -225,7 +225,7 @@
         const STARTING_MONEY = 500;
         const BUILDING_FIT_CONFIG = {
             foundationMinHeight: .32,
-            groundClearance: .42,
+            groundClearance: .08,
             regularRoadClearance: 7,
             addressRoadClearance: 16,
             regularOverlapPadding: 1.8,
@@ -3711,7 +3711,7 @@
         }
 
         function findTargetRoadPosition(position) {
-            const match = findNearestRoadSegment(position, 1800);
+            const match = findBestRoadSegmentTowardTarget(position, 1800, position);
             return match && match.point ? match.point.clone() : cloneVector3(position);
         }
 
@@ -3843,6 +3843,127 @@
             })).sort(((a, b) => a.distance - b.distance))[0] || null;
         }
 
+        function getAddressSearchParts(text) {
+            const normalized = normalizeTownLabel(text).toLowerCase();
+            const postal = normalized.match(/\b\d{4,5}\b/);
+            const house = normalized.match(/\b(\d+[a-z]?)\b(?!.*\b\d+[a-z]?\b)/);
+            const words = normalized.replace(/\b\d+[a-z]?\b/g, " ").split(/\s+/).filter(word => word.length > 2);
+            return {
+                normalized,
+                postal: postal && postal[0] || "",
+                house: house && house[1] || "",
+                words
+            };
+        }
+
+        function buildAddressSearchRequests(text) {
+            const parts = getAddressSearchParts(text);
+            const requests = [{
+                query: text,
+                countrycodes: ""
+            }];
+            if (/^\d{4}\b/.test(parts.normalized)) {
+                requests.push({
+                    query: `${text}, Oesterreich`,
+                    countrycodes: "at"
+                }, {
+                    query: `${text}, Austria`,
+                    countrycodes: "at"
+                });
+            }
+            if (!/\b(oesterreich|österreich|austria|deutschland|germany)\b/i.test(text)) {
+                requests.push({
+                    query: `${text}, Oesterreich`,
+                    countrycodes: "at"
+                });
+            }
+            const seen = new Set;
+            return requests.filter(request => {
+                const key = `${request.query}|${request.countrycodes}`;
+                if (seen.has(key))
+                    return !1;
+                seen.add(key);
+                return !0;
+            });
+        }
+
+        function scoreAddressSearchResult(result, text) {
+            const parts = getAddressSearchParts(text);
+            const address = result && result.address || {};
+            const haystack = normalizeTownLabel([result && result.display_name, address.road, address.house_number, address.postcode, address.city, address.town, address.village, address.hamlet, address.suburb, address.country].filter(Boolean).join(" ")).toLowerCase();
+            let score = Number(result && result.importance) || 0;
+            if (parts.postal && String(address.postcode || "").startsWith(parts.postal))
+                score += 100;
+            if (parts.house && String(address.house_number || "").toLowerCase() === parts.house)
+                score += 55;
+            for (const word of parts.words)
+                haystack.includes(word) && (score += 18);
+            if (/austria|oesterreich|österreich/i.test(haystack))
+                score += /^\d{4}\b/.test(parts.normalized) ? 45 : 8;
+            if (address.road || address.house_number)
+                score += 18;
+            return score;
+        }
+
+        async function resolveAddressToWorldPosition(text) {
+            const queryText = normalizeTownLabel(text);
+            if (!queryText || !runtimeState.geoModule || "function" != typeof runtimeState.geoModule.convertProjLocalCoords)
+                return null;
+            const key = `address:${queryText.toLowerCase()}`;
+            if (runtimeState.customBuildingAddressCache.has(key)) {
+                const cached = runtimeState.customBuildingAddressCache.get(key);
+                return cached && "function" == typeof cached.then ? await cached : cached;
+            }
+            const promise = (async () => {
+                const candidates = [];
+                for (const request of buildAddressSearchRequests(queryText)) {
+                    const params = new URLSearchParams({
+                        format: "json",
+                        limit: "5",
+                        addressdetails: "1",
+                        q: request.query
+                    });
+                    request.countrycodes && params.set("countrycodes", request.countrycodes);
+                    const response = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
+                        headers: {
+                            Accept: "application/json"
+                        }
+                    });
+                    if (!response.ok)
+                        throw new Error(`HTTP ${response.status}`);
+                    const results = await response.json();
+                    for (const result of toSafeArray(results))
+                        candidates.push(result);
+                    if (candidates.some(result => scoreAddressSearchResult(result, queryText) >= 120))
+                        break;
+                }
+                const best = candidates.sort(((a, b) => scoreAddressSearchResult(b, queryText) - scoreAddressSearchResult(a, queryText)))[0];
+                const lat = Number(best && best.lat);
+                const lon = Number(best && best.lon);
+                if (!Number.isFinite(lat) || !Number.isFinite(lon))
+                    return null;
+                const position = runtimeState.geoModule.convertProjLocalCoords([lat, lon]);
+                if (!position)
+                    return null;
+                position.y = getTerrainYWorld(position, 0);
+                return {
+                    x: Number(position.x) || 0,
+                    y: Number(position.y) || 0,
+                    z: Number(position.z) || 0,
+                    label: normalizeTownLabel(best.display_name || queryText),
+                    lat,
+                    lon
+                };
+            })().catch(addressError => {
+                warn(`Adresse konnte nicht aufgeloest werden (${queryText}):`, addressError);
+                return null;
+            });
+            runtimeState.customBuildingAddressCache.set(key, promise);
+            const resolved = await promise;
+            runtimeState.customBuildingAddressCache.set(key, resolved);
+            return resolved;
+        }
+
         function startNaviPreset(type) {
             if (!featureState.navigation) {
                 notifyRuntime("Navi panel ist in den Extension-Einstellungen aus.", "error");
@@ -3894,24 +4015,13 @@
             }
             runtimeState.navSearching = !0;
             setNaviPanelStatus("Suche Adresse...");
-            const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=1&q=${encodeURIComponent(text)}`;
-            fetch(url, {
-                headers: {
-                    Accept: "application/json"
-                }
-            }).then(response => response.json()).then(results => {
-                const result = Array.isArray(results) ? results[0] : null;
+            resolveAddressToWorldPosition(text).then(result => {
                 if (!result)
                     throw new Error("Adresse nicht gefunden");
-                const lat = Number(result.lat);
-                const lon = Number(result.lon);
-                if (!Number.isFinite(lat) || !Number.isFinite(lon))
-                    throw new Error("Adresse ohne Koordinaten");
-                const position = runtimeState.geoModule.convertProjLocalCoords([lat, lon]);
+                const position = new globalState.THREE.Vector3(result.x,result.y || 0,result.z);
                 if (!position)
                     throw new Error("Koordinaten konnten nicht ins Spiel umgerechnet werden");
-                position.y = getTerrainYWorld(position, 0);
-                const label = normalizeTownLabel(result.display_name).slice(0, 72) || text;
+                const label = normalizeTownLabel(result.label).slice(0, 72) || text;
                 addCustomBuildingPriorityTarget(position, label);
                 prepareCustomBuildingsNearPosition(position, "address");
                 startNaviToWorldPosition(position, label, "address");
@@ -4136,6 +4246,49 @@
             return best;
         }
 
+        function scoreRoadSegmentTowardTarget(match, position, target) {
+            if (!match)
+                return 1 / 0;
+            let score = Number(match.distance) || 0;
+            if (!target)
+                return score;
+            const toTarget = target.clone ? target.clone().sub(match.point) : new globalState.THREE.Vector3((Number(target.x) || 0) - match.point.x,0,(Number(target.z) || 0) - match.point.z);
+            toTarget.y = 0;
+            if (toTarget.lengthSq() > 1e-6) {
+                toTarget.normalize();
+                const forwardDot = Math.max(clamp(match.direction.dot(toTarget), -1, 1), clamp(match.direction.clone().multiplyScalar(-1).dot(toTarget), -1, 1));
+                score += (1 - forwardDot) * 180;
+            }
+            score += getDistance2D(match.point, target) * .025;
+            if (position)
+                score += getDistance2D(position, match.point) * .06;
+            return score;
+        }
+
+        function findBestRoadSegmentTowardTarget(position, maxDistance=1 / 0, target=null) {
+            if (!position || !globalState.THREE)
+                return null;
+            let best = null;
+            let bestScore = 1 / 0;
+            for (const chunk of getLoadedChunks())
+                for (const edge of toSafeArray(chunk.newRoadGraph && chunk.newRoadGraph.edges)) {
+                    if (!isRoadEligibleForAutopilot(edge))
+                        continue;
+                    const points = getEdgeWorldPoints(edge);
+                    for (let index = 0; index < points.length - 1; index++) {
+                        const match = getRoadSegmentMatch(edge, index, position);
+                        if (!match || match.distance > maxDistance)
+                            continue;
+                        const score = scoreRoadSegmentTowardTarget(match, position, target);
+                        if (score < bestScore) {
+                            best = match;
+                            bestScore = score;
+                        }
+                    }
+                }
+            return best;
+        }
+
         function chooseAutopilotDirection(match, target) {
             if (!match || !target)
                 return 1;
@@ -4247,8 +4400,8 @@
         function rebuildAutopilotRoute(state, startPosition) {
             if (!state || !state.targetRoadPosition)
                 return !1;
-            const startMatch = findNearestRoadSegment(startPosition || getPlayerPosition(), 220);
-            const targetMatch = findNearestRoadSegment(state.targetRoadPosition, 2200);
+            const startMatch = findBestRoadSegmentTowardTarget(startPosition || getPlayerPosition(), 1800, state.targetRoadPosition || state.targetPosition);
+            const targetMatch = findBestRoadSegmentTowardTarget(state.targetRoadPosition, 2200, state.targetPosition || state.targetRoadPosition);
             if (!startMatch || !targetMatch)
                 return clearAutopilotRoute(state),
                 !1;
@@ -4500,7 +4653,7 @@
                 return !0;
             }
             if (!state.edge || !state.snapped) {
-                const match = findNearestRoadSegment(carPosition, 1 / 0);
+                const match = findBestRoadSegmentTowardTarget(carPosition, 1800, state.targetRoadPosition || state.targetPosition) || findNearestRoadSegment(carPosition, 1 / 0);
                 if (!match) {
                     const now = performance.now();
                     if (now - (state.lastNoticeAt || 0) > 2500) {
@@ -6742,6 +6895,10 @@
                 }
                 group.getWorldPosition(worldPosition);
                 const target = playerPos && getDistance2D(playerPos, worldPosition) <= state.radius ? 1 : 0;
+                if (target && Number.isFinite(state.baseOpenY) && Number.isFinite(state.normalX) && Number.isFinite(state.normalZ)) {
+                    const side = ((Number(playerPos.x) || 0) - worldPosition.x) * state.normalX + ((Number(playerPos.z) || 0) - worldPosition.z) * state.normalZ;
+                    state.openY = state.closedY + state.baseOpenY * (side >= 0 ? 1 : -1);
+                }
                 const delta = doorDt * state.speed;
                 state.current += (target - state.current) * Math.min(1, delta);
                 const eased = state.current * state.current * (3 - 2 * state.current);
@@ -7670,39 +7827,7 @@
             const text = normalizeTownLabel(address);
             if (!text || !runtimeState.geoModule || "function" != typeof runtimeState.geoModule.convertProjLocalCoords)
                 return null;
-            const key = text.toLowerCase();
-            if (runtimeState.customBuildingAddressCache.has(key)) {
-                const cached = runtimeState.customBuildingAddressCache.get(key);
-                return cached && "function" == typeof cached.then ? await cached : cached;
-            }
-            const promise = fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=1&q=${encodeURIComponent(text)}`, {
-                headers: {
-                    Accept: "application/json"
-                }
-            }).then((response => {
-                if (!response.ok)
-                    throw new Error(`HTTP ${response.status}`);
-                return response.json();
-            })).then((results => {
-                const result = Array.isArray(results) ? results[0] : null;
-                const lat = Number(result && result.lat);
-                const lon = Number(result && result.lon);
-                if (!Number.isFinite(lat) || !Number.isFinite(lon))
-                    return null;
-                const position = runtimeState.geoModule.convertProjLocalCoords([lat, lon]);
-                return position ? {
-                    x: Number(position.x) || 0,
-                    z: Number(position.z) || 0,
-                    label: normalizeTownLabel(result.display_name || text)
-                } : null;
-            })).catch((addressError => {
-                warn(`Adresse fuer Custom-Haus konnte nicht aufgeloest werden (${text}):`, addressError);
-                return null;
-            }));
-            runtimeState.customBuildingAddressCache.set(key, promise);
-            const resolved = await promise;
-            runtimeState.customBuildingAddressCache.set(key, resolved);
-            return resolved;
+            return resolveAddressToWorldPosition(text);
         }
 
         async function hydrateCustomBuildingAddressMatches(catalog) {
@@ -8875,23 +9000,26 @@
                 return null;
             const width = Math.max(.2, Number(size && size[0]) || 1);
             const height = Math.max(.2, Number(size && size[1]) || 1);
-            const wallDepth = Math.max(.05, Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .12);
+            const wallDepth = Math.max(.28, Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .34);
             const margin = Math.min(frame.length / 2, width / 2 + .18);
             const projected = projectPointToWallFrame(desired, frame);
             const centerU = clamp(projected * frame.length, margin, Math.max(margin, frame.length - margin));
-            const localX = (Number(frame.start.x) || 0) + frame.alongX * centerU + frame.normalX * Math.max(.025, wallDepth * .55);
-            const localZ = (Number(frame.start.z) || 0) + frame.alongZ * centerU + frame.normalZ * Math.max(.025, wallDepth * .55);
+            const localX = (Number(frame.start.x) || 0) + frame.alongX * centerU + frame.normalX * wallDepth / 2;
+            const localZ = (Number(frame.start.z) || 0) + frame.alongZ * centerU + frame.normalZ * wallDepth / 2;
             const rawCenterY = (Number(anchorPoint.y) || 0) + (Number(position[1]) || 0);
             const grounded = "door" === kind;
-            const minCenterY = baseY + height / 2 + .015;
+            const minCenterY = baseY + height / 2;
             const maxCenterY = baseY + Math.max(height / 2 + .02, bodyHeight - height / 2 - .08);
             const centerY = grounded ? minCenterY : clamp(rawCenterY || baseY + 1.25 + height / 2, minCenterY + .45, maxCenterY);
-            const y1 = grounded ? .025 : Math.max(.025, centerY - baseY - height / 2 - .05);
+            const y1 = grounded ? 0 : Math.max(.025, centerY - baseY - height / 2 - .05);
             const y2 = Math.min(bodyHeight - .025, centerY - baseY + height / 2 + .05);
             return {
                 edgeIndex: frame.index,
                 position: [localX, centerY, localZ],
                 rotationY: frame.rotationY,
+                normalX: frame.normalX,
+                normalZ: frame.normalZ,
+                wallDepth,
                 rect: {
                     x1: Math.max(.025, centerU - width / 2 - .08),
                     x2: Math.min(frame.length - .025, centerU + width / 2 + .08),
@@ -8908,11 +9036,11 @@
             const bestFrame = frames.sort((a, b) => b.length - a.length)[0];
             if (!bestFrame)
                 return null;
-            const wallDepth = Math.max(.06, Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .12);
+            const wallDepth = Math.max(.28, Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .34);
             return {
                 type: "door",
                 wallIndex: bestFrame.index,
-                size: [1.08, Math.min(2.25, Math.max(1.95, bodyHeight - .35)), Math.max(.06, wallDepth * .78)],
+                size: [1.08, Math.min(2.25, Math.max(1.95, bodyHeight - .35)), Math.max(.08, wallDepth * .72)],
                 position: [bestFrame.midX - (Number(anchorPoint.x) || 0), 1.1, bestFrame.midZ - (Number(anchorPoint.z) || 0)],
                 rotation: [0, bestFrame.rotationY, 0],
                 rotationUnit: "rad",
@@ -8920,7 +9048,8 @@
                 frameColor: 0xe9dbc4,
                 materialKind: "wood",
                 hingeSide: "left",
-                openAngle: 88
+                openAngle: 88,
+                openRadius: 2.15
             };
         }
 
@@ -8928,6 +9057,9 @@
             // This is the shared source of truth for wall holes and visible door/window meshes.
             if (!spec || !Array.isArray(points) || points.length < 3)
                 return;
+            spec.__tmWallPoints = points;
+            spec.__tmBaseY = baseY;
+            spec.__tmBodyHeight = bodyHeight;
             const openings = {
                 doors: [],
                 windows: []
@@ -8990,6 +9122,113 @@
             }));
         }
 
+        function createCustomBuildingSlab(points, baseY, thickness, colorValue, spec, name) {
+            const safeThickness = Math.max(.06, Number(thickness) || .12);
+            const slab = createCustomBuildingBody(points, Number(baseY) || 0, safeThickness, null != colorValue ? colorValue : 0xb88f61, deepMergeConfig(spec || {}, {
+                windows: {
+                    enabled: !1,
+                    cutHoles: !1
+                },
+                roof: {
+                    enabled: !1
+                },
+                base: {
+                    solid: !0
+                }
+            }));
+            slab && (slab.name = name || "__tmCustomBuildingSlab");
+            return slab;
+        }
+
+        function hasExplicitFloorPart(spec) {
+            return toSafeArray(spec && spec.parts).some((part => "floor" === String(part && part.type || "").toLowerCase()));
+        }
+
+        function clampWallCutoutRect(rect, edgeLength, bodyHeight) {
+            if (!rect)
+                return null;
+            const x1 = clamp(Number(rect.x1) || 0, 0, edgeLength);
+            const x2 = clamp(Number(rect.x2) || 0, 0, edgeLength);
+            const y1 = clamp(Number(rect.y1) || 0, 0, bodyHeight);
+            const y2 = clamp(Number(rect.y2) || 0, 0, bodyHeight);
+            return x2 - x1 > .06 && y2 - y1 > .06 ? {
+                x1,
+                x2,
+                y1,
+                y2
+            } : null;
+        }
+
+        function collectWallCutoutsForEdge(index, edgeFrame, baseY, bodyHeight, sideSpec, layout, spec) {
+            const edgeLength = edgeFrame && edgeFrame.length || 0;
+            const cutouts = [];
+            const explicitOpenings = getWallOpenings(spec, "doors", index).concat(getWallOpenings(spec, "windows", index));
+            for (const opening of explicitOpenings) {
+                const rect = clampWallCutoutRect(opening.rect || opening, edgeLength, bodyHeight);
+                rect && cutouts.push(rect);
+            }
+            if (!1 === sideSpec.enabled || !1 === sideSpec.cutHoles)
+                return cutouts;
+            for (const rect of toSafeArray(layout && layout.rects)) {
+                if (!isWindowRectClearOfTerrain(rect, edgeFrame, baseY, spec))
+                    continue;
+                if (!isRectClearOfWallOpenings(rect, explicitOpenings, .28))
+                    continue;
+                const cutout = clampWallCutoutRect(rect, edgeLength, bodyHeight);
+                cutout && cutouts.push(cutout);
+            }
+            return cutouts;
+        }
+
+        function addWallSegmentBox(group, material, frame, baseY, wallDepth, x1, x2, y1, y2) {
+            const width = x2 - x1;
+            const height = y2 - y1;
+            if (!group || width <= .045 || height <= .045)
+                return;
+            const overlapX = .055;
+            const overlapY = .035;
+            const overlapZ = .045;
+            const centerU = (x1 + x2) / 2 - frame.length / 2;
+            const centerY = baseY + (y1 + y2) / 2;
+            const mesh = createRuntimeBox([width + overlapX, height + overlapY, wallDepth + overlapZ], material, [0, 0, 0]);
+            mesh.position.set(frame.midX + frame.alongX * centerU + frame.normalX * wallDepth / 2, centerY, frame.midZ + frame.alongZ * centerU + frame.normalZ * wallDepth / 2);
+            mesh.rotation.y = frame.rotationY;
+            group.add(mesh);
+        }
+
+        function addThickWallSegments(group, material, frame, baseY, bodyHeight, wallDepth, cutouts) {
+            const edgeLength = frame && frame.length || 0;
+            if (edgeLength < .4 || bodyHeight < .1)
+                return;
+            const xCuts = [0, edgeLength];
+            const yCuts = [0, bodyHeight];
+            for (const rect of toSafeArray(cutouts)) {
+                xCuts.push(clamp(rect.x1, 0, edgeLength), clamp(rect.x2, 0, edgeLength));
+                yCuts.push(clamp(rect.y1, 0, bodyHeight), clamp(rect.y2, 0, bodyHeight));
+            }
+            const uniqueCuts = values => Array.from(new Set(values.map(value => Math.round(value * 1e3) / 1e3))).sort(((a, b) => a - b));
+            const xs = uniqueCuts(xCuts);
+            const ys = uniqueCuts(yCuts);
+            for (let xi = 0; xi < xs.length - 1; xi++)
+                for (let yi = 0; yi < ys.length - 1; yi++) {
+                    const x1 = xs[xi];
+                    const x2 = xs[xi + 1];
+                    const y1 = ys[yi];
+                    const y2 = ys[yi + 1];
+                    if (x2 - x1 < .045 || y2 - y1 < .045)
+                        continue;
+                    const center = {
+                        x1: (x1 + x2) / 2,
+                        x2: (x1 + x2) / 2,
+                        y1: (y1 + y2) / 2,
+                        y2: (y1 + y2) / 2
+                    };
+                    if (toSafeArray(cutouts).some(rect => rectsOverlap2D(center, rect, -.012)))
+                        continue;
+                    addWallSegmentBox(group, material, frame, baseY, wallDepth, x1, x2, y1, y2);
+                }
+        }
+
         function createCustomBuildingWallBody(points, baseY, bodyHeight, colorValue, spec) {
             if (!globalState.THREE || points.length < 3)
                 return null;
@@ -9009,71 +9248,17 @@
             const windowsSpec = deepMergeConfig(spec && spec.windows || {}, {
                 sides: spec && spec.sides || {}
             });
-            const wallDepth = Math.max(.02, Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .12);
+            const wallDepth = Math.max(.28, Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .34);
             for (let index = 0; index < points.length; index++) {
                 const current = points[index];
                 const next = points[(index + 1) % points.length];
-                const dxRaw = next.x - current.x;
-                const dzRaw = next.z - current.z;
-                const edgeLength = Math.hypot(dxRaw, dzRaw);
-                if (edgeLength < .4)
+                const edgeFrame = getWallEdgeFrame(current, next, center);
+                if (!edgeFrame || edgeFrame.length < .4)
                     continue;
-                const dx = dxRaw / edgeLength;
-                const dz = dzRaw / edgeLength;
-                const midX = (current.x + next.x) / 2;
-                const midZ = (current.z + next.z) / 2;
-                const outwardX = midX - center.x;
-                const outwardZ = midZ - center.z;
-                const outwardLength = Math.hypot(outwardX, outwardZ) || 1;
-                const normalX = outwardX / outwardLength;
-                const normalZ = outwardZ / outwardLength;
-                const edgeFrame = {
-                    length: edgeLength,
-                    alongX: dx,
-                    alongZ: dz,
-                    midX,
-                    midZ
-                };
                 const sideSpec = deepMergeConfig(windowsSpec, windowsSpec.sides && (windowsSpec.sides[index] || windowsSpec.sides[String(index)]) || {});
-                const layout = computeWindowLayout(edgeLength, bodyHeight, sideSpec);
-                const shape = new THREE.Shape;
-                shape.moveTo(0, 0);
-                shape.lineTo(edgeLength, 0);
-                shape.lineTo(edgeLength, bodyHeight);
-                shape.lineTo(0, bodyHeight);
-                shape.lineTo(0, 0);
-                for (const opening of getWallOpenings(spec, "doors", index).concat(getWallOpenings(spec, "windows", index))) {
-                    const rect = opening.rect || opening;
-                    if (!rect || rect.x2 - rect.x1 <= .05 || rect.y2 - rect.y1 <= .05)
-                        continue;
-                    const hole = new THREE.Path;
-                    hole.moveTo(rect.x1, rect.y1);
-                    hole.lineTo(rect.x1, rect.y2);
-                    hole.lineTo(rect.x2, rect.y2);
-                    hole.lineTo(rect.x2, rect.y1);
-                    hole.lineTo(rect.x1, rect.y1);
-                    shape.holes.push(hole);
-                }
-                const reservedOpenings = getWallOpenings(spec, "doors", index).concat(getWallOpenings(spec, "windows", index));
-                if (!1 !== sideSpec.enabled && !1 !== sideSpec.cutHoles)
-                    for (const rect of layout.rects) {
-                        if (!isWindowRectClearOfTerrain(rect, edgeFrame, baseY, spec))
-                            continue;
-                        if (!isRectClearOfWallOpenings(rect, reservedOpenings, .16))
-                            continue;
-                        const hole = new THREE.Path;
-                        hole.moveTo(rect.x1, rect.y1);
-                        hole.lineTo(rect.x1, rect.y2);
-                        hole.lineTo(rect.x2, rect.y2);
-                        hole.lineTo(rect.x2, rect.y1);
-                        hole.lineTo(rect.x1, rect.y1);
-                        shape.holes.push(hole);
-                    }
-                const geometry = new THREE.ShapeGeometry(shape);
-                geometry.applyMatrix4((new THREE.Matrix4).makeBasis(new THREE.Vector3(dx,0,dz), new THREE.Vector3(0,1,0), new THREE.Vector3(normalX,0,normalZ)));
-                geometry.translate(current.x + normalX * wallDepth / 2, baseY, current.z + normalZ * wallDepth / 2);
-                geometry.computeVertexNormals();
-                group.add(new THREE.Mesh(geometry, material));
+                const layout = computeWindowLayout(edgeFrame.length, bodyHeight, sideSpec);
+                const cutouts = collectWallCutoutsForEdge(index, edgeFrame, baseY, bodyHeight, sideSpec, layout, spec);
+                addThickWallSegments(group, material, edgeFrame, baseY, bodyHeight, wallDepth, cutouts);
             }
             return group.children.length ? group : null;
         }
@@ -9331,15 +9516,15 @@
                     roughness: .08,
                     metalness: .05
                 });
-                const wallDepth = Math.max(.05, Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .12);
-                const frameDepth = clamp(Number(sideSpec.frameDepth) || Math.max(.04, wallDepth * .72), .03, Math.max(.05, wallDepth * .92));
-                const frameNormalOffset = Math.max(.01, Math.min(.035, wallDepth * .18));
-                const glassNormalOffset = Math.max(.005, Math.min(.02, wallDepth * .08));
+                const wallDepth = Math.max(.28, Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .34);
+                const frameDepth = clamp(Number(sideSpec.frameDepth) || Math.max(.08, wallDepth * .72), .05, Math.max(.08, wallDepth * .9));
+                const frameNormalOffset = wallDepth / 2;
+                const glassNormalOffset = wallDepth / 2;
                 const reservedOpenings = getWallOpenings(spec, "doors", index).concat(getWallOpenings(spec, "windows", index));
                 for (const rect of layout.rects) {
                     if (!isWindowRectClearOfTerrain(rect, frame, baseY, spec))
                         continue;
-                    if (!isRectClearOfWallOpenings(rect, reservedOpenings, .16))
+                    if (!isRectClearOfWallOpenings(rect, reservedOpenings, .28))
                         continue;
                     const width = rect.width;
                     const height = rect.height;
@@ -9941,7 +10126,8 @@
             const size = getDetailSize(detail, [1.2, 1.4, .16]);
             const width = Math.max(.2, size[0]);
             const height = Math.max(.2, size[1]);
-            const depth = Math.max(.05, size[2]);
+            const placementWallDepth = detail.__tmWallPlacement && Number(detail.__tmWallPlacement.wallDepth);
+            const depth = placementWallDepth ? clamp(Math.max(.05, size[2]), .08, placementWallDepth * .82) : Math.max(.05, size[2]);
             const frameThickness = Math.max(.04, Math.min(width, height) * .09);
             const group = new THREE.Group;
             group.name = "__tmCustomBuildingWindow";
@@ -10008,7 +10194,8 @@
             if (explicitDoor) {
                 const width = Math.max(.25, size[0]);
                 const height = Math.max(.25, size[1]);
-                const depth = Math.max(.04, size[2]);
+                const placementWallDepth = detail.__tmWallPlacement && Number(detail.__tmWallPlacement.wallDepth);
+                const depth = placementWallDepth ? clamp(Math.max(.06, size[2]), .08, placementWallDepth * .78) : Math.max(.04, size[2]);
                 const frameThickness = Math.max(.05, Math.min(width, height) * .08);
                 const group = new THREE.Group;
                 group.name = "__tmCustomBuildingDoorFrame";
@@ -10040,10 +10227,15 @@
                     pivot.userData.tmDoor = {
                         closedY: 0,
                         openY: interactiveOpen,
+                        baseOpenY: interactiveOpen,
                         current: detail.isOpen ? 1 : 0,
-                        radius: Math.max(4, Number(detail.openRadius) || 9),
+                        radius: clamp(Number(detail.openRadius) || 2.15, 1.35, 3.2),
                         speed: Math.max(.8, Number(detail.openSpeed) || 4.5)
                     };
+                    if (detail.__tmWallPlacement) {
+                        pivot.userData.tmDoor.normalX = Number(detail.__tmWallPlacement.normalX) || 0;
+                        pivot.userData.tmDoor.normalZ = Number(detail.__tmWallPlacement.normalZ) || 0;
+                    }
                     pivot.userData.tmDynamicDoor = !0;
                 }
                 group.add(pivot);
@@ -10080,8 +10272,9 @@
             group.userData.tmDoor = {
                 closedY: ry,
                 openY: ry + openAngle,
+                baseOpenY: openAngle,
                 current: 0,
-                radius: Math.max(4, Number(detail.openRadius) || 9),
+                radius: clamp(Number(detail.openRadius) || 2.15, 1.35, 3.2),
                 speed: Math.max(.8, Number(detail.openSpeed) || 4.5)
             };
             group.userData.tmDynamicDoor = !0;
@@ -10174,7 +10367,89 @@
             return positionDetailObject(group, detail, anchorPoint);
         }
 
-        function createPrimitiveDetailMesh(detail, anchorPoint) {
+        function getWallDetailFrameForPart(detail, anchorPoint, spec) {
+            const points = spec && spec.__tmWallPoints;
+            if (!Array.isArray(points) || points.length < 3 || !anchorPoint || detail && detail.absolute)
+                return null;
+            const position = detail.position || [0, 0, 0];
+            const desired = {
+                x: (Number(anchorPoint.x) || 0) + (Number(position[0]) || 0),
+                z: (Number(anchorPoint.z) || 0) + (Number(position[2]) || 0)
+            };
+            return findWallFrameForDetail(points, desired, detail);
+        }
+
+        function createWallDetailWithOpenings(detail, anchorPoint, spec, size) {
+            const frame = getWallDetailFrameForPart(detail, anchorPoint, spec);
+            if (!frame)
+                return null;
+            const baseY = Number(spec && spec.__tmBaseY) || Number(anchorPoint && anchorPoint.y) || 0;
+            const position = detail.position || [0, 0, 0];
+            const wallCenterY = (detail.absolute || !anchorPoint ? 0 : Number(anchorPoint.y) || 0) + (Number(position[1]) || 0);
+            const wallWidth = Math.max(.08, Number(size && size[0]) || 1);
+            const wallHeight = Math.max(.08, Number(size && size[1]) || 1);
+            const wallDepth = Math.max(.28, Number(size && size[2]) || Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .34);
+            const desired = {
+                x: (Number(anchorPoint.x) || 0) + (Number(position[0]) || 0),
+                z: (Number(anchorPoint.z) || 0) + (Number(position[2]) || 0)
+            };
+            const centerU = projectPointToWallFrame(desired, frame) * frame.length;
+            const cutouts = [];
+            for (const opening of getWallOpenings(spec, "doors", frame.index).concat(getWallOpenings(spec, "windows", frame.index))) {
+                const rect = opening && (opening.rect || opening);
+                if (!rect)
+                    continue;
+                const x1 = Math.max(-wallWidth / 2, (Number(rect.x1) || 0) - centerU);
+                const x2 = Math.min(wallWidth / 2, (Number(rect.x2) || 0) - centerU);
+                const y1 = Math.max(-wallHeight / 2, baseY + (Number(rect.y1) || 0) - wallCenterY);
+                const y2 = Math.min(wallHeight / 2, baseY + (Number(rect.y2) || 0) - wallCenterY);
+                if (x2 - x1 > .06 && y2 - y1 > .06)
+                    cutouts.push({
+                        x1,
+                        x2,
+                        y1,
+                        y2
+                    });
+            }
+            if (!cutouts.length)
+                return null;
+            const group = new globalState.THREE.Group;
+            const material = createDetailMaterial(Object.assign({}, detail, {
+                size: [wallWidth, wallHeight, wallDepth]
+            }));
+            const xCuts = [-wallWidth / 2, wallWidth / 2];
+            const yCuts = [-wallHeight / 2, wallHeight / 2];
+            for (const rect of cutouts) {
+                xCuts.push(rect.x1, rect.x2);
+                yCuts.push(rect.y1, rect.y2);
+            }
+            const uniqueCuts = values => Array.from(new Set(values.map(value => Math.round(value * 1e3) / 1e3))).sort(((a, b) => a - b));
+            const xs = uniqueCuts(xCuts);
+            const ys = uniqueCuts(yCuts);
+            for (let xi = 0; xi < xs.length - 1; xi++)
+                for (let yi = 0; yi < ys.length - 1; yi++) {
+                    const x1 = xs[xi];
+                    const x2 = xs[xi + 1];
+                    const y1 = ys[yi];
+                    const y2 = ys[yi + 1];
+                    if (x2 - x1 < .045 || y2 - y1 < .045)
+                        continue;
+                    const pointRect = {
+                        x1: (x1 + x2) / 2,
+                        x2: (x1 + x2) / 2,
+                        y1: (y1 + y2) / 2,
+                        y2: (y1 + y2) / 2
+                    };
+                    if (cutouts.some(rect => rectsOverlap2D(pointRect, rect, -.012)))
+                        continue;
+                    group.add(createRuntimeBox([x2 - x1 + .045, y2 - y1 + .035, wallDepth + .035], material, [(x1 + x2) / 2, (y1 + y2) / 2, 0]));
+                }
+            return group.children.length ? positionDetailObject(group, Object.assign({}, detail, {
+                size: [wallWidth, wallHeight, wallDepth]
+            }), anchorPoint) : null;
+        }
+
+        function createPrimitiveDetailMesh(detail, anchorPoint, spec) {
             if (!globalState.THREE || !detail || !detail.type)
                 return null;
             const type = String(detail.type || "").toLowerCase();
@@ -10189,6 +10464,11 @@
             if ("box" === type || "wall" === type || "floor" === type || "panel" === type || "roofpanel" === type) {
                 const fallback = "panel" === type || "roofpanel" === type ? [1, 1, .04] : [1, 1, .1];
                 const size = getDetailSize(detail, fallback);
+                if ("wall" === type || "panel" === type || "box" === type) {
+                    const cutWall = createWallDetailWithOpenings(detail, anchorPoint, spec, size);
+                    if (cutWall)
+                        return cutWall;
+                }
                 const box = createDetailPatternBoxGroup(detail, [size[0], size[1], Math.max(.02, size[2])], "floor" === type ? "floor" : "roofpanel" === type ? "roof" : "wall");
                 return positionDetailObject(box, detail, anchorPoint);
             }
@@ -10300,11 +10580,17 @@
             });
             prepareWallOpeningsForSpec(points, baseY, bodyHeight, spec, anchorPoint);
             const baseEnabled = !(spec.base && !1 === spec.base.enabled);
+            if (!hasExplicitFloorPart(spec)) {
+                const floor = createCustomBuildingSlab(points, baseY - .08, .14, spec.floor && spec.floor.color || 0xb88f61, spec.floor || spec, "__tmCustomBuildingFloor");
+                floor && group.add(floor);
+            }
             if (baseEnabled) {
                 const foundation = createCustomBuildingFoundation(points, baseY, getFootprintMinTerrainY(points, baseY, spec), spec.base && spec.base.color, spec);
                 foundation && group.add(foundation);
                 const body = createCustomBuildingBody(points, baseY, bodyHeight, spec.base && spec.base.color, spec);
                 body && group.add(body);
+                const ceiling = createCustomBuildingSlab(points, baseY + bodyHeight - .055, .11, spec.ceiling && spec.ceiling.color || spec.base && spec.base.color, spec.ceiling || spec, "__tmCustomBuildingCeiling");
+                ceiling && group.add(ceiling);
                 const roof = createCustomRoof(points, baseY, bodyHeight, spec.roof);
                 roof && group.add(roof);
                 createWindowsForFootprint(group, points, baseY, bodyHeight, deepMergeConfig(spec.windows, {
@@ -10313,7 +10599,7 @@
                 }));
             }
             for (const part of toSafeArray(spec.parts)) {
-                const detailMesh = createPrimitiveDetailMesh(part, anchorPoint);
+                const detailMesh = createPrimitiveDetailMesh(part, anchorPoint, spec);
                 detailMesh && group.add(detailMesh);
             }
             if (!specHasDoorPart(spec)) {
