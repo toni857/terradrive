@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.2.7.16
+// @version      2.2.7.36
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -200,7 +200,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.2.7.16",
+            version: "2.2.7.36",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -233,6 +233,337 @@
             addressOverlapPadding: 5,
             minimumRegularScale: .4
         };
+        const CUSTOM_BUILDING_PERF = {
+            sliceBudgetMs: 5.2,
+            prioritySliceBudgetMs: 9,
+            queueDelayMs: 35,
+            maxBuildsPerSlice: 3,
+            maxOptimizeMeshes: 260,
+            minBatchMeshes: 24,
+            optimizeQueueLimit: 36,
+            debugRefreshMs: 900,
+            cullIntervalMs: 180,
+            cullChunksPerTick: 10,
+            cullDistance: 3400,
+            cullDistanceHysteresis: 260,
+            staticCacheTtlMs: 1800,
+            signatureCacheMs: 260,
+            collisionBucketSize: 96,
+            bridgeCacheTtlMs: 7000,
+            wildlifeSpawnDistance: 2400,
+            wildlifeBeeSpawnDistance: 1200,
+            wildlifeMaxNewPerTick: 6,
+            overlayCleanupIntervalMs: 3200,
+            overlayMaterialCacheSize: 360,
+            overlayGeometryCacheSize: 260,
+            terrainCacheSize: 5000,
+            materialCacheSize: 900,
+            geometryCacheSize: 1200,
+            layoutCacheSize: 900,
+            collisionQueryCacheMs: 80,
+            collisionQueryCacheSize: 180,
+            doorNearDistance: 12,
+            doorFarUpdateMs: 180,
+            damageSmokeUpdateMs: 45,
+            damagePanelUpdateMs: 220,
+            trainCollisionCacheMs: 45,
+            navigationPanelStaticUpdateMs: 650
+        };
+        const TM_DEVELOPER_MENU_ENABLED = !0;
+        // Developer toggles deliberately expose internal/performance gates that are too risky for the normal ESC menu.
+        const DEVELOPER_PERFORMANCE_TOGGLE_ITEMS = [{
+            key: "perfRuntimeTaskThrottle",
+            label: "Runtime task throttles",
+            defaultValue: !0
+        }, {
+            key: "perfSharedGeometryCaches",
+            label: "Shared geometry caches",
+            defaultValue: !0
+        }, {
+            key: "perfMaterialCaches",
+            label: "Material caches",
+            defaultValue: !0
+        }, {
+            key: "perfWindowLayoutCache",
+            label: "Window layout cache",
+            defaultValue: !0
+        }, {
+            key: "perfTerrainYCache",
+            label: "Terrain-height cache",
+            defaultValue: !0
+        }, {
+            key: "perfAuto3dEntryCache",
+            label: "Auto-3D entry cache",
+            defaultValue: !0
+        }, {
+            key: "perfSideSpecFastPath",
+            label: "Side-spec fast path",
+            defaultValue: !0
+        }, {
+            key: "perfWallCutoutFastPath",
+            label: "Wall-cutout fast path",
+            defaultValue: !0
+        }, {
+            key: "perfCollisionQueryCache",
+            label: "Collision query cache",
+            defaultValue: !0
+        }, {
+            key: "perfCollisionSignatureCache",
+            label: "Collision signature cache",
+            defaultValue: !0
+        }, {
+            key: "perfStaticCollisionCache",
+            label: "Static collision cache",
+            defaultValue: !0
+        }, {
+            key: "perfCollisionSpatialIndex",
+            label: "Collision spatial index",
+            defaultValue: !0
+        }, {
+            key: "perfCustomBuildingCulling",
+            label: "Custom-building culling",
+            defaultValue: !0
+        }, {
+            key: "perfPriorityQueueSort",
+            label: "Build-queue priority sort",
+            defaultValue: !0
+        }, {
+            key: "perfLoadedChunkEnumeration",
+            label: "Loaded-chunk enumeration",
+            defaultValue: !0
+        }, {
+            key: "perfWallOpeningIndex",
+            label: "Wall-opening index",
+            defaultValue: !0
+        }, {
+            key: "perfTerrainSampleLoops",
+            label: "Terrain sample loops",
+            defaultValue: !0
+        }, {
+            key: "perfOverlaySignatureCache",
+            label: "Overlay signature cache",
+            defaultValue: !0
+        }, {
+            key: "perfBuildJobMatchReuse",
+            label: "Build-job match reuse",
+            defaultValue: !0
+        }, {
+            key: "perfCacheEvictionFastPath",
+            label: "Cache eviction fast path",
+            defaultValue: !0
+        }, {
+            key: "perfTownLabelCache",
+            label: "Town-label cache",
+            defaultValue: !0
+        }, {
+            key: "perfRoadWorldPointCache",
+            label: "Road world-point cache",
+            defaultValue: !0
+        }, {
+            key: "perfRoadSegmentPointReuse",
+            label: "Road segment point reuse",
+            defaultValue: !0
+        }, {
+            key: "perfNaviTargetSelection",
+            label: "Navi target selection",
+            defaultValue: !0
+        }, {
+            key: "perfMissionTargetSelection",
+            label: "Mission target selection",
+            defaultValue: !0
+        }, {
+            key: "perfMissionTargetCollection",
+            label: "Mission target collection",
+            defaultValue: !0
+        }, {
+            key: "perfMissionSpacingSelection",
+            label: "Mission spacing selection",
+            defaultValue: !0
+        }, {
+            key: "perfAirportEntryBuild",
+            label: "Airport entry build",
+            defaultValue: !0
+        }, {
+            key: "perfPoiOverlaySignature",
+            label: "POI overlay signature",
+            defaultValue: !0
+        }, {
+            key: "perfDeepMergeLoop",
+            label: "Deep-merge loop",
+            defaultValue: !0
+        }, {
+            key: "perfDetailTypeLookup",
+            label: "Detail type lookup",
+            defaultValue: !0
+        }, {
+            key: "perfWorldQueryKey",
+            label: "World query key",
+            defaultValue: !0
+        }, {
+            key: "perfBatchMaterialKey",
+            label: "Batch material key",
+            defaultValue: !0
+        }, {
+            key: "perfTownSplitLabels",
+            label: "Town split-label loop",
+            defaultValue: !0
+        }, {
+            key: "perfTownAreaLookup",
+            label: "Town-area lookup",
+            defaultValue: !0
+        }, {
+            key: "perfPoliceVehicleText",
+            label: "Police vehicle text scan",
+            defaultValue: !0
+        }, {
+            key: "perfWallOpeningCollisionSignature",
+            label: "Wall-opening collision signature",
+            defaultValue: !0
+        }, {
+            key: "perfTemplateKeyLoop",
+            label: "Template key loop",
+            defaultValue: !0
+        }, {
+            key: "perfCollisionCandidateFastPath",
+            label: "Collision candidate fast path",
+            defaultValue: !0
+        }, {
+            key: "perfTrafficMapIteration",
+            label: "Traffic map iteration",
+            defaultValue: !0
+        }, {
+            key: "perfRoadEdgeDistanceCache",
+            label: "Road edge distance cache",
+            defaultValue: !0
+        }, {
+            key: "perfRoadEligibilityCheck",
+            label: "Road eligibility check",
+            defaultValue: !0
+        }, {
+            key: "perfRoadSegmentScoreMath",
+            label: "Road segment score math",
+            defaultValue: !0
+        }, {
+            key: "perfAutopilotCruiseScan",
+            label: "Autopilot cruise scan",
+            defaultValue: !0
+        }, {
+            key: "perfSingleChunkSignature",
+            label: "Single-chunk signature",
+            defaultValue: !0
+        }, {
+            key: "perfNaviAirportTargetsLoop",
+            label: "Navi airport target loop",
+            defaultValue: !0
+        }, {
+            key: "perfPoiNaviTargetsLoop",
+            label: "POI navi target loop",
+            defaultValue: !0
+        }, {
+            key: "perfAddressPartsCache",
+            label: "Address parts cache",
+            defaultValue: !0
+        }, {
+            key: "perfAddressHaystackBuild",
+            label: "Address haystack build",
+            defaultValue: !0
+        }, {
+            key: "perfAddressBestSelection",
+            label: "Address best selection",
+            defaultValue: !0
+        }, {
+            key: "perfNaviPresetChecks",
+            label: "Navi preset checks",
+            defaultValue: !0
+        }, {
+            key: "perfAutopilotEdgeEligibleCache",
+            label: "Autopilot edge eligible cache",
+            defaultValue: !0
+        }, {
+            key: "perfAutopilotEdgeListCache",
+            label: "Autopilot edge list cache",
+            defaultValue: !0
+        }, {
+            key: "perfRoadSegmentMatchMath",
+            label: "Road segment match math",
+            defaultValue: !0
+        }, {
+            key: "perfPrepareSignatureLoop",
+            label: "Prepare signature loop",
+            defaultValue: !0
+        }, {
+            key: "perfOverlaySignatureLoop",
+            label: "Overlay signature loop",
+            defaultValue: !0
+        }, {
+            key: "perfMapTargetSignatureCache",
+            label: "Map target signature cache",
+            defaultValue: !0
+        }, {
+            key: "perfAddressRequestBuild",
+            label: "Address request build",
+            defaultValue: !0
+        }, {
+            key: "perfRoadDistanceFastPath",
+            label: "Road distance fast path",
+            defaultValue: !0
+        }, {
+            key: "perfGasStationMissionCache",
+            label: "Gas-station mission cache",
+            defaultValue: !0
+        }, {
+            key: "perfMainRoadMissionCache",
+            label: "Main-road mission cache",
+            defaultValue: !0
+        }, {
+            key: "perfPoiOverlaySignatureDirect",
+            label: "POI signature direct",
+            defaultValue: !0
+        }, {
+            key: "perfNearestPoiScan",
+            label: "Nearest POI scan",
+            defaultValue: !0
+        }, {
+            key: "perfAirportDirectionMath",
+            label: "Airport direction math",
+            defaultValue: !0
+        }, {
+            key: "perfBatchableMeshCountCache",
+            label: "Batchable mesh-count cache",
+            defaultValue: !0
+        }, {
+            key: "perfNeedsChunkWorkFastPath",
+            label: "Chunk work fast path",
+            defaultValue: !0
+        }, {
+            key: "perfPrepareNearChunkCache",
+            label: "Prepare-near chunk cache",
+            defaultValue: !0
+        }, {
+            key: "perfStaticCacheEarlyBypass",
+            label: "Static-cache early bypass",
+            defaultValue: !0
+        }, {
+            key: "perfBuildQueueScoreReuse",
+            label: "Build-queue score reuse",
+            defaultValue: !0
+        }, {
+            key: "perfGeometryMergeFilter",
+            label: "Geometry merge filter",
+            defaultValue: !0
+        }, {
+            key: "perfNormalizeGeometryAttributes",
+            label: "Normalize geometry attributes",
+            defaultValue: !0
+        }, {
+            key: "perfBasicMaterialKey",
+            label: "Basic material key",
+            defaultValue: !0
+        }];
+        const DEVELOPER_PERFORMANCE_ITEM_BY_KEY = Object.create(null);
+        for (const item of DEVELOPER_PERFORMANCE_TOGGLE_ITEMS)
+            DEVELOPER_PERFORMANCE_ITEM_BY_KEY[item.key] = item;
+        const DETAIL_FURNITURE_TYPES = new Set(["chair", "table", "sofa", "bed", "cabinet", "counter", "shelf", "stove", "chimney"]);
         const townSignsState = globalState.townSigns || (globalState.townSigns = {
             roadModule: null,
             game: null,
@@ -400,6 +731,13 @@
             customMissionRegistry: new Map,
             missionPanelsPatched: new WeakSet,
             visualRefreshTimers: new WeakMap,
+            overlayMaterialCache: new Map,
+            overlayGeometryCache: new Map,
+            overlaySphereGeometry: null,
+            projectileTempVector: null,
+            aircraftForwardVector: null,
+            trainCollisionBoxesCache: null,
+            normalizedLabelCache: new Map,
             menuPatched: !1,
             controlsPatched: !1,
             lastRuntimeUpdateAt: 0,
@@ -427,9 +765,12 @@
             navSearching: !1,
             navMode: "drive",
             navGuidance: null,
+            navGuidanceUiState: null,
             moduleDisables: {},
             moduleFaults: {},
             startMenuFeatureWatcherInstalled: !1,
+            developerMenuHotkeyInstalled: !1,
+            developerMenuVisible: !1,
             startMoneyGranted: !1,
             playerMoney: STARTING_MONEY,
             input: {
@@ -445,6 +786,25 @@
             customBuildingEntriesByChunk: new WeakMap,
             customBuildingTextureCache: new Map,
             customBuildingAddressCache: new Map,
+            customBuildingAutoEntryCache: new Map,
+            customBuildingMaterialCache: new Map,
+            customBuildingBoxGeometryCache: new Map,
+            customBuildingWindowLayoutCache: new Map,
+            customBuildingTerrainYCache: new Map,
+            customBuildingPrepareSignatures: new WeakMap,
+            customBuildingBuildQueue: [],
+            customBuildingQueuedChunks: new WeakSet,
+            customBuildingBuildTimer: null,
+            customBuildingOptimizeQueue: [],
+            customBuildingOptimizeQueued: new WeakSet,
+            customBuildingOptimizeTimer: null,
+            customBuildingCollisionInvalidationQueue: [],
+            customBuildingCollisionInvalidationSet: new WeakSet,
+            customBuildingCollisionInvalidationTimer: null,
+            customBuildingCullCursor: 0,
+            customBuildingCullTemp: null,
+            customBuildingCollisionQueryCache: new Map,
+            customBuildingLastQueueSortAt: 0,
             customBuildingDoorItems: [],
             customBuildingProgress: null,
             customBuildingPriorityTargets: [],
@@ -486,6 +846,12 @@
         const featureFaultState = globalThis.__tmFeatureFaultState || (globalThis.__tmFeatureFaultState = {
             faults: {}
         });
+        const developerState = globalThis.__tmDeveloperState || (globalThis.__tmDeveloperState = {
+            toggles: {},
+            modules: {}
+        });
+        developerState.toggles && "object" == typeof developerState.toggles || (developerState.toggles = {});
+        developerState.modules && "object" == typeof developerState.modules || (developerState.modules = {});
 
         function readCookieValue(name) {
             const prefix = `${name}=`;
@@ -547,8 +913,40 @@
             }
         }
 
+        function loadDeveloperStateFromCookies() {
+            try {
+                const cookieValue = readCookieValue("tmDeveloperToggles");
+                if (!cookieValue)
+                    return;
+                const parsed = JSON.parse(cookieValue);
+                if (!parsed || "object" != typeof parsed || Array.isArray(parsed))
+                    return;
+                developerState.toggles = parsed.toggles && "object" == typeof parsed.toggles && !Array.isArray(parsed.toggles) ? parsed.toggles : {};
+                developerState.modules = parsed.modules && "object" == typeof parsed.modules && !Array.isArray(parsed.modules) ? parsed.modules : {};
+            } catch (e) {
+                console.warn("[TM] Failed to load developer toggles from cookies:", e);
+            }
+        }
+
+        function saveDeveloperStateToCookies() {
+            if (!TM_DEVELOPER_MENU_ENABLED)
+                return;
+            try {
+                const expires = new Date();
+                expires.setFullYear(expires.getFullYear() + 1);
+                const snapshot = {
+                    toggles: developerState.toggles || {},
+                    modules: developerState.modules || {}
+                };
+                document.cookie = `tmDeveloperToggles=${encodeURIComponent(JSON.stringify(snapshot))}; expires=${expires.toUTCString()}; path=/`;
+            } catch (e) {
+                console.warn("[TM] Failed to save developer toggles to cookies:", e);
+            }
+        }
+
         loadFeatureStateFromCookies();
         loadFeatureFaultStateFromCookies();
+        loadDeveloperStateFromCookies();
         Object.assign(runtimeState, {
             overlayItems: Array.isArray(runtimeState.overlayItems) ? runtimeState.overlayItems : [],
             overlayDispose: Array.isArray(runtimeState.overlayDispose) ? runtimeState.overlayDispose : [],
@@ -565,9 +963,36 @@
             navSearching: !!runtimeState.navSearching,
             navMode: "guide" === runtimeState.navMode ? "guide" : "drive",
             navGuidance: runtimeState.navGuidance || null,
+            navGuidanceUiState: runtimeState.navGuidanceUiState || null,
             startMenuFeatureWatcherInstalled: !!runtimeState.startMenuFeatureWatcherInstalled,
+            overlayMaterialCache: runtimeState.overlayMaterialCache instanceof Map ? runtimeState.overlayMaterialCache : new Map,
+            overlayGeometryCache: runtimeState.overlayGeometryCache instanceof Map ? runtimeState.overlayGeometryCache : new Map,
+            overlaySphereGeometry: runtimeState.overlaySphereGeometry || null,
+            projectileTempVector: runtimeState.projectileTempVector || null,
+            aircraftForwardVector: runtimeState.aircraftForwardVector || null,
+            trainCollisionBoxesCache: runtimeState.trainCollisionBoxesCache || null,
+            normalizedLabelCache: runtimeState.normalizedLabelCache instanceof Map ? runtimeState.normalizedLabelCache : new Map,
             customBuildingTextureCache: runtimeState.customBuildingTextureCache instanceof Map ? runtimeState.customBuildingTextureCache : new Map,
             customBuildingAddressCache: runtimeState.customBuildingAddressCache instanceof Map ? runtimeState.customBuildingAddressCache : new Map,
+            customBuildingAutoEntryCache: runtimeState.customBuildingAutoEntryCache instanceof Map ? runtimeState.customBuildingAutoEntryCache : new Map,
+            customBuildingMaterialCache: runtimeState.customBuildingMaterialCache instanceof Map ? runtimeState.customBuildingMaterialCache : new Map,
+            customBuildingBoxGeometryCache: runtimeState.customBuildingBoxGeometryCache instanceof Map ? runtimeState.customBuildingBoxGeometryCache : new Map,
+            customBuildingWindowLayoutCache: runtimeState.customBuildingWindowLayoutCache instanceof Map ? runtimeState.customBuildingWindowLayoutCache : new Map,
+            customBuildingTerrainYCache: runtimeState.customBuildingTerrainYCache instanceof Map ? runtimeState.customBuildingTerrainYCache : new Map,
+            customBuildingPrepareSignatures: runtimeState.customBuildingPrepareSignatures instanceof WeakMap ? runtimeState.customBuildingPrepareSignatures : new WeakMap,
+            customBuildingBuildQueue: Array.isArray(runtimeState.customBuildingBuildQueue) ? runtimeState.customBuildingBuildQueue : [],
+            customBuildingQueuedChunks: runtimeState.customBuildingQueuedChunks instanceof WeakSet ? runtimeState.customBuildingQueuedChunks : new WeakSet,
+            customBuildingBuildTimer: null,
+            customBuildingOptimizeQueue: Array.isArray(runtimeState.customBuildingOptimizeQueue) ? runtimeState.customBuildingOptimizeQueue : [],
+            customBuildingOptimizeQueued: runtimeState.customBuildingOptimizeQueued instanceof WeakSet ? runtimeState.customBuildingOptimizeQueued : new WeakSet,
+            customBuildingOptimizeTimer: null,
+            customBuildingCollisionInvalidationQueue: Array.isArray(runtimeState.customBuildingCollisionInvalidationQueue) ? runtimeState.customBuildingCollisionInvalidationQueue : [],
+            customBuildingCollisionInvalidationSet: runtimeState.customBuildingCollisionInvalidationSet instanceof WeakSet ? runtimeState.customBuildingCollisionInvalidationSet : new WeakSet,
+            customBuildingCollisionInvalidationTimer: null,
+            customBuildingCullCursor: Number(runtimeState.customBuildingCullCursor) || 0,
+            customBuildingCullTemp: runtimeState.customBuildingCullTemp || null,
+            customBuildingCollisionQueryCache: runtimeState.customBuildingCollisionQueryCache instanceof Map ? runtimeState.customBuildingCollisionQueryCache : new Map,
+            customBuildingLastQueueSortAt: Number(runtimeState.customBuildingLastQueueSortAt) || 0,
             customBuildingDoorItems: Array.isArray(runtimeState.customBuildingDoorItems) ? runtimeState.customBuildingDoorItems : [],
             customBuildingProgress: runtimeState.customBuildingProgress || null,
             customBuildingPriorityTargets: Array.isArray(runtimeState.customBuildingPriorityTargets) ? runtimeState.customBuildingPriorityTargets : [],
@@ -577,6 +1002,7 @@
                 staticCache: null,
                 staticCacheSignature: "",
                 staticCacheAt: 0,
+                queryCache: new Map,
                 lastHumanCollisionAt: 0,
                 chunkIdCounter: 0,
                 chunkIds: new WeakMap,
@@ -584,6 +1010,8 @@
             }, runtimeState.worldCollisionState && "object" == typeof runtimeState.worldCollisionState ? runtimeState.worldCollisionState : {}),
             moduleDisables: runtimeState.moduleDisables && "object" == typeof runtimeState.moduleDisables ? runtimeState.moduleDisables : {},
             moduleFaults: runtimeState.moduleFaults && "object" == typeof runtimeState.moduleFaults ? runtimeState.moduleFaults : {},
+            developerMenuHotkeyInstalled: !!runtimeState.developerMenuHotkeyInstalled,
+            developerMenuVisible: !!runtimeState.developerMenuVisible,
             autopilot: Object.assign({
                 enabled: !1,
                 pendingMapSelection: !1,
@@ -614,6 +1042,8 @@
                 fire: !1
             }
         });
+        for (const [moduleName, enabled] of Object.entries(developerState.modules || {}))
+            enabled ? delete runtimeState.moduleDisables[moduleName] : runtimeState.moduleDisables[moduleName] = !0;
         runtimeState.input.slowLeft = !!runtimeState.input.slowLeft;
         runtimeState.input.slowRight = !!runtimeState.input.slowRight;
         runtimeState.input.fastLeft = !!runtimeState.input.fastLeft;
@@ -678,6 +1108,10 @@
                 label: "Custom building doors",
                 feature: "customBuildings"
             },
+            customBuildingOverlayCulling: {
+                label: "Custom building culling",
+                feature: null
+            },
             overlayRuntime: {
                 label: "Overlay runtime",
                 feature: "overlays"
@@ -729,6 +1163,61 @@
 
         function error(...args) {
             console.error(PREFIX, ...args);
+        }
+
+        function getDeveloperPerformanceItem(key) {
+            return DEVELOPER_PERFORMANCE_ITEM_BY_KEY[key] || null;
+        }
+
+        function isDeveloperToggleEnabled(key) {
+            if (!TM_DEVELOPER_MENU_ENABLED)
+                return !0;
+            const item = getDeveloperPerformanceItem(key);
+            const fallback = item ? !1 !== item.defaultValue : !0;
+            return key in (developerState.toggles || {}) ? !!developerState.toggles[key] : fallback;
+        }
+
+        function setDeveloperToggle(key, value) {
+            if (!TM_DEVELOPER_MENU_ENABLED || !getDeveloperPerformanceItem(key))
+                return;
+            developerState.toggles[key] = !!value;
+            if (/Collision|Culling|Terrain|Auto3d|Window|Geometry|Material|Wall|Overlay|Build|Chunk|Town|Cache|Mission|Airport|Poi|Merge|Detail|Query|Navi|Address|Road|Autopilot|Signature|Traffic/i.test(key)) {
+                invalidateWorldCollisionCache();
+                clearCustomBuildingTransientPerfCaches(!0);
+            }
+            saveDeveloperStateToCookies();
+            syncDeveloperMenu();
+        }
+
+        function getDeveloperModuleItems() {
+            const names = new Set(Object.keys(INTERNAL_MODULES));
+            for (const name of Object.keys(runtimeState.moduleDisables || {}))
+                names.add(name);
+            for (const name of Object.keys(runtimeState.moduleFaults || {}))
+                names.add(name);
+            const items = [];
+            for (const name of names) {
+                const meta = getInternalModuleMeta(name);
+                items.push({
+                    name,
+                    label: meta.label || name,
+                    feature: meta.feature || ""
+                });
+            }
+            items.sort((a, b) => a.label.localeCompare(b.label));
+            return items;
+        }
+
+        function setDeveloperModuleEnabled(name, value) {
+            if (!TM_DEVELOPER_MENU_ENABLED)
+                return;
+            developerState.modules[name] = !!value;
+            if (value)
+                clearInternalModuleFault(name);
+            else
+                runtimeState.moduleDisables[name] = !0;
+            saveDeveloperStateToCookies();
+            syncDeveloperMenu();
         }
 
         // Central health output: one compact console.table is much easier to read than hundreds of scattered startup logs.
@@ -855,6 +1344,8 @@
         }
 
         function shouldRunRuntimeTask(name, intervalMs) {
+            if (!isDeveloperToggleEnabled("perfRuntimeTaskThrottle"))
+                return !0;
             runtimeState.runtimeTaskTimes && "object" == typeof runtimeState.runtimeTaskTimes || (runtimeState.runtimeTaskTimes = {});
             const interval = Math.max(0, Number(intervalMs) || 0);
             if (!interval)
@@ -865,6 +1356,27 @@
                 return !1;
             runtimeState.runtimeTaskTimes[name] = now;
             return !0;
+        }
+
+        function scheduleIdleTask(callback, delayMs=0, timeoutMs=220) {
+            return setTimeout((() => {
+                if ("function" == typeof globalThis.requestIdleCallback)
+                    globalThis.requestIdleCallback(callback, {
+                        timeout: timeoutMs
+                    });
+                else
+                    callback({
+                        timeRemaining: () => 0,
+                        didTimeout: !0
+                    });
+            }
+            ), Math.max(0, Number(delayMs) || 0));
+        }
+
+        function getIdleTimeRemaining(deadline, fallbackMs) {
+            if (deadline && "function" == typeof deadline.timeRemaining)
+                return deadline.didTimeout ? 0 : Math.max(0, deadline.timeRemaining());
+            return Math.max(0, Number(fallbackMs) || 0);
         }
 
         const IMPACT_TUNING = {
@@ -1184,6 +1696,29 @@
                 distance: Math.hypot(px - cx, pz - cz),
                 progress: t
             };
+        }
+
+        function distancePointToSegmentSq2D(point, start, end) {
+            const px = Number(point && point.x) || 0;
+            const pz = Number(point && point.z) || 0;
+            const ax = Number(start && start.x) || 0;
+            const az = Number(start && start.z) || 0;
+            const bx = Number(end && end.x) || 0;
+            const bz = Number(end && end.z) || 0;
+            const abx = bx - ax;
+            const abz = bz - az;
+            const abLenSq = abx * abx + abz * abz;
+            if (abLenSq < 1e-6) {
+                const dx = px - ax;
+                const dz = pz - az;
+                return dx * dx + dz * dz;
+            }
+            const t = clamp(((px - ax) * abx + (pz - az) * abz) / abLenSq, 0, 1);
+            const cx = ax + abx * t;
+            const cz = az + abz * t;
+            const dx = px - cx;
+            const dz = pz - cz;
+            return dx * dx + dz * dz;
         }
 
         function beginImpactState(vehicle, spec) {
@@ -1986,7 +2521,15 @@
         }
 
         function normalizeTownLabel(value) {
-            return String(value || "").replace(/\s+/g, " ").trim();
+            const raw = String(value || "");
+            if (!isDeveloperToggleEnabled("perfTownLabelCache"))
+                return raw.replace(/\s+/g, " ").trim();
+            const cache = runtimeState.normalizedLabelCache instanceof Map ? runtimeState.normalizedLabelCache : runtimeState.normalizedLabelCache = new Map;
+            const cached = cache.get(raw);
+            if (void 0 !== cached)
+                return cached;
+            const normalized = raw.replace(/\s+/g, " ").trim();
+            return rememberLimitedCache(cache, raw, normalized, 2400);
         }
 
         function isLikelyTownLabel(value) {
@@ -2017,6 +2560,19 @@
         }
 
         function splitTownDestinationLabels(value) {
+            if (isDeveloperToggleEnabled("perfTownSplitLabels")) {
+                const text = normalizeTownLabel(value);
+                const result = [];
+                let start = 0;
+                for (let index = 0; index <= text.length; index++) {
+                    if (index < text.length && ";" !== text[index] && "|" !== text[index])
+                        continue;
+                    const label = normalizeTownLabel(text.slice(start, index));
+                    label && result.push(label);
+                    start = index + 1;
+                }
+                return result;
+            }
             return normalizeTownLabel(value).split(/[;|]/).map(normalizeTownLabel).filter(Boolean);
         }
 
@@ -2053,6 +2609,8 @@
         }
 
         function getEdgeLength2D(edge) {
+            if (isDeveloperToggleEnabled("perfRoadEdgeDistanceCache"))
+                return getRoadEdgeDistanceData(edge).total;
             const points = getEdgeWorldPoints(edge);
             let total = 0;
             for (let index = 0; index < points.length - 1; index++)
@@ -2061,6 +2619,16 @@
         }
 
         function getEdgeDistanceAtMatch(edge, segmentIndex, segmentProgress) {
+            if (isDeveloperToggleEnabled("perfRoadEdgeDistanceCache")) {
+                const data = getRoadEdgeDistanceData(edge);
+                const segment = Math.floor(Number(segmentIndex));
+                if (!Number.isFinite(segment) || segment < 0)
+                    return 0;
+                if (segment >= data.cumulative.length - 1)
+                    return data.total;
+                const segmentLength = data.cumulative[segment + 1] - data.cumulative[segment];
+                return data.cumulative[segment] + segmentLength * clamp(segmentProgress, 0, 1);
+            }
             const points = getEdgeWorldPoints(edge);
             let total = 0;
             for (let index = 0; index < points.length - 1; index++) {
@@ -2078,6 +2646,17 @@
         function getRemainingDistanceOnMatchedEdge(match, direction) {
             if (!match || !match.edge)
                 return 0;
+            if (isDeveloperToggleEnabled("perfRoadDistanceFastPath")) {
+                const data = getRoadEdgeDistanceData(match.edge);
+                const segment = Math.floor(Number(match.segmentIndex));
+                if (!Number.isFinite(segment) || segment < 0)
+                    return direction > 0 ? data.total : 0;
+                if (segment >= data.cumulative.length - 1)
+                    return direction > 0 ? 0 : data.total;
+                const segmentLength = data.cumulative[segment + 1] - data.cumulative[segment];
+                const progressDistance = data.cumulative[segment] + segmentLength * clamp(match.progress, 0, 1);
+                return direction > 0 ? Math.max(0, data.total - progressDistance) : Math.max(0, progressDistance);
+            }
             const progressDistance = getEdgeDistanceAtMatch(match.edge, match.segmentIndex, match.progress);
             const totalDistance = getEdgeLength2D(match.edge);
             return direction > 0 ? Math.max(0, totalDistance - progressDistance) : Math.max(0, progressDistance);
@@ -2086,6 +2665,17 @@
         function getTargetDistanceFromEdgeStart(match, direction) {
             if (!match || !match.edge)
                 return 0;
+            if (isDeveloperToggleEnabled("perfRoadDistanceFastPath")) {
+                const data = getRoadEdgeDistanceData(match.edge);
+                const segment = Math.floor(Number(match.segmentIndex));
+                if (!Number.isFinite(segment) || segment < 0)
+                    return direction > 0 ? 0 : data.total;
+                if (segment >= data.cumulative.length - 1)
+                    return direction > 0 ? data.total : 0;
+                const segmentLength = data.cumulative[segment + 1] - data.cumulative[segment];
+                const progressDistance = data.cumulative[segment] + segmentLength * clamp(match.progress, 0, 1);
+                return direction > 0 ? progressDistance : Math.max(0, data.total - progressDistance);
+            }
             const progressDistance = getEdgeDistanceAtMatch(match.edge, match.segmentIndex, match.progress);
             const totalDistance = getEdgeLength2D(match.edge);
             return direction > 0 ? progressDistance : Math.max(0, totalDistance - progressDistance);
@@ -2095,10 +2685,35 @@
             return `${getRoadEdgeId(edge)}:${direction > 0 ? 1 : -1}`;
         }
 
+        function getRoadEdgeDistanceData(edge) {
+            const points = getEdgeWorldPoints(edge);
+            const cached = edge && edge.__tmRoadEdgeDistanceData;
+            if (cached && cached.points === points && cached.length === points.length)
+                return cached;
+            const cumulative = [0];
+            let total = 0;
+            for (let index = 0; index < points.length - 1; index++) {
+                total += getDistance2D(points[index], points[index + 1]);
+                cumulative.push(total);
+            }
+            const data = {
+                points,
+                length: points.length,
+                cumulative,
+                total
+            };
+            edge && (edge.__tmRoadEdgeDistanceData = data);
+            return data;
+        }
+
         function isRoadEligibleForTownSigns(edge) {
             const roadModule = townSignsState.roadModule;
             if (!edge || !roadModule)
                 return !1;
+            if (isDeveloperToggleEnabled("perfRoadEligibilityCheck")) {
+                const type = edge.type;
+                return type !== roadModule.ROAD_TYPE_VIRTUAL && type !== roadModule.ROAD_TYPE_MOTORWAY && type !== roadModule.ROAD_TYPE_MOTORWAY_NO_HARD_SHOULDER && type !== roadModule.ROAD_TYPE_MOTORWAY_OPEN && type !== roadModule.ROAD_TYPE_MOTORWAY_LINK && type !== roadModule.ROAD_TYPE_MERGING_LANE && type !== roadModule.ROAD_TYPE_SERVICE && type !== roadModule.ROAD_TYPE_PARKING_AISLE && type !== roadModule.ROAD_TYPE_DRIVEWAY && type !== roadModule.ROAD_TYPE_DRIVE_THROUGH && type !== roadModule.ROAD_TYPE_RACETRACK;
+            }
             return ![
                 roadModule.ROAD_TYPE_VIRTUAL,
                 roadModule.ROAD_TYPE_MOTORWAY,
@@ -2118,6 +2733,10 @@
             const roadModule = townSignsState.roadModule;
             if (!edge || !roadModule)
                 return !1;
+            if (isDeveloperToggleEnabled("perfRoadEligibilityCheck")) {
+                const type = edge.type;
+                return type !== roadModule.ROAD_TYPE_VIRTUAL && type !== roadModule.ROAD_TYPE_MOTORWAY && type !== roadModule.ROAD_TYPE_MOTORWAY_NO_HARD_SHOULDER && type !== roadModule.ROAD_TYPE_MOTORWAY_OPEN && type !== roadModule.ROAD_TYPE_MOTORWAY_LINK && type !== roadModule.ROAD_TYPE_MERGING_LANE && type !== roadModule.ROAD_TYPE_RACETRACK;
+            }
             return ![
                 roadModule.ROAD_TYPE_VIRTUAL,
                 roadModule.ROAD_TYPE_MOTORWAY,
@@ -2903,7 +3522,14 @@
             const now = performance.now();
             if (Array.isArray(state.allLoadedChunks) && now - (Number(state.allLoadedChunksAt) || 0) < 240)
                 return state.allLoadedChunks;
-            state.allLoadedChunks = Object.values(townSignsState.chunkManager && townSignsState.chunkManager.loadedChunks || {}).filter(Boolean);
+            const loaded = townSignsState.chunkManager && townSignsState.chunkManager.loadedChunks || {};
+            if (isDeveloperToggleEnabled("perfLoadedChunkEnumeration")) {
+                const chunks = [];
+                for (const key in loaded)
+                    Object.prototype.hasOwnProperty.call(loaded, key) && loaded[key] && chunks.push(loaded[key]);
+                state.allLoadedChunks = chunks;
+            } else
+                state.allLoadedChunks = Object.values(loaded).filter(Boolean);
             state.allLoadedChunksAt = now;
             return state.allLoadedChunks;
         }
@@ -2912,6 +3538,7 @@
             runtimeState.worldCollisionState && "object" == typeof runtimeState.worldCollisionState || (runtimeState.worldCollisionState = {});
             runtimeState.worldCollisionState.chunkIds instanceof WeakMap || (runtimeState.worldCollisionState.chunkIds = new WeakMap);
             runtimeState.worldCollisionState.chunkStaticCaches instanceof WeakMap || (runtimeState.worldCollisionState.chunkStaticCaches = new WeakMap);
+            runtimeState.worldCollisionState.queryCache instanceof Map || (runtimeState.worldCollisionState.queryCache = new Map);
             return runtimeState.worldCollisionState;
         }
 
@@ -2924,6 +3551,19 @@
             state.staticCache = null;
             state.staticCacheSignature = "";
             state.staticCacheAt = 0;
+            state.signatureChunks = null;
+            state.signatureValue = "";
+            state.signatureAt = 0;
+            state.autopilotEdgeChunks = null;
+            state.autopilotEdges = null;
+            state.autopilotEdgesAt = 0;
+            runtimeState.gasStationMissionTargets = null;
+            runtimeState.gasStationMissionTargetsSignature = "";
+            runtimeState.mainRoadMissionTargets = null;
+            runtimeState.mainRoadMissionTargetsSignature = "";
+            runtimeState.prepareNearChunkCache = null;
+            state.queryCache instanceof Map && state.queryCache.clear();
+            runtimeState.customBuildingCollisionQueryCache instanceof Map && runtimeState.customBuildingCollisionQueryCache.clear();
         }
 
         function invalidateWorldCollisionCacheForChunk(chunk) {
@@ -2933,6 +3573,70 @@
             state.staticCache = null;
             state.staticCacheSignature = "";
             state.staticCacheAt = 0;
+            state.signatureChunks = null;
+            state.signatureValue = "";
+            state.signatureAt = 0;
+            state.autopilotEdgeChunks = null;
+            state.autopilotEdges = null;
+            state.autopilotEdgesAt = 0;
+            runtimeState.gasStationMissionTargets = null;
+            runtimeState.gasStationMissionTargetsSignature = "";
+            runtimeState.mainRoadMissionTargets = null;
+            runtimeState.mainRoadMissionTargetsSignature = "";
+            runtimeState.prepareNearChunkCache = null;
+            state.queryCache instanceof Map && state.queryCache.clear();
+            runtimeState.customBuildingCollisionQueryCache instanceof Map && runtimeState.customBuildingCollisionQueryCache.clear();
+        }
+
+        function getWorldCollisionQueryCacheKey(kind, position, mode) {
+            if (isDeveloperToggleEnabled("perfWorldQueryKey")) {
+                const x = Math.round((Number(position && position.x) || 0) * 2) / 2;
+                const z = Math.round((Number(position && position.z) || 0) * 2) / 2;
+                return `${kind || "world"}:${mode || ""}:${x}:${z}`;
+            }
+            return [
+                kind || "world",
+                mode || "",
+                Math.round((Number(position && position.x) || 0) * 2) / 2,
+                Math.round((Number(position && position.z) || 0) * 2) / 2
+            ].join(":");
+        }
+
+        function getCachedWorldCollisionQuery(kind, position, mode, producer) {
+            if (!position || "function" != typeof producer)
+                return producer ? producer() : null;
+            if (!isDeveloperToggleEnabled("perfCollisionQueryCache"))
+                return producer();
+            const cache = runtimeState.customBuildingCollisionQueryCache instanceof Map ? runtimeState.customBuildingCollisionQueryCache : runtimeState.customBuildingCollisionQueryCache = new Map;
+            const now = performance.now();
+            const key = getWorldCollisionQueryCacheKey(kind, position, mode);
+            const cached = cache.get(key);
+            if (cached && now - cached.at < CUSTOM_BUILDING_PERF.collisionQueryCacheMs)
+                return cached.value;
+            const value = producer();
+            return rememberLimitedCache(cache, key, {
+                at: now,
+                value
+            }, CUSTOM_BUILDING_PERF.collisionQueryCacheSize).value;
+        }
+
+        function flushCustomBuildingCollisionInvalidations() {
+            runtimeState.customBuildingCollisionInvalidationTimer = null;
+            const queue = runtimeState.customBuildingCollisionInvalidationQueue.splice(0);
+            runtimeState.customBuildingCollisionInvalidationSet = new WeakSet;
+            for (const chunk of queue)
+                chunk && invalidateWorldCollisionCacheForChunk(chunk);
+        }
+
+        function queueCustomBuildingCollisionInvalidation(chunk) {
+            if (!chunk)
+                return;
+            if (!runtimeState.customBuildingCollisionInvalidationSet.has(chunk)) {
+                runtimeState.customBuildingCollisionInvalidationSet.add(chunk);
+                runtimeState.customBuildingCollisionInvalidationQueue.push(chunk);
+            }
+            if (!runtimeState.customBuildingCollisionInvalidationTimer)
+                runtimeState.customBuildingCollisionInvalidationTimer = setTimeout(flushCustomBuildingCollisionInvalidations, 80);
         }
 
         function getWorldCollisionLoadedChunks() {
@@ -2957,6 +3661,14 @@
             return Math.hypot((Number(a.x) || 0) - (Number(b.x) || 0), (Number(a.z) || 0) - (Number(b.z) || 0));
         }
 
+        function getDistanceSq2D(a, b) {
+            if (!a || !b)
+                return 1 / 0;
+            const dx = (Number(a.x) || 0) - (Number(b.x) || 0);
+            const dz = (Number(a.z) || 0) - (Number(b.z) || 0);
+            return dx * dx + dz * dz;
+        }
+
         function cloneVector3(value) {
             if (!value)
                 return null;
@@ -2964,6 +3676,60 @@
         }
 
         function chooseSpacedTargets(targets, count, minDistance, seed) {
+            if (isDeveloperToggleEnabled("perfMissionSpacingSelection")) {
+                const source = toSafeArray(targets);
+                const chosen = [];
+                const used = new Set;
+                const wanted = Math.max(0, Number(count) || 0);
+                for (let pick = 0; pick < wanted; pick++) {
+                    let bestIndex = -1;
+                    let bestScore = 1 / 0;
+                    for (let index = 0; index < source.length; index++) {
+                        if (used.has(index))
+                            continue;
+                        const candidate = source[index];
+                        if (!candidate || !candidate.position)
+                            continue;
+                        let spaced = !0;
+                        for (const existing of chosen)
+                            if (getDistance2D(existing.position, candidate.position) < minDistance) {
+                                spaced = !1;
+                                break;
+                            }
+                        if (!spaced)
+                            continue;
+                        const score = seededUnit(seed, candidate.position.x + 17 * candidate.position.z);
+                        if (score < bestScore) {
+                            bestScore = score;
+                            bestIndex = index;
+                        }
+                    }
+                    if (bestIndex < 0)
+                        break;
+                    used.add(bestIndex);
+                    chosen.push(source[bestIndex]);
+                }
+                if (chosen.length >= wanted)
+                    return chosen;
+                for (let pick = chosen.length; pick < wanted; pick++) {
+                    let bestIndex = -1;
+                    let bestScore = 1 / 0;
+                    for (let index = 0; index < source.length; index++) {
+                        if (used.has(index) || !source[index] || !source[index].position)
+                            continue;
+                        const score = seededUnit(seed, source[index].position.x + 17 * source[index].position.z);
+                        if (score < bestScore) {
+                            bestScore = score;
+                            bestIndex = index;
+                        }
+                    }
+                    if (bestIndex < 0)
+                        break;
+                    used.add(bestIndex);
+                    chosen.push(source[bestIndex]);
+                }
+                return chosen;
+            }
             const chosen = [];
             const pool = targets.slice().sort(((a, b) => seededUnit(seed, a.position.x + 17 * a.position.z) - seededUnit(seed, b.position.x + 17 * b.position.z)));
             for (const candidate of pool) {
@@ -2983,6 +3749,86 @@
         }
 
         function collectTownMissionTargets() {
+            if (isDeveloperToggleEnabled("perfMissionTargetCollection")) {
+                const debugTargets = [];
+                const debugPlaces = toSafeArray(townSignsState.debugPlaces);
+                for (let index = 0; index < debugPlaces.length; index++) {
+                    const place = debugPlaces[index];
+                    if (!place || !place.name || !place.center)
+                        continue;
+                    debugTargets.push({
+                        key: `town_${index}`,
+                        label: place.name,
+                        position: new globalState.THREE.Vector3(Number(place.center.x) || 0, Number(place.center.y) || 0, Number(place.center.z) || 0),
+                        radius: clamp(Number(place.radius) || 55, 35, 90)
+                    });
+                }
+                if (debugTargets.length)
+                    return debugTargets;
+                const cachedTargets = [];
+                const seen = new Set;
+                for (const places of townSignsState.placeCache instanceof Map ? townSignsState.placeCache.values() : [])
+                    for (const place of toSafeArray(places)) {
+                        if (!place || !place.position || !place.name)
+                            continue;
+                        const key = `${String(place.name).toLowerCase()}:${Math.round(place.position.x / 80)}:${Math.round(place.position.z / 80)}`;
+                        if (seen.has(key))
+                            continue;
+                        seen.add(key);
+                        cachedTargets.push({
+                            key: `cached_${cachedTargets.length}`,
+                            label: place.name,
+                            position: cloneVector3(place.position),
+                            radius: 70
+                        });
+                    }
+                if (cachedTargets.length)
+                    return cachedTargets;
+                const clusters = [];
+                for (const chunk of getLoadedChunks())
+                    for (const building of toSafeArray(chunk && chunk.buildings)) {
+                        const home = building && building.houseCenter;
+                        if (!home)
+                            continue;
+                        let cluster = null;
+                        for (const entry of clusters)
+                            if (getDistance2D(entry.center, home) <= 420) {
+                                cluster = entry;
+                                break;
+                            }
+                        if (!cluster) {
+                            cluster = {
+                                center: home.clone(),
+                                points: [],
+                                sumX: 0,
+                                sumY: 0,
+                                sumZ: 0
+                            };
+                            clusters.push(cluster);
+                        }
+                        const point = home.clone();
+                        cluster.points.push(point);
+                        cluster.sumX += point.x;
+                        cluster.sumY += point.y;
+                        cluster.sumZ += point.z;
+                        const count = cluster.points.length;
+                        cluster.center.set(cluster.sumX / count, cluster.sumY / count, cluster.sumZ / count);
+                    }
+                const result = [];
+                for (let index = 0; index < clusters.length; index++) {
+                    const cluster = clusters[index];
+                    let radius = 55;
+                    for (const point of cluster.points)
+                        radius = Math.max(radius, getDistance2D(cluster.center, point));
+                    result.push({
+                        key: `fallback_town_${index}`,
+                        label: `Residential area ${index + 1}`,
+                        position: cluster.center,
+                        radius: clamp(radius + 40, 55, 120)
+                    });
+                }
+                return result;
+            }
             const debugTargets = toSafeArray(townSignsState.debugPlaces).map(((place, index) => ({
                 key: `town_${index}`,
                 label: place.name,
@@ -3038,6 +3884,18 @@
         }
 
         function collectResidentialMissionTargets(manager) {
+            if (isDeveloperToggleEnabled("perfMissionTargetCollection")) {
+                const targets = [];
+                for (const building of toSafeArray(manager && manager.buildings))
+                    building && building.houseCenter && targets.push({
+                        key: `house_${building.index}`,
+                        label: `House ${building.index}`,
+                        position: building.houseCenter.clone(),
+                        radius: 26,
+                        building
+                    });
+                return targets;
+            }
             return toSafeArray(manager && manager.buildings).filter((building => building && building.houseCenter)).map((building => ({
                 key: `house_${building.index}`,
                 label: `House ${building.index}`,
@@ -3048,8 +3906,28 @@
         }
 
         function collectGasStationMissionTargets() {
+            const chunks = getLoadedChunks();
+            if (isDeveloperToggleEnabled("perfGasStationMissionCache")) {
+                const signature = getWorldCollisionChunkSignature(chunks);
+                if (Array.isArray(runtimeState.gasStationMissionTargets) && runtimeState.gasStationMissionTargetsSignature === signature)
+                    return runtimeState.gasStationMissionTargets;
+                const cachedTargets = [];
+                for (const chunk of chunks)
+                    for (const station of toSafeArray(chunk && chunk.gasStations)) {
+                        const position = station && station.pumpPositions && station.pumpPositions[0] ? station.pumpPositions[0].clone() : station && station.origin ? station.origin.clone() : null;
+                        position && cachedTargets.push({
+                            key: `fuel_${cachedTargets.length}`,
+                            label: "Fuel station",
+                            position,
+                            radius: 22
+                        });
+                    }
+                runtimeState.gasStationMissionTargets = cachedTargets;
+                runtimeState.gasStationMissionTargetsSignature = signature;
+                return cachedTargets;
+            }
             const targets = [];
-            for (const chunk of getLoadedChunks())
+            for (const chunk of chunks)
                 for (const station of toSafeArray(chunk.gasStations)) {
                     const position = station && station.pumpPositions && station.pumpPositions[0] ? station.pumpPositions[0].clone() : station && station.origin ? station.origin.clone() : null;
                     position && targets.push({
@@ -3063,6 +3941,23 @@
         }
 
         function collectForestMissionTargets() {
+            if (isDeveloperToggleEnabled("perfMissionTargetCollection")) {
+                let best = null;
+                for (const chunk of getLoadedChunks()) {
+                    const coverage = chunk && chunk.terrain && typeof chunk.terrain.getForestCoverage === "function" ? Number(chunk.terrain.getForestCoverage()) || 0 : 0;
+                    if (coverage < .22 || best && coverage <= best.coverage)
+                        continue;
+                    const position = chunk.centerVec ? chunk.centerVec.clone() : new globalState.THREE.Vector3(Number(chunk.cx) || 0, 0, Number(chunk.cz) || 0);
+                    best = {
+                        key: "forest_0",
+                        label: "Forest 1",
+                        position,
+                        radius: 34,
+                        coverage
+                    };
+                }
+                return best ? [best] : [];
+            }
             const targets = [];
             for (const chunk of getLoadedChunks()) {
                 const coverage = chunk && chunk.terrain && typeof chunk.terrain.getForestCoverage === "function" ? Number(chunk.terrain.getForestCoverage()) || 0 : 0;
@@ -3084,7 +3979,33 @@
             const points = [];
             if (!townSignsState.roadModule)
                 return points;
-            for (const chunk of getLoadedChunks())
+            const chunks = getLoadedChunks();
+            if (isDeveloperToggleEnabled("perfMainRoadMissionCache")) {
+                const signature = `${getWorldCollisionChunkSignature(chunks)}:${townSignsState.roadModule.ROAD_TYPE_PRIMARY}:${townSignsState.roadModule.ROAD_TYPE_MOTORWAY}:${townSignsState.roadModule.ROAD_TYPE_MERGING_LANE}`;
+                if (Array.isArray(runtimeState.mainRoadMissionTargets) && runtimeState.mainRoadMissionTargetsSignature === signature)
+                    return runtimeState.mainRoadMissionTargets;
+                for (const chunk of chunks)
+                    for (const edge of toSafeArray(chunk && chunk.newRoadGraph && chunk.newRoadGraph.edges)) {
+                        if (!edge || !isRoadEligibleForTownHints(edge))
+                            continue;
+                        if (edge.type !== townSignsState.roadModule.ROAD_TYPE_PRIMARY && edge.type !== townSignsState.roadModule.ROAD_TYPE_MOTORWAY && edge.type !== townSignsState.roadModule.ROAD_TYPE_MERGING_LANE)
+                            continue;
+                        const worldPoints = getEdgeWorldPoints(edge);
+                        if (!worldPoints.length)
+                            continue;
+                        const midPoint = worldPoints[Math.floor(worldPoints.length / 2)].clone();
+                        points.push({
+                            key: `road_${points.length}`,
+                            label: "Main road checkpoint",
+                            position: midPoint,
+                            radius: 28
+                        });
+                    }
+                runtimeState.mainRoadMissionTargets = points;
+                runtimeState.mainRoadMissionTargetsSignature = signature;
+                return points;
+            }
+            for (const chunk of chunks)
                 for (const edge of toSafeArray(chunk.newRoadGraph && chunk.newRoadGraph.edges)) {
                     if (!edge || !isRoadEligibleForTownHints(edge))
                         continue;
@@ -3111,6 +4032,31 @@
                 tmFindNearbyHard: [3000, 12000]
             };
             const [minDistance,maxDistance] = ranges[type] || ranges.tmFindNearbyEasy;
+            if (isDeveloperToggleEnabled("perfMissionTargetSelection")) {
+                const ranged = [];
+                let fallback = null;
+                let fallbackDistance = "tmFindNearbyHard" === type ? -1 : 1 / 0;
+                for (const target of toSafeArray(towns)) {
+                    if (!target || !target.position)
+                        continue;
+                    const distance = getDistance2D(playerPos, target.position);
+                    if (distance >= minDistance && distance <= maxDistance)
+                        ranged.push(Object.assign({}, target, {
+                            distance
+                        }));
+                    if ("tmFindNearbyHard" === type ? distance > fallbackDistance : distance < fallbackDistance) {
+                        fallbackDistance = distance;
+                        fallback = Object.assign({}, target, {
+                            distance
+                        });
+                    }
+                }
+                if (ranged.length) {
+                    ranged.sort((a, b) => a.distance - b.distance);
+                    return ranged[Math.floor(seededUnit(playerPos.x + playerPos.z, ranged.length) * ranged.length)] || ranged[0];
+                }
+                return fallback;
+            }
             const scored = towns.map(target => Object.assign({}, target, {
                 distance: getDistance2D(playerPos, target.position)
             })).filter(target => target.distance >= minDistance && target.distance <= maxDistance).sort(((a, b) => a.distance - b.distance));
@@ -3138,9 +4084,67 @@
                     markerColor: "#ffe26a",
                     status: `Find ${target.label}`,
                     description: `Map disabled. Navigate to ${target.label} without ESC/Shift map help.`
-                }] : [];
+            }] : [];
             }
             if ("tmPassengerFlight" === type) {
+                if (isDeveloperToggleEnabled("perfMissionTargetSelection")) {
+                    let start = null;
+                    let startDistance = 1 / 0;
+                    const airportsRaw = getAirportEntries();
+                    for (let index = 0; index < airportsRaw.length; index++) {
+                        const airport = airportsRaw[index];
+                        if (!airport || !airport.center)
+                            continue;
+                        const target = {
+                            key: `airport_${index}`,
+                            label: `Airport ${index + 1}`,
+                            position: airport.center.clone(),
+                            radius: Math.max(90, airport.width + 60),
+                            airport
+                        };
+                        const distance = getDistance2D(playerPos, target.position);
+                        if (distance < startDistance) {
+                            startDistance = distance;
+                            start = target;
+                        }
+                    }
+                    let destination = null;
+                    let destinationDistance = 1 / 0;
+                    for (let index = 0; index < airportsRaw.length; index++) {
+                        const airport = airportsRaw[index];
+                        if (!airport || !airport.center || !start || getDistance2D(start.position, airport.center) <= 1200)
+                            continue;
+                        const distance = getDistance2D(playerPos, airport.center);
+                        if (distance < destinationDistance) {
+                            destinationDistance = distance;
+                            destination = {
+                                key: `airport_${index}`,
+                                label: `Airport ${index + 1}`,
+                                position: airport.center.clone(),
+                                radius: Math.max(90, airport.width + 60),
+                                airport
+                            };
+                        }
+                    }
+                    const stages = [];
+                    start && stages.push({
+                        label: "Passenger pickup",
+                        position: start.position,
+                        radius: start.radius,
+                        markerColor: "#64d6ff",
+                        status: "Board passengers at the airport",
+                        description: "Use a passenger aircraft and depart from the runway."
+                    });
+                    destination && stages.push({
+                        label: "Passenger destination",
+                        position: destination.position,
+                        radius: destination.radius,
+                        markerColor: "#ffcb62",
+                        status: "Land at the destination airport",
+                        description: "Passenger jobs only count between airport runways."
+                    });
+                    return stages;
+                }
                 const airports = getAirportEntries().map((airport, index) => ({
                     key: `airport_${index}`,
                     label: `Airport ${index + 1}`,
@@ -3178,6 +4182,44 @@
                 })));
             }
             if ("tmResidentialDash" === type) {
+                if (isDeveloperToggleEnabled("perfMissionTargetSelection")) {
+                    let first = null;
+                    let firstDistance = 1 / 0;
+                    for (const target of homes) {
+                        const distance = getDistance2D(playerPos, target.position);
+                        if (distance < firstDistance) {
+                            firstDistance = distance;
+                            first = target;
+                        }
+                    }
+                    let second = null;
+                    let secondDistance = 1 / 0;
+                    let third = null;
+                    let thirdDistance = 1 / 0;
+                    for (const target of homes) {
+                        const playerDistance = getDistance2D(playerPos, target.position);
+                        if (first && getDistance2D(first.position, target.position) > 500 && playerDistance < secondDistance) {
+                            secondDistance = playerDistance;
+                            second = target;
+                        }
+                    }
+                    for (const target of homes)
+                        if (second && target !== first && getDistance2D(second.position, target.position) > 350) {
+                            const playerDistance = getDistance2D(playerPos, target.position);
+                            if (playerDistance < thirdDistance) {
+                                thirdDistance = playerDistance;
+                                third = target;
+                            }
+                        }
+                    return [first, second, third].filter(Boolean).map((target => ({
+                        label: target.label,
+                        position: target.position,
+                        radius: target.radius,
+                        markerColor: "#69d2ff",
+                        status: `Residential stop: ${target.label}`,
+                        description: "Sprint between residential stops without wrecking the car."
+                    })));
+                }
                 const sorted = homes.sort(((a, b) => getDistance2D(playerPos, a.position) - getDistance2D(playerPos, b.position)));
                 const first = sorted[0];
                 const second = sorted.find((target => getDistance2D(first && first.position, target.position) > 500));
@@ -3192,6 +4234,43 @@
                 })));
             }
             if ("tmFuelRun" === type) {
+                if (isDeveloperToggleEnabled("perfMissionTargetSelection")) {
+                    let nearestFuel = null;
+                    let nearestFuelDistance = 1 / 0;
+                    for (const target of fuelStations) {
+                        const distance = getDistance2D(playerPos, target.position);
+                        if (distance < nearestFuelDistance) {
+                            nearestFuelDistance = distance;
+                            nearestFuel = target;
+                        }
+                    }
+                    let deliveryHome = null;
+                    let deliveryDistance = 1 / 0;
+                    for (const target of homes) {
+                        if (nearestFuel && getDistance2D(nearestFuel.position, target.position) <= 250)
+                            continue;
+                        const distance = nearestFuel ? getDistance2D(nearestFuel.position, target.position) : 0;
+                        if (distance < deliveryDistance) {
+                            deliveryDistance = distance;
+                            deliveryHome = target;
+                        }
+                    }
+                    return [nearestFuel && {
+                        label: nearestFuel.label,
+                        position: nearestFuel.position,
+                        radius: nearestFuel.radius,
+                        markerColor: "#63f08d",
+                        status: "Reach the fuel station",
+                        description: "Drive to the station first, then bring the car back into town."
+                    }, deliveryHome && {
+                        label: deliveryHome.label,
+                        position: deliveryHome.position,
+                        radius: deliveryHome.radius,
+                        markerColor: "#40b8ff",
+                        status: `Return to ${deliveryHome.label}`,
+                        description: "Finish the run at a residential destination."
+                    }].filter(Boolean);
+                }
                 const nearestFuel = fuelStations.sort(((a, b) => getDistance2D(playerPos, a.position) - getDistance2D(playerPos, b.position)))[0];
                 const deliveryHome = homes.sort(((a, b) => nearestFuel ? getDistance2D(nearestFuel.position, a.position) - getDistance2D(nearestFuel.position, b.position) : 0)).find((target => !nearestFuel || getDistance2D(nearestFuel.position, target.position) > 250));
                 return [nearestFuel && {
@@ -3212,6 +4291,34 @@
             }
             if ("tmForestPatrol" === type) {
                 const forest = forests[0];
+                if (isDeveloperToggleEnabled("perfMissionTargetSelection")) {
+                    let town = null;
+                    let townDistance = 1 / 0;
+                    for (const target of towns) {
+                        if (forest && getDistance2D(forest.position, target.position) <= 500)
+                            continue;
+                        const distance = forest ? getDistance2D(forest.position, target.position) : 0;
+                        if (distance < townDistance) {
+                            townDistance = distance;
+                            town = target;
+                        }
+                    }
+                    return [forest && {
+                        label: forest.label,
+                        position: forest.position,
+                        radius: forest.radius,
+                        markerColor: "#7ee35b",
+                        status: "Reach the forest edge",
+                        description: "Head out of town and reach the greener part of the map."
+                    }, town && {
+                        label: town.label,
+                        position: town.position,
+                        radius: town.radius,
+                        markerColor: "#ffc46b",
+                        status: `Return to ${town.label}`,
+                        description: "Turn back and finish inside a nearby settlement."
+                    }].filter(Boolean);
+                }
                 const town = towns.sort(((a, b) => forest ? getDistance2D(forest.position, a.position) - getDistance2D(forest.position, b.position) : 0)).find((target => !forest || getDistance2D(forest.position, target.position) > 500));
                 return [forest && {
                     label: forest.label,
@@ -3559,6 +4666,7 @@
             if (runtimeState.controlsPatched)
                 return;
             runtimeState.controlsPatched = !0;
+            ensureDeveloperMenuHotkey();
             document.addEventListener("keydown", (event => {
                 if (isTypingTarget(event.target))
                     return;
@@ -3740,7 +4848,15 @@
             const lng = Number(navPoint.lng);
             if (!Number.isFinite(lat) || !Number.isFinite(lng))
                 return "";
-            return `${lat.toFixed(6)},${lng.toFixed(6)}`;
+            if (isDeveloperToggleEnabled("perfMapTargetSignatureCache") && runtimeState.mapTargetSignatureLat === lat && runtimeState.mapTargetSignatureLng === lng && runtimeState.mapTargetSignature)
+                return runtimeState.mapTargetSignature;
+            const signature = `${lat.toFixed(6)},${lng.toFixed(6)}`;
+            if (isDeveloperToggleEnabled("perfMapTargetSignatureCache")) {
+                runtimeState.mapTargetSignatureLat = lat;
+                runtimeState.mapTargetSignatureLng = lng;
+                runtimeState.mapTargetSignature = signature;
+            }
+            return signature;
         }
 
         function getMapTargetWorldPosition() {
@@ -3789,6 +4905,7 @@
 
         function clearNaviGuidance(reason, shouldNotify=!1) {
             runtimeState.navGuidance = null;
+            runtimeState.navGuidanceUiState = null;
             shouldNotify && notifyRuntime(`Navi aus: ${reason || "gestoppt"}`);
             setNaviPanelStatus("");
         }
@@ -3857,6 +4974,7 @@
                 source: source || "navi",
                 startedAt: performance.now()
             };
+            runtimeState.navGuidanceUiState = null;
             stopAutopilot("Navi zeigt nur den Weg", !1);
             notifyRuntime(`Navi zeigt Weg: ${label || "Ziel gesetzt"}.`);
             setNaviPanelStatus(`Weg zeigen: ${label || "Ziel gesetzt"}`);
@@ -3894,15 +5012,35 @@
             };
             for (const item of runtimeState.overlayItems)
                 item.kind === "poi" && addTarget(item.data || item, item.key);
-            for (const [chunkKey, pois] of runtimeState.poiCache)
-                for (let index = 0; index < toSafeArray(pois).length; index++)
-                    addTarget(pois[index], `${chunkKey}:${index}`);
+            for (const [chunkKey, pois] of runtimeState.poiCache) {
+                const list = isDeveloperToggleEnabled("perfPoiNaviTargetsLoop") ? toSafeArray(pois) : null;
+                if (list)
+                    for (let index = 0; index < list.length; index++)
+                        addTarget(list[index], `${chunkKey}:${index}`);
+                else
+                    for (let index = 0; index < toSafeArray(pois).length; index++)
+                        addTarget(pois[index], `${chunkKey}:${index}`);
+            }
             return targets;
         }
 
         function collectNaviTargets(type) {
             if ("fuel" === type)
                 return collectGasStationMissionTargets();
+            if ("airport" === type && isDeveloperToggleEnabled("perfNaviAirportTargetsLoop")) {
+                const airports = getAirportEntries();
+                const targets = [];
+                for (let index = 0; index < airports.length; index++) {
+                    const airport = airports[index];
+                    targets.push({
+                        key: `airport_${index}`,
+                        label: `Airport ${index + 1}`,
+                        position: airport.center,
+                        airport
+                    });
+                }
+                return targets;
+            }
             if ("airport" === type)
                 return getAirportEntries().map((airport, index) => ({
                     key: `airport_${index}`,
@@ -3921,6 +5059,22 @@
             const playerPos = getControlPosition() || getPlayerPosition();
             if (!playerPos)
                 return null;
+            if (isDeveloperToggleEnabled("perfNaviTargetSelection")) {
+                let best = null;
+                let bestDistance = 1 / 0;
+                for (const target of toSafeArray(targets)) {
+                    if (!target || !target.position)
+                        continue;
+                    const distance = getDistance2D(playerPos, target.position);
+                    if (distance < bestDistance) {
+                        bestDistance = distance;
+                        best = target;
+                    }
+                }
+                return best ? Object.assign({}, best, {
+                    distance: bestDistance
+                }) : null;
+            }
             return targets.filter(target => target && target.position).map(target => Object.assign({}, target, {
                 distance: getDistance2D(playerPos, target.position)
             })).sort(((a, b) => a.distance - b.distance))[0] || null;
@@ -3928,6 +5082,21 @@
 
         function getAddressSearchParts(text) {
             const normalized = normalizeTownLabel(text).toLowerCase();
+            if (isDeveloperToggleEnabled("perfAddressPartsCache")) {
+                runtimeState.addressSearchPartsCache instanceof Map || (runtimeState.addressSearchPartsCache = new Map);
+                const cached = runtimeState.addressSearchPartsCache.get(normalized);
+                if (cached)
+                    return cached;
+                const postal = normalized.match(/\b\d{4,5}\b/);
+                const house = normalized.match(/\b(\d+[a-z]?)\b(?!.*\b\d+[a-z]?\b)/);
+                const words = normalized.replace(/\b\d+[a-z]?\b/g, " ").split(/\s+/).filter(word => word.length > 2);
+                return rememberLimitedCache(runtimeState.addressSearchPartsCache, normalized, {
+                    normalized,
+                    postal: postal && postal[0] || "",
+                    house: house && house[1] || "",
+                    words
+                }, 160);
+            }
             const postal = normalized.match(/\b\d{4,5}\b/);
             const house = normalized.match(/\b(\d+[a-z]?)\b(?!.*\b\d+[a-z]?\b)/);
             const words = normalized.replace(/\b\d+[a-z]?\b/g, " ").split(/\s+/).filter(word => word.length > 2);
@@ -3941,6 +5110,28 @@
 
         function buildAddressSearchRequests(text) {
             const parts = getAddressSearchParts(text);
+            if (isDeveloperToggleEnabled("perfAddressRequestBuild")) {
+                const requests = [];
+                const seen = new Set;
+                const addRequest = (query, countrycodes="") => {
+                    const key = `${query}|${countrycodes}`;
+                    if (seen.has(key))
+                        return;
+                    seen.add(key);
+                    requests.push({
+                        query,
+                        countrycodes
+                    });
+                };
+                addRequest(text);
+                if (/^\d{4}\b/.test(parts.normalized)) {
+                    addRequest(`${text}, Oesterreich`, "at");
+                    addRequest(`${text}, Austria`, "at");
+                }
+                if (!/\b(oesterreich|österreich|austria|deutschland|germany)\b/i.test(text))
+                    addRequest(`${text}, Oesterreich`, "at");
+                return requests;
+            }
             const requests = [{
                 query: text,
                 countrycodes: ""
@@ -3973,7 +5164,25 @@
         function scoreAddressSearchResult(result, text) {
             const parts = getAddressSearchParts(text);
             const address = result && result.address || {};
-            const haystack = normalizeTownLabel([result && result.display_name, address.road, address.house_number, address.postcode, address.city, address.town, address.village, address.hamlet, address.suburb, address.country].filter(Boolean).join(" ")).toLowerCase();
+            let haystack;
+            if (isDeveloperToggleEnabled("perfAddressHaystackBuild")) {
+                let raw = "";
+                const append = value => {
+                    value && (raw += `${raw ? " " : ""}${value}`);
+                };
+                append(result && result.display_name);
+                append(address.road);
+                append(address.house_number);
+                append(address.postcode);
+                append(address.city);
+                append(address.town);
+                append(address.village);
+                append(address.hamlet);
+                append(address.suburb);
+                append(address.country);
+                haystack = normalizeTownLabel(raw).toLowerCase();
+            } else
+                haystack = normalizeTownLabel([result && result.display_name, address.road, address.house_number, address.postcode, address.city, address.town, address.village, address.hamlet, address.suburb, address.country].filter(Boolean).join(" ")).toLowerCase();
             let score = Number(result && result.importance) || 0;
             if (parts.postal && String(address.postcode || "").startsWith(parts.postal))
                 score += 100;
@@ -3999,6 +5208,7 @@
             }
             const promise = (async () => {
                 const candidates = [];
+                const fastAddressSelection = isDeveloperToggleEnabled("perfAddressBestSelection");
                 for (const request of buildAddressSearchRequests(queryText)) {
                     const params = new URLSearchParams({
                         format: "json",
@@ -4015,12 +5225,26 @@
                     if (!response.ok)
                         throw new Error(`HTTP ${response.status}`);
                     const results = await response.json();
-                    for (const result of toSafeArray(results))
+                    let hasStrongCandidate = !1;
+                    for (const result of toSafeArray(results)) {
                         candidates.push(result);
-                    if (candidates.some(result => scoreAddressSearchResult(result, queryText) >= 120))
+                        fastAddressSelection && scoreAddressSearchResult(result, queryText) >= 120 && (hasStrongCandidate = !0);
+                    }
+                    if (fastAddressSelection ? hasStrongCandidate : candidates.some(result => scoreAddressSearchResult(result, queryText) >= 120))
                         break;
                 }
-                const best = candidates.sort(((a, b) => scoreAddressSearchResult(b, queryText) - scoreAddressSearchResult(a, queryText)))[0];
+                let best;
+                if (fastAddressSelection) {
+                    let bestScore = -1 / 0;
+                    for (const candidate of candidates) {
+                        const score = scoreAddressSearchResult(candidate, queryText);
+                        if (score > bestScore) {
+                            bestScore = score;
+                            best = candidate;
+                        }
+                    }
+                } else
+                    best = candidates.sort(((a, b) => scoreAddressSearchResult(b, queryText) - scoreAddressSearchResult(a, queryText)))[0];
                 const lat = Number(best && best.lat);
                 const lon = Number(best && best.lon);
                 if (!Number.isFinite(lat) || !Number.isFinite(lon))
@@ -4052,7 +5276,8 @@
                 notifyRuntime("Navi panel ist in den Extension-Einstellungen aus.", "error");
                 return !1;
             }
-            if (["supermarket", "autoshop", "apiary"].includes(type) && !featureState.shops) {
+            const isShopPreset = isDeveloperToggleEnabled("perfNaviPresetChecks") ? "supermarket" === type || "autoshop" === type || "apiary" === type : ["supermarket", "autoshop", "apiary"].includes(type);
+            if (isShopPreset && !featureState.shops) {
                 notifyRuntime("Shops + Navi POIs sind in den Extension-Einstellungen aus.", "error");
                 return !1;
             }
@@ -4077,11 +5302,19 @@
 
         function setNaviPanelStatus(message, kind) {
             const panel = runtimeState.navPanel;
-            const status = panel && panel.querySelector('[data-role="status"]');
+            const status = panel && (panel.__tmNaviStatusNode || (panel.__tmNaviStatusNode = panel.querySelector('[data-role="status"]')));
             if (!status)
                 return;
-            status.textContent = message || "";
-            status.style.color = "error" === kind ? "#ff9f9f" : "#9fd7ff";
+            const text = message || "";
+            const color = "error" === kind ? "#ff9f9f" : "#9fd7ff";
+            if (status.__tmLastText !== text) {
+                status.textContent = text;
+                status.__tmLastText = text;
+            }
+            if (status.__tmLastColor !== color) {
+                status.style.color = color;
+                status.__tmLastColor = color;
+            }
         }
 
         function searchNaviAddress(query) {
@@ -4169,8 +5402,12 @@
             const panel = runtimeState.navPanel;
             if (!panel)
                 return;
-            for (const button of panel.querySelectorAll("button[data-mode]")) {
+            const buttons = panel.__tmNaviModeButtons || (panel.__tmNaviModeButtons = Array.from(panel.querySelectorAll("button[data-mode]")));
+            for (const button of buttons) {
                 const active = button.dataset.mode === runtimeState.navMode;
+                if (button.__tmNaviModeActive === active)
+                    continue;
+                button.__tmNaviModeActive = active;
                 button.style.background = active ? "#d7e2f2" : "rgba(255,255,255,.08)";
                 button.style.color = active ? "#12202d" : "#f5f1e8";
                 button.style.borderColor = active ? "rgba(255,255,255,.4)" : "rgba(255,255,255,.14)";
@@ -4265,12 +5502,19 @@
         function isRoadEligibleForAutopilot(edge) {
             if (!edge || !edge.points || edge.points.length < 2)
                 return !1;
+            const cacheKey = isDeveloperToggleEnabled("perfAutopilotEdgeEligibleCache") ? `${edge.points.length}:${edge.type}:${edge.lanesForward}:${edge.lanesBackward}:${edge.oneway ? 1 : 0}` : "";
+            if (cacheKey && edge.__tmAutopilotEligibleKey === cacheKey)
+                return !!edge.__tmAutopilotEligible;
             const roadModule = townSignsState.roadModule;
-            if (!roadModule)
+            if (!roadModule) {
+                cacheKey && (edge.__tmAutopilotEligibleKey = cacheKey,
+                edge.__tmAutopilotEligible = !0);
                 return !0;
-            if (edge.type === roadModule.ROAD_TYPE_VIRTUAL || edge.type === roadModule.ROAD_TYPE_RACETRACK)
-                return !1;
-            return (Number(edge.lanesForward) || 0) > 0 || (Number(edge.lanesBackward) || 0) > 0 || !!edge.oneway;
+            }
+            const eligible = edge.type !== roadModule.ROAD_TYPE_VIRTUAL && edge.type !== roadModule.ROAD_TYPE_RACETRACK && ((Number(edge.lanesForward) || 0) > 0 || (Number(edge.lanesBackward) || 0) > 0 || !!edge.oneway);
+            cacheKey && (edge.__tmAutopilotEligibleKey = cacheKey,
+            edge.__tmAutopilotEligible = eligible);
+            return eligible;
         }
 
         function canDriveEdgeDirection(edge, direction) {
@@ -4279,19 +5523,80 @@
             return direction > 0 ? (Number(edge.lanesForward) || 0) > 0 || !!edge.oneway : !edge.oneway && (Number(edge.lanesBackward) || 0) > 0;
         }
 
+        function getLoadedAutopilotEdges() {
+            if (!isDeveloperToggleEnabled("perfAutopilotEdgeListCache"))
+                return null;
+            const state = getWorldCollisionState();
+            const chunks = getLoadedChunks();
+            const now = performance.now();
+            if (state.autopilotEdgeChunks === chunks && Array.isArray(state.autopilotEdges) && now - (Number(state.autopilotEdgesAt) || 0) < 240)
+                return state.autopilotEdges;
+            const edges = [];
+            for (const chunk of chunks)
+                for (const edge of toSafeArray(chunk && chunk.newRoadGraph && chunk.newRoadGraph.edges))
+                    isRoadEligibleForAutopilot(edge) && edges.push(edge);
+            state.autopilotEdgeChunks = chunks;
+            state.autopilotEdges = edges;
+            state.autopilotEdgesAt = now;
+            return edges;
+        }
+
         function getEdgeWorldPoints(edge) {
             const center = edge && edge.chunk && edge.chunk.centerVec;
             if (!edge || !edge.points || !center)
                 return [];
-            return edge.points.map(point => point.clone().add(center));
+            if (isDeveloperToggleEnabled("perfRoadWorldPointCache")) {
+                const key = `${edge.points.length}:${roundNumberForCacheKey(center.x)}:${roundNumberForCacheKey(center.y)}:${roundNumberForCacheKey(center.z)}`;
+                const cached = edge.__tmWorldPointsCache;
+                if (cached && cached.key === key)
+                    return cached.points;
+                const points = [];
+                for (const point of edge.points)
+                    points.push(point.clone().add(center));
+                edge.__tmWorldPointsCache = {
+                    key,
+                    points
+                };
+                return points;
+            }
+            const points = [];
+            for (const point of edge.points)
+                points.push(point.clone().add(center));
+            return points;
         }
 
-        function getRoadSegmentMatch(edge, index, position) {
-            const points = getEdgeWorldPoints(edge);
+        function getRoadSegmentMatchFromPoints(edge, index, position, points) {
             const start = points[index];
             const end = points[index + 1];
             if (!start || !end)
                 return null;
+            if (isDeveloperToggleEnabled("perfRoadSegmentMatchMath")) {
+                const px = Number(position && position.x) || 0;
+                const pz = Number(position && position.z) || 0;
+                const ax = Number(start.x) || 0;
+                const ay = Number(start.y) || 0;
+                const az = Number(start.z) || 0;
+                const dx = (Number(end.x) || 0) - ax;
+                const dy = (Number(end.y) || 0) - ay;
+                const dz = (Number(end.z) || 0) - az;
+                const lenSq = dx * dx + dz * dz;
+                if (lenSq < 1e-6)
+                    return null;
+                const progress = clamp(((px - ax) * dx + (pz - az) * dz) / lenSq, 0, 1);
+                const cx = ax + dx * progress;
+                const cz = az + dz * progress;
+                const distance = Math.hypot(px - cx, pz - cz);
+                const direction = new globalState.THREE.Vector3(dx,0,dz);
+                direction.normalize();
+                return {
+                    edge,
+                    segmentIndex: index,
+                    progress,
+                    point: new globalState.THREE.Vector3(cx,ay + dy * progress,cz),
+                    direction,
+                    distance
+                };
+            }
             const segment = distancePointToSegment2D(position, start, end);
             const point = start.clone().lerp(end, segment.progress);
             const direction = end.clone().sub(start);
@@ -4309,17 +5614,35 @@
             };
         }
 
+        function getRoadSegmentMatch(edge, index, position) {
+            return getRoadSegmentMatchFromPoints(edge, index, position, getEdgeWorldPoints(edge));
+        }
+
         function findNearestRoadSegment(position, maxDistance=1 / 0) {
             if (!position || !globalState.THREE)
                 return null;
             let best = null;
+            const cachedEdges = getLoadedAutopilotEdges();
+            if (cachedEdges) {
+                for (const edge of cachedEdges) {
+                    const points = getEdgeWorldPoints(edge);
+                    for (let index = 0; index < points.length - 1; index++) {
+                        const match = isDeveloperToggleEnabled("perfRoadSegmentPointReuse") ? getRoadSegmentMatchFromPoints(edge, index, position, points) : getRoadSegmentMatch(edge, index, position);
+                        if (!match || match.distance > maxDistance)
+                            continue;
+                        if (!best || match.distance < best.distance)
+                            best = match;
+                    }
+                }
+                return best;
+            }
             for (const chunk of getLoadedChunks())
                 for (const edge of toSafeArray(chunk.newRoadGraph && chunk.newRoadGraph.edges)) {
                     if (!isRoadEligibleForAutopilot(edge))
                         continue;
                     const points = getEdgeWorldPoints(edge);
                     for (let index = 0; index < points.length - 1; index++) {
-                        const match = getRoadSegmentMatch(edge, index, position);
+                        const match = isDeveloperToggleEnabled("perfRoadSegmentPointReuse") ? getRoadSegmentMatchFromPoints(edge, index, position, points) : getRoadSegmentMatch(edge, index, position);
                         if (!match || match.distance > maxDistance)
                             continue;
                         if (!best || match.distance < best.distance)
@@ -4335,6 +5658,23 @@
             let score = Number(match.distance) || 0;
             if (!target)
                 return score;
+            if (isDeveloperToggleEnabled("perfRoadSegmentScoreMath")) {
+                const targetDx = (Number(target.x) || 0) - (Number(match.point && match.point.x) || 0);
+                const targetDz = (Number(target.z) || 0) - (Number(match.point && match.point.z) || 0);
+                const targetLenSq = targetDx * targetDx + targetDz * targetDz;
+                if (targetLenSq > 1e-6) {
+                    const invLen = 1 / Math.sqrt(targetLenSq);
+                    const dot = ((Number(match.direction && match.direction.x) || 0) * targetDx + (Number(match.direction && match.direction.z) || 0) * targetDz) * invLen;
+                    score += (1 - Math.abs(clamp(dot, -1, 1))) * 180;
+                }
+                score += Math.sqrt(targetLenSq) * .025;
+                if (position) {
+                    const px = (Number(position.x) || 0) - (Number(match.point && match.point.x) || 0);
+                    const pz = (Number(position.z) || 0) - (Number(match.point && match.point.z) || 0);
+                    score += Math.hypot(px, pz) * .06;
+                }
+                return score;
+            }
             const toTarget = target.clone ? target.clone().sub(match.point) : new globalState.THREE.Vector3((Number(target.x) || 0) - match.point.x,0,(Number(target.z) || 0) - match.point.z);
             toTarget.y = 0;
             if (toTarget.lengthSq() > 1e-6) {
@@ -4353,13 +5693,30 @@
                 return null;
             let best = null;
             let bestScore = 1 / 0;
+            const cachedEdges = getLoadedAutopilotEdges();
+            if (cachedEdges) {
+                for (const edge of cachedEdges) {
+                    const points = getEdgeWorldPoints(edge);
+                    for (let index = 0; index < points.length - 1; index++) {
+                        const match = isDeveloperToggleEnabled("perfRoadSegmentPointReuse") ? getRoadSegmentMatchFromPoints(edge, index, position, points) : getRoadSegmentMatch(edge, index, position);
+                        if (!match || match.distance > maxDistance)
+                            continue;
+                        const score = scoreRoadSegmentTowardTarget(match, position, target);
+                        if (score < bestScore) {
+                            best = match;
+                            bestScore = score;
+                        }
+                    }
+                }
+                return best;
+            }
             for (const chunk of getLoadedChunks())
                 for (const edge of toSafeArray(chunk.newRoadGraph && chunk.newRoadGraph.edges)) {
                     if (!isRoadEligibleForAutopilot(edge))
                         continue;
                     const points = getEdgeWorldPoints(edge);
                     for (let index = 0; index < points.length - 1; index++) {
-                        const match = getRoadSegmentMatch(edge, index, position);
+                        const match = isDeveloperToggleEnabled("perfRoadSegmentPointReuse") ? getRoadSegmentMatchFromPoints(edge, index, position, points) : getRoadSegmentMatch(edge, index, position);
                         if (!match || match.distance > maxDistance)
                             continue;
                         const score = scoreRoadSegmentTowardTarget(match, position, target);
@@ -4713,6 +6070,18 @@
         }
 
         function getAutopilotCruiseSpeedMs(car) {
+            if (isDeveloperToggleEnabled("perfAutopilotCruiseScan")) {
+                let best = 0;
+                const scan = value => {
+                    const speed = Number(value);
+                    Number.isFinite(speed) && speed > 4 && speed > best && (best = speed);
+                };
+                scan(car && car.maxSpeed);
+                scan(car && car.mcs && car.mcs.maxSpeed);
+                scan(car && car.mcs && car.mcs.maxForwardSpeed);
+                scan(car && car.mcs && car.mcs.maxVelocity);
+                return best > 0 ? clamp(best, 12, 45) : 32;
+            }
             const candidates = [car && car.maxSpeed, car && car.mcs && car.mcs.maxSpeed, car && car.mcs && car.mcs.maxForwardSpeed, car && car.mcs && car.mcs.maxVelocity].map(Number).filter(value => Number.isFinite(value) && value > 4);
             if (candidates.length)
                 return clamp(Math.max(...candidates), 12, 45);
@@ -4922,13 +6291,26 @@
             const kindSet = new Set(toSafeArray(kinds));
             if (!kindSet.size)
                 return;
-            runtimeState.overlayItems = runtimeState.overlayItems.filter(item => {
-                if (!item || !kindSet.has(item.kind))
-                    return !0;
+            const kept = [];
+            for (const item of runtimeState.overlayItems) {
+                if (!item || !kindSet.has(item.kind)) {
+                    item && kept.push(item);
+                    continue;
+                }
                 item.group && item.group.parent && item.group.parent.remove(item.group);
                 item.group && disposeObject3D(item.group);
-                return !1;
-            });
+            }
+            runtimeState.overlayItems = kept;
+        }
+
+        function clearCustomBuildingTransientPerfCaches(clearCatalogCaches=!1) {
+            runtimeState.customBuildingTerrainYCache instanceof Map && runtimeState.customBuildingTerrainYCache.clear();
+            runtimeState.customBuildingCollisionQueryCache instanceof Map && runtimeState.customBuildingCollisionQueryCache.clear();
+            runtimeState.customBuildingCullCursor = 0;
+            if (clearCatalogCaches) {
+                runtimeState.customBuildingAutoEntryCache instanceof Map && runtimeState.customBuildingAutoEntryCache.clear();
+                runtimeState.customBuildingWindowLayoutCache instanceof Map && runtimeState.customBuildingWindowLayoutCache.clear();
+            }
         }
 
         function clearAircraftFeatureVisuals() {
@@ -4944,6 +6326,7 @@
 
         function clearCustomBuildingVisualsForLoadedChunks() {
             invalidateWorldCollisionCache();
+            clearCustomBuildingTransientPerfCaches();
             const loadedChunks = getLoadedChunks();
             const loadedSet = new Set(loadedChunks);
             for (const chunk of loadedChunks) {
@@ -4955,7 +6338,10 @@
                 }
                 resetCustomBuildingPreparationForChunk(chunk);
             }
-            runtimeState.customBuildingDoorItems = runtimeState.customBuildingDoorItems.filter(item => item && !loadedSet.has(item.chunk));
+            const remainingDoors = [];
+            for (const item of runtimeState.customBuildingDoorItems)
+                item && !loadedSet.has(item.chunk) && remainingDoors.push(item);
+            runtimeState.customBuildingDoorItems = remainingDoors;
         }
 
         function getFeatureFault(name) {
@@ -4972,6 +6358,7 @@
         function applyFeatureSideEffects(name) {
             if ("customBuildings" === name || "auto3dBuildings" === name) {
                 invalidateWorldCollisionCache();
+                clearCustomBuildingTransientPerfCaches(!0);
                 for (const chunk of getLoadedChunks())
                     resetCustomBuildingPreparationForChunk(chunk);
                 if (isAny3dBuildingFeatureEnabled())
@@ -5093,21 +6480,36 @@
         }
 
         function syncFeatureMenu() {
-            for (const panel of document.querySelectorAll("#__tmFeatureMenuSection,#__tmFeatureStartMenuSection"))
-                for (const input of panel.querySelectorAll("input[data-feature]")) {
-                    const fault = getFeatureFault(input.dataset.feature) || getInternalModuleFaultForFeature(input.dataset.feature);
+            const panels = [document.getElementById("__tmFeatureMenuSection"), document.getElementById("__tmFeatureStartMenuSection")];
+            for (const panel of panels) {
+                if (!panel)
+                    continue;
+                const inputs = panel.__tmFeatureInputs || (panel.__tmFeatureInputs = Array.from(panel.querySelectorAll("input[data-feature]")));
+                for (const input of inputs) {
+                    const feature = input.dataset.feature;
+                    const fault = getFeatureFault(feature) || getInternalModuleFaultForFeature(feature);
                     const row = input.closest("label");
-                    input.checked = !!featureState[input.dataset.feature];
-                    input.title = fault ? `${fault.context || "Feature-Fehler"}: ${fault.message}` : "";
+                    const checked = !!featureState[feature];
+                    const title = fault ? `${fault.context || "Feature-Fehler"}: ${fault.message}` : "";
+                    if (input.checked !== checked)
+                        input.checked = checked;
+                    if (input.title !== title)
+                        input.title = title;
                     if (row) {
-                        row.title = input.title;
-                        row.style.color = fault ? "#ff9f9f" : "";
-                        row.style.background = fault ? "rgba(120,0,0,.28)" : "";
-                        row.style.border = fault ? "1px solid rgba(255,95,95,.75)" : "1px solid transparent";
-                        row.style.borderRadius = "6px";
-                        row.style.padding = "3px 5px";
+                        const faultKey = fault ? `${title}` : "";
+                        if (row.__tmFeatureFaultKey !== faultKey) {
+                            row.__tmFeatureFaultKey = faultKey;
+                            row.title = title;
+                            row.style.color = fault ? "#ff9f9f" : "";
+                            row.style.background = fault ? "rgba(120,0,0,.28)" : "";
+                            row.style.border = fault ? "1px solid rgba(255,95,95,.75)" : "1px solid transparent";
+                            row.style.borderRadius = "6px";
+                            row.style.padding = "3px 5px";
+                        }
                     }
                 }
+            }
+            syncDeveloperMenu();
         }
 
         function createFeatureMenuPanel(id, title) {
@@ -5139,6 +6541,146 @@
             return panel;
         }
 
+        function escapeDeveloperText(value) {
+            return String(value == null ? "" : value).replace(/[&<>"']/g, char => ({
+                "&": "&amp;",
+                "<": "&lt;",
+                ">": "&gt;",
+                '"': "&quot;",
+                "'": "&#39;"
+            })[char]);
+        }
+
+        function getDeveloperLabelStyle() {
+            return "display:flex;gap:6px;align-items:center;min-width:0;padding:3px 5px;border:1px solid transparent;border-radius:6px;";
+        }
+
+        function createDeveloperMenuPanel(id="__tmDeveloperMenuSection") {
+            if (!TM_DEVELOPER_MENU_ENABLED)
+                return null;
+            let panel = document.getElementById(id);
+            if (panel)
+                return panel;
+            if (!document.body)
+                return null;
+            panel = document.createElement("div");
+            panel.id = id;
+            panel.style.cssText = "position:fixed;z-index:2147483646;left:50%;top:48px;transform:translateX(-50%);box-sizing:border-box;width:min(920px,calc(100vw - 24px));max-height:calc(100vh - 96px);overflow:auto;padding:12px;border:1px solid rgba(255,190,80,.55);background:rgba(18,18,20,.96);box-shadow:0 18px 50px rgba(0,0,0,.45);color:#f8f3e8;font:600 12px/1.35 Arial,Helvetica,sans-serif;text-align:left;display:none;";
+            const featureHtml = Object.keys(featureState).sort().map(feature => `<label style="${getDeveloperLabelStyle()}"><input type="checkbox" data-dev-feature="${escapeDeveloperText(feature)}"> <span>${escapeDeveloperText(feature)}</span></label>`).join("");
+            const moduleHtml = getDeveloperModuleItems().map(item => `<label style="${getDeveloperLabelStyle()}"><input type="checkbox" data-dev-module="${escapeDeveloperText(item.name)}"> <span>${escapeDeveloperText(item.label)}${item.feature ? ` (${escapeDeveloperText(item.feature)})` : ""}</span></label>`).join("");
+            const perfHtml = DEVELOPER_PERFORMANCE_TOGGLE_ITEMS.map(item => `<label style="${getDeveloperLabelStyle()}"><input type="checkbox" data-dev-toggle="${escapeDeveloperText(item.key)}"> <span>${escapeDeveloperText(item.label)}</span></label>`).join("");
+            panel.innerHTML = `
+                <details open>
+                    <summary style="cursor:pointer;letter-spacing:.04em;text-transform:uppercase;color:#ffd79a;">Developer Menu (F8)</summary>
+                    <div style="display:flex;justify-content:flex-end;margin:-20px 0 8px;">
+                        <button type="button" data-role="closeDeveloperMenu" style="border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.08);color:inherit;border-radius:8px;padding:5px 8px;font:inherit;cursor:pointer;">Schliessen</button>
+                    </div>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-top:9px;">
+                        <section>
+                            <div style="opacity:.82;margin-bottom:5px;">Features</div>
+                            <div style="display:grid;gap:5px;">${featureHtml}</div>
+                        </section>
+                        <section>
+                            <div style="opacity:.82;margin-bottom:5px;">Interne Module</div>
+                            <div style="display:grid;gap:5px;">${moduleHtml}</div>
+                        </section>
+                        <section>
+                            <div style="opacity:.82;margin-bottom:5px;">Performance</div>
+                            <div style="display:grid;gap:5px;">${perfHtml}</div>
+                        </section>
+                    </div>
+                </details>
+            `;
+            panel.addEventListener("change", event => {
+                const input = event.target;
+                if (!input || !input.dataset)
+                    return;
+                if (input.dataset.devFeature)
+                    setFeature(input.dataset.devFeature, input.checked);
+                else if (input.dataset.devModule)
+                    setDeveloperModuleEnabled(input.dataset.devModule, input.checked);
+                else if (input.dataset.devToggle)
+                    setDeveloperToggle(input.dataset.devToggle, input.checked);
+            });
+            panel.addEventListener("keydown", event => event.stopPropagation(), !0);
+            panel.addEventListener("keyup", event => event.stopPropagation(), !0);
+            const closeButton = panel.querySelector('[data-role="closeDeveloperMenu"]');
+            closeButton && closeButton.addEventListener("click", event => {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleDeveloperMenu(!1);
+            });
+            document.body.appendChild(panel);
+            return panel;
+        }
+
+        function toggleDeveloperMenu(forceVisible) {
+            if (!TM_DEVELOPER_MENU_ENABLED)
+                return;
+            const panel = createDeveloperMenuPanel();
+            if (!panel)
+                return;
+            runtimeState.developerMenuVisible = null == forceVisible ? !runtimeState.developerMenuVisible : !!forceVisible;
+            panel.style.display = runtimeState.developerMenuVisible ? "block" : "none";
+            runtimeState.developerMenuVisible && syncDeveloperMenu();
+        }
+
+        function ensureDeveloperMenuHotkey() {
+            if (!TM_DEVELOPER_MENU_ENABLED || runtimeState.developerMenuHotkeyInstalled)
+                return;
+            runtimeState.developerMenuHotkeyInstalled = !0;
+            document.addEventListener("keydown", event => {
+                if (event.repeat || event.altKey || event.ctrlKey || event.metaKey)
+                    return;
+                if ("F8" !== (event.code || "") && "F8" !== (event.key || ""))
+                    return;
+                event.preventDefault();
+                event.stopPropagation();
+                toggleDeveloperMenu();
+            }, !0);
+        }
+
+        function markDeveloperRow(row, fault, disabled) {
+            if (!row)
+                return;
+            const faultKey = fault ? `${fault.context || "Fehler"}: ${fault.message}` : disabled ? "Aus" : "";
+            if (row.__tmDeveloperFaultKey === faultKey)
+                return;
+            row.__tmDeveloperFaultKey = faultKey;
+            row.title = faultKey;
+            row.style.color = fault ? "#ff9f9f" : disabled ? "#ffd79a" : "";
+            row.style.background = fault ? "rgba(120,0,0,.28)" : "";
+            row.style.border = fault ? "1px solid rgba(255,95,95,.75)" : "1px solid transparent";
+        }
+
+        function syncDeveloperMenu() {
+            const panel = document.getElementById("__tmDeveloperMenuSection");
+            if (!TM_DEVELOPER_MENU_ENABLED) {
+                panel && panel.remove();
+                return;
+            }
+            if (!panel)
+                return;
+            for (const input of panel.querySelectorAll("input[data-dev-feature]")) {
+                const feature = input.dataset.devFeature;
+                const checked = !!featureState[feature];
+                input.checked !== checked && (input.checked = checked);
+                markDeveloperRow(input.closest("label"), getFeatureFault(feature) || getInternalModuleFaultForFeature(feature), !checked);
+            }
+            for (const input of panel.querySelectorAll("input[data-dev-module]")) {
+                const moduleName = input.dataset.devModule;
+                const checked = isInternalModuleEnabled(moduleName);
+                input.checked !== checked && (input.checked = checked);
+                markDeveloperRow(input.closest("label"), getInternalModuleFault(moduleName), !checked);
+            }
+            for (const input of panel.querySelectorAll("input[data-dev-toggle]")) {
+                const key = input.dataset.devToggle;
+                const checked = isDeveloperToggleEnabled(key);
+                input.checked !== checked && (input.checked = checked);
+                markDeveloperRow(input.closest("label"), null, !checked);
+            }
+        }
+
         function getElementLabelText(element) {
             return normalizeTownLabel((element && (element.textContent || element.value || element.getAttribute && element.getAttribute("aria-label"))) || "");
         }
@@ -5147,7 +6689,7 @@
             const explicitTarget = document.getElementById("start_menu") || document.getElementById("startMenu") || document.querySelector(".start-menu,.startMenu");
             if (explicitTarget)
                 return explicitTarget;
-            const excludedSelector = "#game_menu,#content_menu,#missionContainer,#menu-container,#special-container,#__tmFeatureMenuSection,#__tmFeatureStartMenuSection";
+            const excludedSelector = "#game_menu,#content_menu,#missionContainer,#menu-container,#special-container,#__tmFeatureMenuSection,#__tmFeatureStartMenuSection,#__tmDeveloperMenuSection";
             const buttons = Array.from(document.querySelectorAll('button,a,[role="button"],input[type="button"],input[type="submit"]'));
             const openMapButton = buttons.find(element => !element.closest(excludedSelector) && /\b(open\s*map|open\s*world|play)\b/i.test(getElementLabelText(element)));
             if (openMapButton)
@@ -5207,6 +6749,7 @@
                 mainButtons.insertAdjacentElement("afterend", panel);
             else if (panel.parentNode !== target)
                 target.appendChild(panel);
+            ensureDeveloperMenuHotkey();
             runtimeState.featurePanel = panel;
             syncFeatureMenu();
         }
@@ -5244,6 +6787,35 @@
             return fallback;
         }
 
+        function getCachedCustomTerrainYWorld(position, fallback=0) {
+            const game = runtimeState.game;
+            if (!game || !game.chunkManager || !position)
+                return fallback;
+            try {
+                const chunk = game.chunkManager.getCurrentChunk ? game.chunkManager.getCurrentChunk(position) : null;
+                if (!chunk || "function" != typeof chunk.getTerrainYLoc)
+                    return fallback;
+                const localX = position.x - (chunk.cx || 0);
+                const localZ = position.z - (chunk.cz || 0);
+                if (!isDeveloperToggleEnabled("perfTerrainYCache")) {
+                    const directY = chunk.getTerrainYLoc(localX, localZ);
+                    return Number.isFinite(directY) && directY > -999 ? directY : fallback;
+                }
+                const key = [
+                    Math.round(Number(chunk.cx) || 0),
+                    Math.round(Number(chunk.cz) || 0),
+                    Math.round(localX * 4) / 4,
+                    Math.round(localZ * 4) / 4
+                ].join(":");
+                if (runtimeState.customBuildingTerrainYCache.has(key))
+                    return runtimeState.customBuildingTerrainYCache.get(key);
+                const y = chunk.getTerrainYLoc(localX, localZ);
+                if (Number.isFinite(y) && y > -999)
+                    return rememberLimitedCache(runtimeState.customBuildingTerrainYCache, key, y, CUSTOM_BUILDING_PERF.terrainCacheSize);
+            } catch (terrainError) {}
+            return fallback;
+        }
+
         function getChunkWorldOffset(chunk) {
             if (!globalState.THREE)
                 return null;
@@ -5253,10 +6825,16 @@
         function offsetFootprintToWorld(points, offset) {
             const ox = Number(offset && offset.x) || 0;
             const oz = Number(offset && offset.z) || 0;
-            return toSafeArray(points).map(point => ({
-                x: (Number(point && point.x) || 0) + ox,
-                z: (Number(point && point.z) || 0) + oz
-            })).filter(point => Number.isFinite(point.x) && Number.isFinite(point.z));
+            const result = [];
+            for (const point of toSafeArray(points)) {
+                const x = (Number(point && point.x) || 0) + ox;
+                const z = (Number(point && point.z) || 0) + oz;
+                Number.isFinite(x) && Number.isFinite(z) && result.push({
+                    x,
+                    z
+                });
+            }
+            return result;
         }
 
         function getBuildingWorldFootprint(building, spec, chunk) {
@@ -5435,11 +7013,132 @@
             return !0;
         }
 
+        function getOverlayMaterialCache() {
+            runtimeState.overlayMaterialCache instanceof Map || (runtimeState.overlayMaterialCache = new Map);
+            return runtimeState.overlayMaterialCache;
+        }
+
+        function getOverlayGeometryCache() {
+            runtimeState.overlayGeometryCache instanceof Map || (runtimeState.overlayGeometryCache = new Map);
+            return runtimeState.overlayGeometryCache;
+        }
+
+        function getSharedOverlayBoxGeometry(size) {
+            const THREE = globalState.THREE;
+            const safeSize = [
+                Math.max(.001, Number(size && size[0]) || .001),
+                Math.max(.001, Number(size && size[1]) || .001),
+                Math.max(.001, Number(size && size[2]) || .001)
+            ];
+            if (!isDeveloperToggleEnabled("perfSharedGeometryCaches"))
+                return new THREE.BoxGeometry(safeSize[0], safeSize[1], safeSize[2]);
+            const key = `box:${makeRoundedNumberKey(safeSize)}`;
+            const cache = getOverlayGeometryCache();
+            const cached = cache.get(key);
+            if (cached)
+                return cached;
+            const geometry = new THREE.BoxGeometry(safeSize[0], safeSize[1], safeSize[2]);
+            markSharedResource(geometry, "overlay-box-geometry");
+            return rememberLimitedCache(cache, key, geometry, CUSTOM_BUILDING_PERF.overlayGeometryCacheSize);
+        }
+
+        function getSharedOverlayCylinderGeometry(radiusTop, radiusBottom, height, segments=16) {
+            const THREE = globalState.THREE;
+            const top = Math.max(0, Number(radiusTop) || 0);
+            const bottom = Math.max(0, Number(radiusBottom) || 0);
+            const safeHeight = Math.max(.001, Number(height) || .001);
+            const safeSegments = Math.max(3, Math.min(32, Math.round(Number(segments) || 16)));
+            if (!isDeveloperToggleEnabled("perfSharedGeometryCaches"))
+                return new THREE.CylinderGeometry(top, bottom, safeHeight, safeSegments);
+            const key = `cylinder:${makeRoundedNumberKey([top, bottom, safeHeight])}:${safeSegments}`;
+            const cache = getOverlayGeometryCache();
+            const cached = cache.get(key);
+            if (cached)
+                return cached;
+            const geometry = new THREE.CylinderGeometry(top, bottom, safeHeight, safeSegments);
+            markSharedResource(geometry, "overlay-cylinder-geometry");
+            return rememberLimitedCache(cache, key, geometry, CUSTOM_BUILDING_PERF.overlayGeometryCacheSize);
+        }
+
+        function getSharedOverlayConeGeometry(radius, height, segments=16) {
+            return getSharedOverlayCylinderGeometry(0, radius, height, segments);
+        }
+
+        function getSharedOverlaySphereGeometry() {
+            if (!isDeveloperToggleEnabled("perfSharedGeometryCaches"))
+                return new globalState.THREE.SphereGeometry(1, 24, 12);
+            if (runtimeState.overlaySphereGeometry)
+                return runtimeState.overlaySphereGeometry;
+            const geometry = new globalState.THREE.SphereGeometry(1, 24, 12);
+            markSharedResource(geometry, "overlay-sphere-geometry");
+            runtimeState.overlaySphereGeometry = geometry;
+            return geometry;
+        }
+
+        function getSharedOverlayLambertMaterial(colorValue) {
+            const THREE = globalState.THREE;
+            const color = toThreeColor(colorValue, 0xffffff);
+            if (!isDeveloperToggleEnabled("perfMaterialCaches"))
+                return new THREE.MeshLambertMaterial({
+                    color
+                });
+            const colorKey = color && "function" == typeof color.getHexString ? color.getHexString() : String(colorValue);
+            const key = `lambert:${colorKey}`;
+            const cache = getOverlayMaterialCache();
+            const cached = cache.get(key);
+            if (cached)
+                return cached;
+            const material = new THREE.MeshLambertMaterial({
+                color
+            });
+            markSharedResource(material, "overlay-material");
+            return rememberLimitedCache(cache, key, material, CUSTOM_BUILDING_PERF.overlayMaterialCacheSize);
+        }
+
+        function getSharedOverlayBasicMaterial(colorValue, options={}) {
+            const THREE = globalState.THREE;
+            const color = toThreeColor(colorValue, 0xffffff);
+            const opacity = null != options.opacity ? clamp(Number(options.opacity) || 0, .02, 1) : 1;
+            const side = null != options.side ? options.side : THREE.DoubleSide;
+            const depthWrite = "boolean" == typeof options.depthWrite ? options.depthWrite : !0;
+            const baseOptions = {
+                color,
+                transparent: !!options.transparent,
+                opacity,
+                side,
+                depthWrite
+            };
+            if (!isDeveloperToggleEnabled("perfMaterialCaches"))
+                return THREE.MeshBasicMaterial ? new THREE.MeshBasicMaterial(baseOptions) : THREE.MeshLambertMaterial ? new THREE.MeshLambertMaterial(baseOptions) : new THREE.MeshStandardMaterial(Object.assign({
+                    roughness: .6,
+                    metalness: .1
+                }, baseOptions));
+            const colorKey = color && "function" == typeof color.getHexString ? color.getHexString() : String(colorValue);
+            const materialKind = THREE.MeshBasicMaterial ? "basic" : THREE.MeshLambertMaterial ? "lambert" : "standard";
+            const key = isDeveloperToggleEnabled("perfBasicMaterialKey") ? `basic|${colorKey}|${options.transparent ? 1 : 0}|${Math.round(opacity * 1e3) / 1e3}|${side}|${depthWrite ? 1 : 0}|${materialKind}` : [
+                "basic",
+                colorKey,
+                options.transparent ? 1 : 0,
+                Math.round(opacity * 1e3) / 1e3,
+                side,
+                depthWrite ? 1 : 0,
+                materialKind
+            ].join("|");
+            const cache = getOverlayMaterialCache();
+            const cached = cache.get(key);
+            if (cached)
+                return cached;
+            const material = THREE.MeshBasicMaterial ? new THREE.MeshBasicMaterial(baseOptions) : THREE.MeshLambertMaterial ? new THREE.MeshLambertMaterial(baseOptions) : new THREE.MeshStandardMaterial(Object.assign({
+                roughness: .6,
+                metalness: .1
+            }, baseOptions));
+            markSharedResource(material, "overlay-basic-material");
+            return rememberLimitedCache(cache, key, material, CUSTOM_BUILDING_PERF.overlayMaterialCacheSize);
+        }
+
         function createBox(size, color, position) {
             const THREE = globalState.THREE;
-            const mesh = new THREE.Mesh(new THREE.BoxGeometry(size[0], size[1], size[2]), new THREE.MeshLambertMaterial({
-                color
-            }));
+            const mesh = new THREE.Mesh(getSharedOverlayBoxGeometry(size), getSharedOverlayLambertMaterial(color));
             position && mesh.position.set(position[0], position[1], position[2]);
             return mesh;
         }
@@ -5471,50 +7170,268 @@
             return position.x >= bounds.minX - px && position.x <= bounds.maxX + px && position.z >= bounds.minZ - px && position.z <= bounds.maxZ + px;
         }
 
+        function getWorldCollisionChunkId(chunk, state) {
+            let chunkId = chunk && state.chunkIds.get(chunk);
+            if (chunk && !chunkId) {
+                state.chunkIdCounter = (Number(state.chunkIdCounter) || 0) + 1;
+                chunkId = state.chunkIdCounter;
+                state.chunkIds.set(chunk, chunkId);
+            }
+            return chunkId || 0;
+        }
+
+        function getWorldCollisionChunkSignaturePart(chunk, state) {
+            const chunkId = getWorldCollisionChunkId(chunk, state);
+            const matches = chunk && (chunk.__tmMatchedCustomBuildings || runtimeState.customBuildingEntriesByChunk.get(chunk)) || [];
+            const edges = chunk && chunk.newRoadGraph && chunk.newRoadGraph.edges || [];
+            return `${chunkId}:${Math.round(Number(chunk && chunk.cx) || 0)}:${Math.round(Number(chunk && chunk.cz) || 0)}:${Array.isArray(matches) ? matches.length : 0}:${Array.isArray(edges) ? edges.length : 0}:${chunk && chunk.__tmCustomBuildingOverlayReady ? 1 : 0}`;
+        }
+
+        function getWorldCollisionSingleChunkSignature(chunk) {
+            return getWorldCollisionChunkSignaturePart(chunk, getWorldCollisionState());
+        }
+
         function getWorldCollisionChunkSignature(chunks) {
             const state = getWorldCollisionState();
-            return toSafeArray(chunks).map(chunk => {
-                let chunkId = chunk && state.chunkIds.get(chunk);
-                if (chunk && !chunkId) {
-                    state.chunkIdCounter = (Number(state.chunkIdCounter) || 0) + 1;
-                    chunkId = state.chunkIdCounter;
-                    state.chunkIds.set(chunk, chunkId);
+            const safeChunks = toSafeArray(chunks);
+            const now = performance.now();
+            if (isDeveloperToggleEnabled("perfCollisionSignatureCache") && state.signatureChunks === chunks && state.signatureValue && now - (Number(state.signatureAt) || 0) < CUSTOM_BUILDING_PERF.signatureCacheMs)
+                return state.signatureValue;
+            const parts = [];
+            const useFastChunkParts = isDeveloperToggleEnabled("perfSingleChunkSignature");
+            for (const chunk of safeChunks) {
+                if (useFastChunkParts)
+                    parts.push(getWorldCollisionChunkSignaturePart(chunk, state));
+                else {
+                    const chunkId = getWorldCollisionChunkId(chunk, state);
+                    const matches = chunk && (chunk.__tmMatchedCustomBuildings || runtimeState.customBuildingEntriesByChunk.get(chunk)) || [];
+                    const edges = chunk && chunk.newRoadGraph && chunk.newRoadGraph.edges || [];
+                    parts.push([
+                        chunkId,
+                        Math.round(Number(chunk && chunk.cx) || 0),
+                        Math.round(Number(chunk && chunk.cz) || 0),
+                        Array.isArray(matches) ? matches.length : 0,
+                        Array.isArray(edges) ? edges.length : 0,
+                        chunk && chunk.__tmCustomBuildingOverlayReady ? 1 : 0
+                    ].join(":"));
                 }
-                const matches = chunk && (chunk.__tmMatchedCustomBuildings || runtimeState.customBuildingEntriesByChunk.get(chunk)) || [];
-                const edges = chunk && chunk.newRoadGraph && chunk.newRoadGraph.edges || [];
-                return [
-                    chunkId || 0,
-                    Math.round(Number(chunk && chunk.cx) || 0),
-                    Math.round(Number(chunk && chunk.cz) || 0),
-                    toSafeArray(matches).length,
-                    toSafeArray(edges).length,
-                    chunk && chunk.__tmCustomBuildingOverlayReady ? 1 : 0
-                ].join(":");
-            }).sort().join("|");
+            }
+            parts.length > 1 && parts.sort();
+            const signature = parts.join("|");
+            if (isDeveloperToggleEnabled("perfCollisionSignatureCache")) {
+                state.signatureChunks = chunks;
+                state.signatureValue = signature;
+                state.signatureAt = now;
+            }
+            return signature;
         }
 
         function appendWorldCollisionStaticCache(target, source) {
             if (!target || !source)
                 return;
-            target.buildingPolygons.push(...toSafeArray(source.buildingPolygons));
-            target.customWallSegments.push(...toSafeArray(source.customWallSegments));
-            target.customFallbackPolygons.push(...toSafeArray(source.customFallbackPolygons));
-            target.tunnelWallSegments.push(...toSafeArray(source.tunnelWallSegments));
+            const append = (targetList, sourceList) => {
+                if (!Array.isArray(targetList) || !Array.isArray(sourceList) || !sourceList.length)
+                    return;
+                for (let index = 0; index < sourceList.length; index++)
+                    targetList.push(sourceList[index]);
+            };
+            append(target.buildingPolygons, source.buildingPolygons);
+            append(target.customWallSegments, source.customWallSegments);
+            append(target.customFallbackPolygons, source.customFallbackPolygons);
+            append(target.tunnelWallSegments, source.tunnelWallSegments);
+        }
+
+        function createCollisionSpatialIndex() {
+            return {
+                buildingPolygons: new Map,
+                customWallSegments: new Map,
+                customFallbackPolygons: new Map,
+                tunnelWallSegments: new Map,
+                overflow: {
+                    buildingPolygons: [],
+                    customWallSegments: [],
+                    customFallbackPolygons: [],
+                    tunnelWallSegments: []
+                }
+            };
+        }
+
+        function getCollisionBucketCoord(value) {
+            return Math.floor((Number(value) || 0) / CUSTOM_BUILDING_PERF.collisionBucketSize);
+        }
+
+        function getCollisionBucketKey(x, z) {
+            return `${x}:${z}`;
+        }
+
+        function addCollisionSpatialItem(index, type, item, bounds) {
+            if (!index || !index[type] || !item || !bounds) {
+                index && index.overflow && index.overflow[type] && index.overflow[type].push(item);
+                return;
+            }
+            const minX = getCollisionBucketCoord(bounds.minX);
+            const maxX = getCollisionBucketCoord(bounds.maxX);
+            const minZ = getCollisionBucketCoord(bounds.minZ);
+            const maxZ = getCollisionBucketCoord(bounds.maxZ);
+            const bucketCount = Math.max(1, maxX - minX + 1) * Math.max(1, maxZ - minZ + 1);
+            if (bucketCount > 80) {
+                index.overflow[type].push(item);
+                return;
+            }
+            for (let x = minX; x <= maxX; x++)
+                for (let z = minZ; z <= maxZ; z++) {
+                    const key = getCollisionBucketKey(x, z);
+                    let bucket = index[type].get(key);
+                    if (!bucket) {
+                        bucket = [];
+                        index[type].set(key, bucket);
+                    }
+                    bucket.push(item);
+                }
+        }
+
+        function buildCollisionSpatialIndex(cache) {
+            if (!cache)
+                return null;
+            if (cache.spatialIndex)
+                return cache.spatialIndex;
+            const index = createCollisionSpatialIndex();
+            for (const item of Array.isArray(cache.buildingPolygons) ? cache.buildingPolygons : [])
+                addCollisionSpatialItem(index, "buildingPolygons", item, item && item.bounds);
+            for (const item of Array.isArray(cache.customWallSegments) ? cache.customWallSegments : [])
+                addCollisionSpatialItem(index, "customWallSegments", item, item && item.bounds);
+            for (const item of Array.isArray(cache.customFallbackPolygons) ? cache.customFallbackPolygons : [])
+                addCollisionSpatialItem(index, "customFallbackPolygons", item, item && item.bounds);
+            for (const item of Array.isArray(cache.tunnelWallSegments) ? cache.tunnelWallSegments : [])
+                addCollisionSpatialItem(index, "tunnelWallSegments", item, item && item.bounds);
+            cache.spatialIndex = index;
+            return index;
+        }
+
+        function getCollisionSpatialCandidates(cache, type, position, padding=0) {
+            if (!isDeveloperToggleEnabled("perfCollisionSpatialIndex"))
+                return Array.isArray(cache && cache[type]) ? cache[type] : [];
+            const index = buildCollisionSpatialIndex(cache);
+            if (!index || !index[type])
+                return [];
+            const size = CUSTOM_BUILDING_PERF.collisionBucketSize;
+            const range = Math.max(0, Math.ceil((Number(padding) || 0) / size));
+            const centerX = getCollisionBucketCoord(position && position.x);
+            const centerZ = getCollisionBucketCoord(position && position.z);
+            if (isDeveloperToggleEnabled("perfCollisionCandidateFastPath") && 0 === range) {
+                const bucketItems = index[type].get(getCollisionBucketKey(centerX, centerZ)) || [];
+                const overflowItems = index.overflow && index.overflow[type];
+                if (!overflowItems || !overflowItems.length)
+                    return bucketItems;
+                if (!bucketItems.length)
+                    return overflowItems;
+                const merged = bucketItems.slice();
+                const seen = new Set(bucketItems);
+                for (const item of overflowItems)
+                    item && !seen.has(item) && (seen.add(item),
+                    merged.push(item));
+                return merged;
+            }
+            const seen = new Set;
+            const candidates = [];
+            const addItem = item => {
+                if (!item || seen.has(item))
+                    return;
+                seen.add(item);
+                candidates.push(item);
+            };
+            for (let x = centerX - range; x <= centerX + range; x++)
+                for (let z = centerZ - range; z <= centerZ + range; z++) {
+                    const bucketItems = index[type].get(getCollisionBucketKey(x, z));
+                    if (!bucketItems)
+                        continue;
+                    for (const item of bucketItems)
+                        addItem(item);
+                }
+            const overflowItems = index.overflow && index.overflow[type];
+            if (overflowItems)
+                for (const item of overflowItems)
+                    addItem(item);
+            return candidates;
         }
 
         function getWallOpeningCollisionSignature(entry) {
             const openings = entry && entry.__tmWallOpenings;
             if (!openings || "object" != typeof openings)
                 return "no-openings";
-            const rectSignature = list => toSafeArray(list).map(opening => opening && (opening.rect || opening)).filter(Boolean).map(rect => [rect.x1, rect.x2, rect.y1, rect.y2].map(value => Math.round(100 * (Number(value) || 0))).join(":")).join(";");
-            return ["doors", "windows"].map(type => `${type}:${Object.entries(openings[type] || {}).map(([edge, list]) => `${edge}:${rectSignature(list)}`).sort().join(",")}`).join("|");
+            if (isDeveloperToggleEnabled("perfWallOpeningCollisionSignature")) {
+                if (entry.__tmWallOpeningCollisionSignatureSource === openings && entry.__tmWallOpeningCollisionSignature)
+                    return entry.__tmWallOpeningCollisionSignature;
+                const makeArrayTypeSignature = type => {
+                    const byEdge = new Map;
+                    const addOpening = (edge, opening) => {
+                        const rect = opening && (opening.rect || opening);
+                        if (!rect)
+                            return;
+                        let rectParts = byEdge.get(edge);
+                        if (!rectParts) {
+                            rectParts = [];
+                            byEdge.set(edge, rectParts);
+                        }
+                        rectParts.push(`${Math.round(100 * (Number(rect.x1) || 0))}:${Math.round(100 * (Number(rect.x2) || 0))}:${Math.round(100 * (Number(rect.y1) || 0))}:${Math.round(100 * (Number(rect.y2) || 0))}`);
+                    };
+                    const source = openings[type];
+                    if (Array.isArray(source)) {
+                        for (const opening of source)
+                            addOpening(null != opening && null != opening.edgeIndex ? opening.edgeIndex : "", opening);
+                    } else if (source && "object" == typeof source) {
+                        for (const edge in source) {
+                            if (!Object.prototype.hasOwnProperty.call(source, edge))
+                                continue;
+                            for (const opening of toSafeArray(source[edge]))
+                                addOpening(edge, opening);
+                        }
+                    }
+                    const edgeParts = [];
+                    for (const [edge, rectParts] of byEdge) {
+                        rectParts.length > 1 && rectParts.sort();
+                        edgeParts.push(`${edge}:${rectParts.join(";")}`);
+                    }
+                    edgeParts.length > 1 && edgeParts.sort();
+                    return `${type}:${edgeParts.join(",")}`;
+                };
+                const signature = `${makeArrayTypeSignature("doors")}|${makeArrayTypeSignature("windows")}`;
+                entry.__tmWallOpeningCollisionSignatureSource = openings;
+                entry.__tmWallOpeningCollisionSignature = signature;
+                return signature;
+            }
+            const makeRectSignature = list => {
+                const rectParts = [];
+                for (const opening of toSafeArray(list)) {
+                    const rect = opening && (opening.rect || opening);
+                    rect && rectParts.push([
+                        Math.round(100 * (Number(rect.x1) || 0)),
+                        Math.round(100 * (Number(rect.x2) || 0)),
+                        Math.round(100 * (Number(rect.y1) || 0)),
+                        Math.round(100 * (Number(rect.y2) || 0))
+                    ].join(":"));
+                }
+                return rectParts.join(";");
+            };
+            const makeTypeSignature = type => {
+                const edgeParts = [];
+                const source = openings[type] || {};
+                for (const edge of Object.keys(source))
+                    edgeParts.push(`${edge}:${makeRectSignature(source[edge])}`);
+                edgeParts.sort();
+                return `${type}:${edgeParts.join(",")}`;
+            };
+            return `${makeTypeSignature("doors")}|${makeTypeSignature("windows")}`;
         }
 
         function getChunkStaticCollisionSignature(chunk) {
-            const baseSignature = getWorldCollisionChunkSignature([chunk]);
+            const baseSignature = isDeveloperToggleEnabled("perfSingleChunkSignature") ? getWorldCollisionSingleChunkSignature(chunk) : getWorldCollisionChunkSignature([chunk]);
             const matches = chunk && (chunk.__tmMatchedCustomBuildings || runtimeState.customBuildingEntriesByChunk.get(chunk)) || [];
             const buildings = chunk && (chunk.__tmOriginalBuildings || chunk.buildings) || [];
-            const matchSignature = toSafeArray(matches).map(match => [match && match.id || "", getWallOpeningCollisionSignature(match && match.entry)].join(":")).join("|");
+            const matchParts = [];
+            for (const match of toSafeArray(matches))
+                matchParts.push(`${match && match.id || ""}:${getWallOpeningCollisionSignature(match && match.entry)}`);
+            const matchSignature = matchParts.join("|");
             return [baseSignature, toSafeArray(buildings).length, matchSignature].join("::");
         }
 
@@ -5611,10 +7528,15 @@
                         const length = Math.hypot(dx, dz);
                         if (length < .4)
                             continue;
-                        const doors = getWallOpenings(entry, "doors", edgeIndex).map(opening => opening.rect || opening).filter(Boolean).map(rect => ({
-                            x1: clamp((Number(rect.x1) || 0) - .34, 0, length),
-                            x2: clamp((Number(rect.x2) || 0) + .34, 0, length)
-                        })).sort((a, b) => a.x1 - b.x1);
+                        const doors = [];
+                        for (const opening of getWallOpenings(entry, "doors", edgeIndex)) {
+                            const rect = opening && (opening.rect || opening);
+                            rect && doors.push({
+                                x1: clamp((Number(rect.x1) || 0) - .34, 0, length),
+                                x2: clamp((Number(rect.x2) || 0) + .34, 0, length)
+                            });
+                        }
+                        doors.length > 1 && doors.sort((a, b) => a.x1 - b.x1);
                         let cursor = 0;
                         const spans = [];
                         for (const door of doors) {
@@ -5663,6 +7585,7 @@
                 });
                 appendWorldCollisionStaticCache(cache, chunkCache);
             }
+            buildCollisionSpatialIndex(cache);
             return cache;
         }
 
@@ -5670,8 +7593,12 @@
             const state = getWorldCollisionState();
             const now = performance.now();
             const chunks = getWorldCollisionLoadedChunks();
+            if (isDeveloperToggleEnabled("perfStaticCacheEarlyBypass") && !isDeveloperToggleEnabled("perfStaticCollisionCache"))
+                return buildWorldCollisionStaticCache(chunks);
             const signature = getWorldCollisionChunkSignature(chunks);
-            if (state.staticCache && state.staticCacheSignature === signature && now - (Number(state.staticCacheAt) || 0) < 420)
+            if (!isDeveloperToggleEnabled("perfStaticCollisionCache"))
+                return buildWorldCollisionStaticCache(chunks);
+            if (state.staticCache && state.staticCacheSignature === signature && now - (Number(state.staticCacheAt) || 0) < CUSTOM_BUILDING_PERF.staticCacheTtlMs)
                 return state.staticCache;
             state.staticCache = buildWorldCollisionStaticCache(chunks);
             state.staticCacheSignature = signature;
@@ -5713,7 +7640,38 @@
             return startY + (endY - startY) * clamp(Number(progress) || 0, 0, 1);
         }
 
+        function getChunkRoadGraphSignature(chunk) {
+            const edges = toSafeArray(chunk && chunk.newRoadGraph && chunk.newRoadGraph.edges);
+            const now = performance.now();
+            if (chunk && chunk.__tmRoadGraphSignatureEdges === edges && chunk.__tmRoadGraphSignature && now - (Number(chunk.__tmRoadGraphSignatureAt) || 0) < CUSTOM_BUILDING_PERF.bridgeCacheTtlMs)
+                return chunk.__tmRoadGraphSignature;
+            const signatureParts = [];
+            for (const edge of edges) {
+                const points = toSafeArray(edge && edge.points);
+                const first = points[0] || {};
+                const last = points[points.length - 1] || {};
+                signatureParts.push([
+                    Number(edge && edge.layer) || 0,
+                    points.length,
+                    Math.round(Number(first.x) || 0),
+                    Math.round(Number(first.z) || 0),
+                    Math.round(Number(last.x) || 0),
+                    Math.round(Number(last.z) || 0)
+                ].join(":"));
+            }
+            const signature = signatureParts.join("|");
+            if (chunk) {
+                chunk.__tmRoadGraphSignatureEdges = edges;
+                chunk.__tmRoadGraphSignature = signature;
+                chunk.__tmRoadGraphSignatureAt = now;
+            }
+            return signature;
+        }
+
         function getChunkRoadSegments(chunk) {
+            const signature = getChunkRoadGraphSignature(chunk);
+            if (chunk && chunk.__tmRoadSegmentsCache && chunk.__tmRoadSegmentsCache.signature === signature)
+                return chunk.__tmRoadSegmentsCache.segments;
             const segments = [];
             for (const edge of toSafeArray(chunk && chunk.newRoadGraph && chunk.newRoadGraph.edges)) {
                 if (!edge || !Array.isArray(edge.points) || edge.points.length < 2 || !isRoadEligibleForAutopilot(edge))
@@ -5731,12 +7689,22 @@
                     });
                 }
             }
+            chunk && (chunk.__tmRoadSegmentsCache = {
+                signature,
+                segments
+            });
             return segments;
         }
 
         function getBridgeRoadClearanceZones(chunk) {
+            const signature = getChunkRoadGraphSignature(chunk);
+            const now = performance.now();
+            const cached = chunk && chunk.__tmBridgeClearanceZonesCache;
+            if (cached && cached.signature === signature && now - (Number(cached.at) || 0) < CUSTOM_BUILDING_PERF.bridgeCacheTtlMs)
+                return cached.zones;
             const segments = getChunkRoadSegments(chunk);
             const zones = [];
+            const zoneKeys = new Set;
             const maxSegments = Math.min(segments.length, 220);
             for (let aIndex = 0; aIndex < maxSegments; aIndex++) {
                 const first = segments[aIndex];
@@ -5756,8 +7724,9 @@
                     const lower = heightDelta > 0 || layerDelta > 0 ? second : first;
                     const lowerY = heightDelta > 0 || layerDelta > 0 ? secondY : firstY;
                     const key = `${Math.round(hit.x / 4)}:${Math.round(hit.z / 4)}`;
-                    if (zones.some(zone => zone.key === key))
+                    if (zoneKeys.has(key))
                         continue;
+                    zoneKeys.add(key);
                     zones.push({
                         key,
                         x: hit.x,
@@ -5765,10 +7734,21 @@
                         y: lowerY,
                         radius: clamp(getRoadEdgeHalfWidth(lower.edge) + 2.8, 4.5, 11)
                     });
-                    if (zones.length >= 80)
+                    if (zones.length >= 80) {
+                        chunk && (chunk.__tmBridgeClearanceZonesCache = {
+                            signature,
+                            zones,
+                            at: now
+                        });
                         return zones;
+                    }
                 }
             }
+            chunk && (chunk.__tmBridgeClearanceZonesCache = {
+                signature,
+                zones,
+                at: now
+            });
             return zones;
         }
 
@@ -5782,11 +7762,14 @@
                 }
             });
             chunk.__tmHiddenWebsiteBridgePillars = 0;
+            chunk.__tmBridgePillarSanitizeSignature = "";
         }
 
         function getObjectChunkLocalBounds(object, chunk) {
             if (!globalState.THREE || !globalState.THREE.Box3 || !object)
                 return null;
+            if (object.userData && object.userData.tmBridgeLocalBounds && object.userData.tmBridgeLocalBoundsChunk === chunk)
+                return object.userData.tmBridgeLocalBounds;
             try {
                 object.updateMatrixWorld && object.updateMatrixWorld(!0);
                 const box = new globalState.THREE.Box3().setFromObject(object);
@@ -5797,10 +7780,14 @@
                 box.getCenter(center);
                 box.getSize(size);
                 chunk && chunk.group && chunk.group.worldToLocal && chunk.group.worldToLocal(center);
-                return {
+                const bounds = {
                     center,
                     size
                 };
+                object.userData || (object.userData = {});
+                object.userData.tmBridgeLocalBounds = bounds;
+                object.userData.tmBridgeLocalBoundsChunk = chunk;
+                return bounds;
             } catch (boundsError) {
                 return null;
             }
@@ -5824,7 +7811,11 @@
                 return !1;
             const center = bounds.center;
             const size = bounds.size;
-            if (!center || !size || Math.hypot(center.x - zone.x, center.z - zone.z) > zone.radius)
+            if (!center || !size)
+                return !1;
+            const dx = center.x - zone.x;
+            const dz = center.z - zone.z;
+            if (dx * dx + dz * dz > zone.radius * zone.radius)
                 return !1;
             const horizontalMax = Math.max(Math.abs(size.x), Math.abs(size.z));
             const horizontalMin = Math.min(Math.abs(size.x), Math.abs(size.z));
@@ -5841,12 +7832,25 @@
         function sanitizeWebsiteBridgePillarsForChunk(chunk) {
             if (!chunk || !chunk.group || !globalState.THREE)
                 return;
+            if (!featureState.enhancedRoads) {
+                if (chunk.__tmBridgePillarSanitizeSignature || chunk.__tmHiddenWebsiteBridgePillars)
+                    restoreWebsiteBridgePillarsForChunk(chunk);
+                chunk.__tmBridgePillarSanitizeSignature = "";
+                return;
+            }
+            const signature = [
+                getChunkRoadGraphSignature(chunk),
+                chunk.group.children && chunk.group.children.length || 0,
+                toSafeArray(chunk.roadMeshes).length
+            ].join("::");
+            if (chunk.__tmBridgePillarSanitizeSignature === signature)
+                return;
             restoreWebsiteBridgePillarsForChunk(chunk);
-            if (!featureState.enhancedRoads)
-                return;
             const zones = getBridgeRoadClearanceZones(chunk);
-            if (!zones.length)
+            if (!zones.length) {
+                chunk.__tmBridgePillarSanitizeSignature = signature;
                 return;
+            }
             const roadMeshSet = new Set(toSafeArray(chunk.roadMeshes));
             let hidden = 0;
             chunk.group.traverse && chunk.group.traverse(object => {
@@ -5855,7 +7859,13 @@
                 const bounds = getObjectChunkLocalBounds(object, chunk);
                 if (!bounds)
                     return;
-                if (!zones.some(zone => isBridgePillarCandidate(object, bounds, zone, roadMeshSet, chunk)))
+                let candidate = !1;
+                for (const zone of zones)
+                    if (isBridgePillarCandidate(object, bounds, zone, roadMeshSet, chunk)) {
+                        candidate = !0;
+                        break;
+                    }
+                if (!candidate)
                     return;
                 object.visible = !1;
                 object.userData || (object.userData = {});
@@ -5863,6 +7873,7 @@
                 hidden++;
             });
             chunk.__tmHiddenWebsiteBridgePillars = hidden;
+            chunk.__tmBridgePillarSanitizeSignature = signature;
         }
 
         function createTunnelBridgeMesh(edge, start, end, intersection) {
@@ -5913,6 +7924,12 @@
                 restoreWebsiteBridgePillarsForChunk(chunk);
                 overlay && overlay.parent && overlay.parent.remove(overlay);
                 chunk.__tmTunnelBridgeOverlay = null;
+                chunk.__tmTunnelBridgeSignature = "";
+                return;
+            }
+            const signature = getChunkRoadGraphSignature(chunk);
+            if (chunk.__tmTunnelBridgeSignature === signature) {
+                sanitizeWebsiteBridgePillarsForChunk(chunk);
                 return;
             }
             if (!overlay) {
@@ -5955,33 +7972,65 @@
                     break;
             }
             overlay.children.length ? overlay.parent !== chunk.group && chunk.group.add(overlay) : overlay.parent && overlay.parent.remove(overlay);
+            chunk.__tmTunnelBridgeSignature = signature;
             sanitizeWebsiteBridgePillarsForChunk(chunk);
         }
 
         function getTunnelWallCollisionSegments(position) {
-            return toSafeArray(getWorldCollisionStaticCache().tunnelWallSegments).filter(segment => isPositionInBounds2D(position, segment.bounds) && distancePointToSegment2D(position, segment.start, segment.end).distance <= 160);
+            return getCachedWorldCollisionQuery("tunnelWalls", position, "", (() => {
+                const cache = getWorldCollisionStaticCache();
+                const result = [];
+                for (const segment of getCollisionSpatialCandidates(cache, "tunnelWallSegments", position))
+                    isPositionInBounds2D(position, segment.bounds) && distancePointToSegmentSq2D(position, segment.start, segment.end) <= 25600 && result.push(segment);
+                return result;
+            })) || [];
         }
 
         function collectBuildingCollisionPolygons(position, mode) {
-            const padding = "vehicle" === mode ? 5 : 1.6;
-            return toSafeArray(getWorldCollisionStaticCache().buildingPolygons).filter(item => isPositionInBounds2D(position, item.bounds, padding));
+            return getCachedWorldCollisionQuery("buildingPolygons", position, mode, (() => {
+                const cache = getWorldCollisionStaticCache();
+                const padding = "vehicle" === mode ? 5 : 1.6;
+                const result = [];
+                for (const item of getCollisionSpatialCandidates(cache, "buildingPolygons", position, padding))
+                    isPositionInBounds2D(position, item.bounds, padding) && result.push(item);
+                return result;
+            })) || [];
         }
 
         function collectCustomWallCollisionSegments(position) {
-            const cache = getWorldCollisionStaticCache();
-            return {
-                segments: toSafeArray(cache.customWallSegments).filter(segment => isPositionInBounds2D(position, segment.bounds)),
-                fallbackPolygons: toSafeArray(cache.customFallbackPolygons).filter(item => isPositionInBounds2D(position, item.bounds, 1.8)).map(item => item.points)
+            return getCachedWorldCollisionQuery("customWalls", position, "", (() => {
+                const cache = getWorldCollisionStaticCache();
+                const segments = [];
+                for (const segment of getCollisionSpatialCandidates(cache, "customWallSegments", position))
+                    isPositionInBounds2D(position, segment.bounds) && segments.push(segment);
+                const fallbackPolygons = [];
+                for (const item of getCollisionSpatialCandidates(cache, "customFallbackPolygons", position, 1.8))
+                    isPositionInBounds2D(position, item.bounds, 1.8) && fallbackPolygons.push(item.points);
+                return {
+                    segments,
+                    fallbackPolygons
+                };
+            })) || {
+                segments: [],
+                fallbackPolygons: []
             };
         }
 
         function getTrainCollisionBoxes(position) {
+            const trains = toSafeArray(runtimeState.game && runtimeState.game.trainTraffic && runtimeState.game.trainTraffic.trains);
+            let wagonCount = 0;
+            for (const train of trains)
+                wagonCount += toSafeArray(train && train.wagons).length;
+            const now = performance.now();
+            const key = `${Math.round((Number(position && position.x) || 0) / 20)}:${Math.round((Number(position && position.z) || 0) / 20)}:${trains.length}:${wagonCount}`;
+            const cached = runtimeState.trainCollisionBoxesCache;
+            if (cached && cached.key === key && now - (Number(cached.at) || 0) < CUSTOM_BUILDING_PERF.trainCollisionCacheMs)
+                return cached.boxes || [];
             const boxes = [];
-            const trains = runtimeState.game && runtimeState.game.trainTraffic && runtimeState.game.trainTraffic.trains || [];
-            for (const train of toSafeArray(trains))
+            for (const train of trains)
                 for (const wagon of toSafeArray(train && train.wagons)) {
                     const center = wagon && wagon.position;
-                    if (!center || getDistance2D(position, center) > 170)
+                    if (!center || getDistanceSq2D(position, center) > 28900)
                         continue;
                     const config = wagon.cs || {};
                     boxes.push({
@@ -5992,6 +8041,11 @@
                         radius: .8
                     });
                 }
+            runtimeState.trainCollisionBoxesCache = {
+                key,
+                at: now,
+                boxes
+            };
             return boxes;
         }
 
@@ -6002,6 +8056,7 @@
             const vehicleMode = "vehicle" === mode;
             const buildingRadius = vehicleMode ? clamp(radius * .64, 1.02, 1.95) : clamp(radius * .62, .34, .48);
             const wallRadius = vehicleMode ? radius + .18 : clamp(radius * .62, .34, .48);
+            const trainBoxes = getTrainCollisionBoxes(position);
             for (let pass = 0; pass < 3; pass++) {
                 let passCollided = !1;
                 const applyPass = separation => {
@@ -6011,7 +8066,7 @@
                         passCollided = !0;
                     }
                 };
-                for (const box of getTrainCollisionBoxes(position))
+                for (const box of trainBoxes)
                     applyPass(getCircleObbSeparation(position, box.center, box.halfX + box.radius, box.halfZ + box.radius, box.rotationY, radius));
                 for (const wall of getTunnelWallCollisionSegments(position))
                     applyPass(getCircleSegmentSeparation(position, wall.start, wall.end, radius + wall.radius));
@@ -6038,16 +8093,18 @@
                 return;
             const position = car.cameraGroup.position;
             const radius = clamp(Math.max(Number(car.mcs && car.mcs.width) || Number(car.width) || 2.2, (Number(car.mcs && car.mcs.length) || Number(car.length) || 4.8) * .46), 1.35, 4.6);
-            const previousSafe = car.__tmLastWorldCollisionSafePosition && car.__tmLastWorldCollisionSafePosition.clone ? car.__tmLastWorldCollisionSafePosition.clone() : null;
+            const previousSafe = car.__tmLastWorldCollisionSafePosition || null;
             const collided = resolveWorldCollisionPosition(position, radius, "vehicle");
             if (collided) {
-                if (previousSafe && speedAbs(car.speed) > 12 && getDistance2D(previousSafe, position) < 75)
+                if (previousSafe && speedAbs(car.speed) > 12 && getDistanceSq2D(previousSafe, position) < 5625)
                     position.copy(previousSafe);
                 setPlayerSpeed(car, 0);
                 "function" == typeof car.resetAcc && car.resetAcc();
                 "function" == typeof car.turnOffCruiseControl && car.turnOffCruiseControl();
-            } else
-                car.__tmLastWorldCollisionSafePosition = position.clone();
+            } else {
+                car.__tmLastWorldCollisionSafePosition || (car.__tmLastWorldCollisionSafePosition = new globalState.THREE.Vector3);
+                car.__tmLastWorldCollisionSafePosition.copy(position);
+            }
         }
 
         function resolveHumanWorldHitboxes(human) {
@@ -6079,9 +8136,7 @@
 
         function createEllipsoid(size, color, position, material) {
             const THREE = globalState.THREE;
-            const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 12), material || new THREE.MeshLambertMaterial({
-                color
-            }));
+            const mesh = new THREE.Mesh(getSharedOverlaySphereGeometry(), material || getSharedOverlayLambertMaterial(color));
             mesh.scale.set(size[0] / 2, size[1] / 2, size[2] / 2);
             position && mesh.position.set(position[0], position[1], position[2]);
             return mesh;
@@ -6093,12 +8148,12 @@
             object.traverse && object.traverse((node => {
                 if (!node || !node.isMesh)
                     return;
-                node.geometry && typeof node.geometry.dispose === "function" && node.geometry.dispose();
+                node.geometry && !isSharedResource(node.geometry) && typeof node.geometry.dispose === "function" && node.geometry.dispose();
                 if (Array.isArray(node.material))
                     for (const material of node.material)
-                        material && typeof material.dispose === "function" && material.dispose();
+                        material && !isSharedResource(material) && typeof material.dispose === "function" && material.dispose();
                 else
-                    node.material && typeof node.material.dispose === "function" && node.material.dispose();
+                    node.material && !isSharedResource(node.material) && typeof node.material.dispose === "function" && node.material.dispose();
             }
             ));
         }
@@ -6129,6 +8184,17 @@
                 return !1;
             const px = Number(position.x) || 0;
             const pz = Number(position.z) || 0;
+            if (isDeveloperToggleEnabled("perfTownAreaLookup")) {
+                const places = toSafeArray(townSignsState.debugPlaces);
+                for (let index = 0; index < places.length; index++) {
+                    const place = places[index];
+                    const cx = Number(place && place.center && place.center.x) || 0;
+                    const cz = Number(place && place.center && place.center.z) || 0;
+                    if (Math.hypot(px - cx, pz - cz) <= Math.max(Number(place && place.radius) || 0, 180) + 80)
+                        return !0;
+                }
+                return !1;
+            }
             return toSafeArray(townSignsState.debugPlaces).some(place => {
                 const cx = Number(place.center && place.center.x) || 0;
                 const cz = Number(place.center && place.center.z) || 0;
@@ -6157,7 +8223,7 @@
             if ("boolean" == typeof vehicle.__tmPoliceLike && (vehicle.__tmPoliceLike || now - (Number(vehicle.__tmPoliceLikeScanAt) || 0) < 2500))
                 return vehicle.__tmPoliceLike;
             vehicle.__tmPoliceLikeScanAt = now;
-            const directText = [vehicle.name, vehicle.type, vehicle.kind, vehicle.vehicleType, vehicle.carType, vehicle.modelType, vehicle.mcs && vehicle.mcs.name, vehicle.group && vehicle.group.name, vehicle.cameraGroup && vehicle.cameraGroup.name].filter(Boolean).join(" ");
+            const directText = isDeveloperToggleEnabled("perfPoliceVehicleText") ? `${vehicle.name || ""} ${vehicle.type || ""} ${vehicle.kind || ""} ${vehicle.vehicleType || ""} ${vehicle.carType || ""} ${vehicle.modelType || ""} ${vehicle.mcs && vehicle.mcs.name || ""} ${vehicle.group && vehicle.group.name || ""} ${vehicle.cameraGroup && vehicle.cameraGroup.name || ""}` : [vehicle.name, vehicle.type, vehicle.kind, vehicle.vehicleType, vehicle.carType, vehicle.modelType, vehicle.mcs && vehicle.mcs.name, vehicle.group && vehicle.group.name, vehicle.cameraGroup && vehicle.cameraGroup.name].filter(Boolean).join(" ");
             if (textLooksPoliceLike(directText))
                 return vehicle.__tmPoliceLike = !0;
             let redLight = !1;
@@ -6208,14 +8274,14 @@
                 return;
             const player = getPlayerCar();
             const playerPos = player && getVehicleFlatPosition(player);
-            if (!playerPos || speedAbs(player.speed) > 1.4 || getDistance2D(playerPos, previousPosition) > 90)
+            if (!playerPos || speedAbs(player.speed) > 1.4 || getDistanceSq2D(playerPos, previousPosition) > 8100)
                 return;
             const currentPosition = getVehicleFlatPosition(aiCar);
             if (!currentPosition)
                 return;
             const aiSpeed = speedAbs((resolver.speeds && resolver.speeds[aiId]) ?? aiCar.speed);
-            const moved = getDistance2D(previousPosition, currentPosition);
-            if (aiSpeed > 1.8 || moved > 1.45)
+            const movedSq = getDistanceSq2D(previousPosition, currentPosition);
+            if (aiSpeed > 1.8 || movedSq > 2.1025)
                 return;
             setVehicleFlatPosition(aiCar, previousPosition);
             setAiSpeed(resolver, aiId, aiCar, 0);
@@ -6265,12 +8331,8 @@
                 transparent: !0,
                 opacity: .62
             });
-            const lightRed = new THREE.MeshBasicMaterial({
-                color: 0xff2030
-            });
-            const lightBlue = new THREE.MeshBasicMaterial({
-                color: 0x2f77ff
-            });
+            const lightRed = getSharedOverlayBasicMaterial(0xff2030);
+            const lightBlue = getSharedOverlayBasicMaterial(0x2f77ff);
             group.add(createEllipsoid([6.35, .92, 2.34], 0xf5f8fb, [0, .82, 0], paintWhite));
             group.add(createEllipsoid([2.95, .72, 1.78], 0xf5f8fb, [-.08, 1.34, 0], paintWhite));
             group.add(createEllipsoid([2.15, .28, 1.56], 0x1d5fc8, [1.86, 1.04, 0], paintBlue));
@@ -6334,16 +8396,12 @@
             group.add(grille);
             const headLeft = createBox([.08, .22, .5], 0xfff2a8, [2.96, .86, -.58]);
             const headRight = createBox([.08, .22, .5], 0xfff2a8, [2.96, .86, .58]);
-            headLeft.material = new THREE.MeshBasicMaterial({
-                color: 0xfff2a8
-            });
+            headLeft.material = getSharedOverlayBasicMaterial(0xfff2a8);
             headRight.material = headLeft.material;
             group.add(headLeft, headRight);
             const tailLeft = createBox([.08, .2, .44], 0xb60e1b, [-3.04, .88, -.56]);
             const tailRight = createBox([.08, .2, .44], 0xb60e1b, [-3.04, .88, .56]);
-            tailLeft.material = new THREE.MeshBasicMaterial({
-                color: 0xb60e1b
-            });
+            tailLeft.material = getSharedOverlayBasicMaterial(0xb60e1b);
             tailRight.material = tailLeft.material;
             group.add(tailLeft, tailRight);
             const spoiler = createBox([.9, .08, 1.12], 0x1b1d22, [-2.7, 1.28, 0]);
@@ -6353,7 +8411,7 @@
             const wheelMaterial = makeMat(0x111111);
             for (const x of [-1.72, 1.74])
                 for (const z of [-1.1, 1.1]) {
-                    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(.42, .42, .34, 20), wheelMaterial);
+                    const wheel = new THREE.Mesh(getSharedOverlayCylinderGeometry(.42, .42, .34, 20), wheelMaterial);
                     wheel.rotation.x = Math.PI / 2;
                     wheel.position.set(x, .42, z);
                     group.add(wheel);
@@ -6441,9 +8499,7 @@
             }) : new THREE.MeshLambertMaterial({
                 color: 0x89c2dc
             });
-            const amber = new THREE.MeshBasicMaterial({
-                color: 0xffb638
-            });
+            const amber = getSharedOverlayBasicMaterial(0xffb638);
             group.add(createEllipsoid([5.6, 1.18, 2.36], 0xf0b73f, [-.4, .98, 0], yellow));
             group.add(createEllipsoid([2.2, 1.08, 1.96], 0xf4f4f1, [1.25, 1.68, 0], yellow));
             const bed = createBox([4.6, .22, 2.34], 0x9aa3ad, [-1.55, 1.02, 0]);
@@ -6467,7 +8523,7 @@
             const wheels = [];
             for (const x of [-2.7, -1.08, 1.42])
                 for (const z of [-1.08, 1.08]) {
-                    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(.42, .42, .32, 18), dark);
+                    const wheel = new THREE.Mesh(getSharedOverlayCylinderGeometry(.42, .42, .32, 18), dark);
                     wheel.rotation.x = Math.PI / 2;
                     wheel.position.set(x, .42, z);
                     group.add(wheel);
@@ -6502,8 +8558,7 @@
             const windshield = createBox([.1, .44, 1.28], 0x5b6875, [1.02, 1.45, 0]);
             windshield.material = glass;
             group.add(windshield);
-            const scorch = createEllipsoid([1.6, .12, .9], 0x111111, [.95, 1.08, -.26], new THREE.MeshBasicMaterial({
-                color: 0x111111,
+            const scorch = createEllipsoid([1.6, .12, .9], 0x111111, [.95, 1.08, -.26], getSharedOverlayBasicMaterial(0x111111, {
                 transparent: !0,
                 opacity: .8
             }));
@@ -6638,9 +8693,20 @@
                 return;
             const damage = clamp(Number(car && car.__tmDamage) || 0, 0, 120);
             const visible = !!featureState.vehicleDamage || damage > 0;
-            panel.style.display = visible ? "block" : "none";
             const percent = Math.min(120, Math.round(damage));
             const ratio = clamp(damage / 100, 0, 1);
+            const stateText = car && car.__tmBrokenDown ? "BROKEN" : ratio < .35 ? "OK" : ratio < .7 ? "Damaged" : "Critical";
+            const stateColor = ratio < .35 ? "#9fd7ff" : ratio < .7 ? "#ffd96a" : "#ff9f9f";
+            const barColor = ratio < .35 ? "#45d17a" : ratio < .7 ? "#f4c542" : "#e64b4b";
+            const last = panel.__tmDamageLast || {};
+            if (last.visible !== visible)
+                panel.style.display = visible ? "block" : "none";
+            if (!visible) {
+                panel.__tmDamageLast = Object.assign({}, last, {
+                    visible
+                });
+                return;
+            }
             const nodes = panel.__tmDamageNodes || (panel.__tmDamageNodes = {
                 value: panel.querySelector('[data-role="value"]'),
                 bar: panel.querySelector('[data-role="bar"]'),
@@ -6649,15 +8715,22 @@
             const value = nodes.value;
             const bar = nodes.bar;
             const state = nodes.state;
-            value && (value.textContent = `${percent}%`);
+            value && last.percent !== percent && (value.textContent = `${percent}%`);
             if (bar) {
-                bar.style.width = `${Math.min(100, percent)}%`;
-                bar.style.background = ratio < .35 ? "#45d17a" : ratio < .7 ? "#f4c542" : "#e64b4b";
+                last.percent !== percent && (bar.style.width = `${Math.min(100, percent)}%`);
+                last.barColor !== barColor && (bar.style.background = barColor);
             }
             if (state) {
-                state.textContent = car && car.__tmBrokenDown ? "BROKEN" : ratio < .35 ? "OK" : ratio < .7 ? "Damaged" : "Critical";
-                state.style.color = ratio < .35 ? "#9fd7ff" : ratio < .7 ? "#ffd96a" : "#ff9f9f";
+                last.stateText !== stateText && (state.textContent = stateText);
+                last.stateColor !== stateColor && (state.style.color = stateColor);
             }
+            panel.__tmDamageLast = {
+                visible,
+                percent,
+                barColor,
+                stateText,
+                stateColor
+            };
         }
 
         function getDamageSmokeTexture() {
@@ -6701,21 +8774,17 @@
             const THREE = globalState.THREE;
             const group = new THREE.Group;
             group.name = "__tmVehicleDamageVisuals";
-            const scorchMaterial = new THREE.MeshBasicMaterial({
-                color: 0x181818,
+            const scorchMaterial = getSharedOverlayBasicMaterial(0x181818, {
                 transparent: !0,
                 opacity: .78
             });
-            const smokeMaterial = new THREE.MeshBasicMaterial({
-                color: 0xa9b1af,
+            const smokeMaterial = getSharedOverlayBasicMaterial(0xa9b1af, {
                 transparent: !0,
                 opacity: .16,
                 depthWrite: !1
             });
             const smokeTexture = getDamageSmokeTexture();
-            const sparkMaterial = new THREE.MeshBasicMaterial({
-                color: 0xffa331
-            });
+            const sparkMaterial = getSharedOverlayBasicMaterial(0xffa331);
             const dents = [
                 createEllipsoid([1.1, .08, .52], 0x181818, [2.05, 1.08, -.35], scorchMaterial),
                 createEllipsoid([.85, .07, .42], 0x181818, [1.25, 1.12, .62], scorchMaterial),
@@ -6728,6 +8797,7 @@
             for (let index = 0; index < 10; index++) {
                 const puff = new THREE.Group;
                 puff.userData.phase = seededUnit(index, 37);
+                puff.userData.opacityMaterials = [];
                 for (let part = 0; part < 2; part++) {
                     const spread = .06 + part * .045;
                     const material = smokeTexture && THREE.SpriteMaterial ? new THREE.SpriteMaterial({
@@ -6737,8 +8807,17 @@
                         opacity: .1 + .025 * part,
                         depthWrite: !1
                     }) : smokeMaterial.clone();
+                    if (material && material.userData && material.userData.tmSharedResource) {
+                        delete material.userData.tmSharedResource;
+                        delete material.userData.tmEvictedFromCache;
+                    }
                     const waver = seededUnit(index, part + 11) * Math.PI * 2;
-                    const mote = createDamageSmokeMote(material, .18 + .018 * index + .04 * part, [Math.cos(waver) * spread, Math.sin(waver * 1.7) * spread, Math.sin(waver) * spread]);
+                    const motePosition = [Math.cos(waver) * spread, Math.sin(waver * 1.7) * spread, Math.sin(waver) * spread];
+                    const mote = createDamageSmokeMote(material, .18 + .018 * index + .04 * part, motePosition);
+                    puff.userData.opacityMaterials.push({
+                        material,
+                        offset: Math.hypot(motePosition[0], motePosition[1], motePosition[2])
+                    });
                     puff.add(mote);
                 }
                 puff.position.set(1.25 + .06 * index, 1.38 + .13 * index, -.22 + Math.sin(index) * .16);
@@ -6760,44 +8839,51 @@
 
         function updateVehicleDamageVisuals(dtSeconds) {
             const car = getPlayerCar();
-            shouldRunRuntimeTask("vehicleDamageDisplay", 180) && syncVehicleDamageDisplay(car);
+            shouldRunRuntimeTask("vehicleDamageDisplay", CUSTOM_BUILDING_PERF.damagePanelUpdateMs) && syncVehicleDamageDisplay(car);
             if (!car)
-                return;
-            const group = ensureVehicleDamageVisuals(car);
-            if (!group)
                 return;
             const damage = clamp(Number(car.__tmDamage) || 0, 0, 120);
             const ratio = clamp(damage / 100, 0, 1);
-            group.visible = !!featureState.vehicleDamage && ratio > .03 && !runtimeState.activeAircraft;
-            if (!group.visible)
+            const shouldShowVisuals = !!featureState.vehicleDamage && ratio > .03 && !runtimeState.activeAircraft;
+            const existingVisuals = car.__tmDamageVisuals && car.__tmDamageVisuals.parent ? car.__tmDamageVisuals : null;
+            const group = shouldShowVisuals || existingVisuals ? ensureVehicleDamageVisuals(car) : null;
+            if (!group)
+                return;
+            group.visible = shouldShowVisuals;
+            if (!shouldShowVisuals)
                 return;
             const time = performance.now() / 1000;
-            const dents = toSafeArray(group.userData.dents);
+            const dents = Array.isArray(group.userData && group.userData.dents) ? group.userData.dents : [];
             for (let index = 0; index < dents.length; index++)
                 dents[index].visible = ratio > .12 + index * .18;
             const smoke = group.userData.smoke;
             if (smoke) {
                 smoke.visible = ratio > .35;
-                for (let index = 0; index < smoke.children.length; index++) {
-                    const puff = smoke.children[index];
-                    const wave = (time * (.8 + ratio) + index * .37 + (puff.userData.phase || 0)) % 1;
-                    puff.position.y = 1.32 + index * .14 + wave * .42;
-                    puff.position.x = 1.1 + Math.sin(time * 1.7 + index) * .13 + index * .055;
-                    puff.position.z = -.18 + Math.cos(time * 1.35 + index) * .16;
-                    puff.scale.setScalar(.2 + ratio * .28 + wave * .1);
-                    const materials = puff.userData.opacityMaterials || (puff.userData.opacityMaterials = []);
-                    if (!materials.length && puff.traverse)
-                        puff.traverse(node => node.material && materials.push({
-                            material: node.material,
-                            offset: node.position && node.position.length ? node.position.length() : 0
-                        }));
-                    for (const item of materials)
-                        item.material.opacity = clamp(.035 + ratio * .13 - wave * .06 + item.offset * .025, .015, .22);
+                if (smoke.visible) {
+                    group.userData.smokeAccumulator = (Number(group.userData.smokeAccumulator) || 0) + Math.max(.001, Number(dtSeconds) || .016);
+                    if (group.userData.smokeAccumulator >= CUSTOM_BUILDING_PERF.damageSmokeUpdateMs / 1000) {
+                        group.userData.smokeAccumulator = 0;
+                        for (let index = 0; index < smoke.children.length; index++) {
+                            const puff = smoke.children[index];
+                            const wave = (time * (.8 + ratio) + index * .37 + (puff.userData.phase || 0)) % 1;
+                            puff.position.y = 1.32 + index * .14 + wave * .42;
+                            puff.position.x = 1.1 + Math.sin(time * 1.7 + index) * .13 + index * .055;
+                            puff.position.z = -.18 + Math.cos(time * 1.35 + index) * .16;
+                            puff.scale.setScalar(.2 + ratio * .28 + wave * .1);
+                            const materials = puff.userData.opacityMaterials || [];
+                            for (const item of materials)
+                                item.material.opacity = clamp(.035 + ratio * .13 - wave * .06 + item.offset * .025, .015, .22);
+                        }
+                    }
+                } else {
+                    group.userData.smokeAccumulator = 0;
                 }
             }
             const sparks = group.userData.sparks;
             if (sparks) {
                 sparks.visible = ratio > .78;
+                if (!sparks.visible)
+                    return;
                 for (let index = 0; index < sparks.children.length; index++) {
                     const spark = sparks.children[index];
                     const wave = (time * 8 + index * .41) % 1;
@@ -6966,30 +9052,58 @@
             if (!overlay || !featureState.shops)
                 return;
             const chunks = getLoadedChunks();
-            for (const chunk of chunks)
+            const chunkKeys = [];
+            let chunkSignature = "";
+            for (const chunk of chunks) {
                 queuePoiFetch(chunk);
-            const poiCounts = Array.from(runtimeState.poiCache, ([key, pois]) => `${key}:${toSafeArray(pois).length}`).sort();
-            const expectedPoiCount = poiCounts.reduce((count, entry) => count + (Number(entry.split(":").pop()) || 0), 0);
-            const signature = `${chunks.map(chunkPoiKey).sort().join("|")}::${poiCounts.join("|")}`;
-            const existingPoiItems = runtimeState.overlayItems.filter(item => item.kind === "poi");
-            if (runtimeState.poiOverlaySignature === signature && existingPoiItems.length >= expectedPoiCount)
+                const key = chunkPoiKey(chunk);
+                if (isDeveloperToggleEnabled("perfPoiOverlaySignatureDirect") && isDeveloperToggleEnabled("perfPoiOverlaySignature"))
+                    chunkSignature += `${chunkSignature ? "|" : ""}${key}`;
+                else
+                    chunkKeys.push(key);
+            }
+            const poiCounts = [];
+            let poiSignature = "";
+            let expectedPoiCount = 0;
+            for (const [key, pois] of runtimeState.poiCache) {
+                const count = toSafeArray(pois).length;
+                expectedPoiCount += count;
+                if (isDeveloperToggleEnabled("perfPoiOverlaySignatureDirect") && isDeveloperToggleEnabled("perfPoiOverlaySignature"))
+                    poiSignature += `${poiSignature ? "|" : ""}${key}:${count}`;
+                else
+                    poiCounts.push(`${key}:${count}`);
+            }
+            const useDirectSignature = isDeveloperToggleEnabled("perfPoiOverlaySignatureDirect") && isDeveloperToggleEnabled("perfPoiOverlaySignature");
+            if (!useDirectSignature && !isDeveloperToggleEnabled("perfPoiOverlaySignature")) {
+                chunkKeys.sort();
+                poiCounts.sort();
+            }
+            const signature = useDirectSignature ? `${chunkSignature}::${poiSignature}` : `${chunkKeys.join("|")}::${poiCounts.join("|")}`;
+            const existing = new Set;
+            let existingPoiCount = 0;
+            for (const item of runtimeState.overlayItems)
+                if (item && "poi" === item.kind) {
+                    existingPoiCount++;
+                    item.key && existing.add(item.key);
+                }
+            if (runtimeState.poiOverlaySignature === signature && existingPoiCount >= expectedPoiCount)
                 return;
             runtimeState.poiOverlaySignature = signature;
-            const existing = new Set(existingPoiItems.map(item => item.key));
             for (const [chunkKey, pois] of runtimeState.poiCache)
-                for (let index = 0; index < pois.length; index++) {
+                for (let index = 0, list = toSafeArray(pois); index < list.length; index++) {
                     const key = `${chunkKey}:${index}`;
                     if (existing.has(key))
                         continue;
-                    const object = createPoiObject(pois[index]);
+                    const poi = list[index];
+                    const object = createPoiObject(poi);
                     overlay.add(object);
                     runtimeState.overlayItems.push({
                         kind: "poi",
                         key,
-                        type: pois[index].type,
+                        type: poi.type,
                         group: object,
-                        position: pois[index].position,
-                        data: pois[index]
+                        position: poi.position,
+                        data: poi
                     });
                 }
         }
@@ -6999,14 +9113,30 @@
             if (!playerPos)
                 return null;
             let best = null;
-            let bestDistance = maxDistance;
+            let bestDistanceSq = Math.max(0, Number(maxDistance) || 28) ** 2;
+            if (isDeveloperToggleEnabled("perfNearestPoiScan")) {
+                const px = Number(playerPos.x) || 0;
+                const pz = Number(playerPos.z) || 0;
+                for (const item of runtimeState.overlayItems) {
+                    if (!item || item.kind !== "poi" || type && item.type !== type || !item.position)
+                        continue;
+                    const dx = px - (Number(item.position.x) || 0);
+                    const dz = pz - (Number(item.position.z) || 0);
+                    const distanceSq = dx * dx + dz * dz;
+                    if (distanceSq < bestDistanceSq) {
+                        best = item;
+                        bestDistanceSq = distanceSq;
+                    }
+                }
+                return best;
+            }
             for (const item of runtimeState.overlayItems) {
                 if (item.kind !== "poi" || type && item.type !== type)
                     continue;
-                const distance = getDistance2D(playerPos, item.position);
-                if (distance < bestDistance) {
+                const distanceSq = getDistanceSq2D(playerPos, item.position);
+                if (distanceSq < bestDistanceSq) {
                     best = item;
-                    bestDistance = distance;
+                    bestDistanceSq = distanceSq;
                 }
             }
             return best;
@@ -7039,9 +9169,16 @@
             else if (Array.isArray(carMaps))
                 for (let index = 0; index < carMaps.length; index++)
                     entries.push([index, carMaps[index]]);
-            else if (carMaps && "object" == typeof carMaps)
-                for (const [key, value] of Object.entries(carMaps))
-                    entries.push([key, value]);
+            else if (carMaps && "object" == typeof carMaps) {
+                if (isDeveloperToggleEnabled("perfTrafficMapIteration"))
+                    for (const key in carMaps) {
+                        if (Object.prototype.hasOwnProperty.call(carMaps, key))
+                            entries.push([key, carMaps[key]]);
+                    }
+                else
+                    for (const [key, value] of Object.entries(carMaps))
+                        entries.push([key, value]);
+            }
             return entries;
         }
 
@@ -7051,27 +9188,44 @@
             if (!resolver || !playerPos)
                 return null;
             let best = null;
-            let bestDistance = Math.max(2, Number(maxDistance) || 12);
-            for (const [aiId, aiCar] of getTrafficResolverEntries(resolver)) {
+            let bestDistanceSq = Math.max(2, Number(maxDistance) || 12) ** 2;
+            const visitAiCar = (aiId, aiCar) => {
                 if (!aiCar)
-                    continue;
+                    return;
                 if (resolver.actives && null != resolver.actives[aiId] && !resolver.actives[aiId])
-                    continue;
+                    return;
                 const position = aiCar.getPosition && aiCar.getPosition();
                 if (!position)
-                    continue;
-                const distance = getDistance2D(playerPos, position);
+                    return;
+                const distanceSq = getDistanceSq2D(playerPos, position);
                 const aiSpeed = speedAbs((resolver.speeds && resolver.speeds[aiId]) ?? aiCar.speed);
-                if (distance > bestDistance || aiSpeed > maxSpeed)
-                    continue;
+                if (distanceSq > bestDistanceSq || aiSpeed > maxSpeed)
+                    return;
                 best = {
                     resolver,
                     aiId,
                     aiCar,
-                    distance,
+                    distanceSq,
                     aiSpeed
                 };
-                bestDistance = distance;
+                bestDistanceSq = distanceSq;
+            };
+            const carMaps = resolver.carMaps;
+            if (carMaps && "function" == typeof carMaps.entries) {
+                for (const [aiId, aiCar] of carMaps.entries())
+                    visitAiCar(aiId, aiCar);
+            } else if (Array.isArray(carMaps)) {
+                for (let index = 0; index < carMaps.length; index++)
+                    visitAiCar(index, carMaps[index]);
+            } else if (carMaps && "object" == typeof carMaps) {
+                if (isDeveloperToggleEnabled("perfTrafficMapIteration"))
+                    for (const key in carMaps) {
+                        if (Object.prototype.hasOwnProperty.call(carMaps, key))
+                            visitAiCar(key, carMaps[key]);
+                    }
+                else
+                    for (const key of Object.keys(carMaps))
+                        visitAiCar(key, carMaps[key]);
             }
             return best;
         }
@@ -7160,16 +9314,22 @@
                 return;
             if (!chunk || chunk.__tmRunwayBuildingsSuppressed || !chunk.aerowayGraph || !Array.isArray(chunk.buildings))
                 return;
-            const runways = toSafeArray(chunk.aerowayGraph.edges).filter(edge => edge && typeof edge.getLength === "function" && edge.getLength() >= 330);
+            const runways = [];
+            for (const edge of toSafeArray(chunk.aerowayGraph.edges))
+                edge && typeof edge.getLength === "function" && edge.getLength() >= 330 && runways.push(edge);
             if (!runways.length)
                 return;
             chunk.__tmRunwayBuildingsSuppressed = !0;
-            chunk.buildings = chunk.buildings.filter(building => {
+            const remainingBuildings = [];
+            for (const building of chunk.buildings) {
                 const center = building && building.houseCenterLocal;
-                if (!center)
-                    return !0;
+                let keep = !0;
                 for (const runway of runways) {
+                    if (!center)
+                        break;
                     const points = runway.points || [];
+                    const clearance = Math.max(45, Number(runway.width) / 2 + 35);
+                    const clearanceSq = clearance * clearance;
                     for (let index = 0; index < points.length - 1; index++) {
                         const a = points[index];
                         const b = points[index + 1];
@@ -7183,12 +9343,19 @@
                         const t = clamp(((center.x - ax) * dx + (center.z - az) * dz) / lenSq, 0, 1);
                         const px = ax + dx * t;
                         const pz = az + dz * t;
-                        if (Math.hypot(center.x - px, center.z - pz) < Math.max(45, Number(runway.width) / 2 + 35))
-                            return !1;
+                        const distX = center.x - px;
+                        const distZ = center.z - pz;
+                        if (distX * distX + distZ * distZ < clearanceSq) {
+                            keep = !1;
+                            break;
+                        }
                     }
+                    if (!keep)
+                        break;
                 }
-                return !0;
-            });
+                keep && remainingBuildings.push(building);
+            }
+            chunk.buildings = remainingBuildings;
         }
 
         function getAirportEntries() {
@@ -7204,17 +9371,46 @@
                 const edges = toSafeArray(chunk.aerowayGraph.edges);
                 for (let index = 0; index < edges.length; index++) {
                     const edge = edges[index];
-                    if (!edge || typeof edge.getLength !== "function" || edge.getLength() < 330)
+                    const length = edge && typeof edge.getLength === "function" ? edge.getLength() : 0;
+                    if (!edge || length < 330)
                         continue;
-                    const points = edge.points.map(point => point.clone().add(chunk.centerVec));
-                    const start = points[0];
-                    const end = points[points.length - 1];
-                    const direction = end.clone().sub(start);
-                    direction.y = 0;
-                    if (direction.lengthSq() < 1e-6)
-                        continue;
-                    direction.normalize();
-                    const center = start.clone().lerp(end, .5);
+                    let points = null;
+                    let start = null;
+                    let end = null;
+                    if (isDeveloperToggleEnabled("perfAirportEntryBuild")) {
+                        const rawPoints = toSafeArray(edge.points);
+                        if (rawPoints.length < 2)
+                            continue;
+                        start = rawPoints[0].clone().add(chunk.centerVec);
+                        end = rawPoints[rawPoints.length - 1].clone().add(chunk.centerVec);
+                        points = [start, end];
+                    } else {
+                        points = [];
+                        for (const point of toSafeArray(edge.points))
+                            points.push(point.clone().add(chunk.centerVec));
+                        if (points.length < 2)
+                            continue;
+                        start = points[0];
+                        end = points[points.length - 1];
+                    }
+                    let direction;
+                    let center;
+                    if (isDeveloperToggleEnabled("perfAirportDirectionMath")) {
+                        const dx = end.x - start.x;
+                        const dz = end.z - start.z;
+                        const len = Math.hypot(dx, dz);
+                        if (len < 1e-3)
+                            continue;
+                        direction = new globalState.THREE.Vector3(dx / len,0,dz / len);
+                        center = new globalState.THREE.Vector3((start.x + end.x) * .5,(start.y + end.y) * .5,(start.z + end.z) * .5);
+                    } else {
+                        direction = end.clone().sub(start);
+                        direction.y = 0;
+                        if (direction.lengthSq() < 1e-6)
+                            continue;
+                        direction.normalize();
+                        center = start.clone().lerp(end, .5);
+                    }
                     airports.push({
                         key: `${chunkPoiKey(chunk)}:runway:${index}`,
                         chunk,
@@ -7223,7 +9419,7 @@
                         center,
                         direction,
                         side: new globalState.THREE.Vector3(-direction.z,0,direction.x),
-                        length: edge.getLength(),
+                        length,
                         width: Number(edge.width) || 30
                     });
                 }
@@ -7250,26 +9446,20 @@
             });
             const accentColor = "helicopter" === type ? 0x2c855c : "jet" === type ? 0xd84545 : "passenger" === type ? 0x2e6fc6 : 0xf0b73f;
             const accent = makeMat(accentColor);
-            const lightRed = new THREE.MeshBasicMaterial({
-                color: 0xff2935
-            });
-            const lightGreen = new THREE.MeshBasicMaterial({
-                color: 0x2ff072
-            });
-            const lightWhite = new THREE.MeshBasicMaterial({
-                color: 0xffffff
-            });
+            const lightRed = getSharedOverlayBasicMaterial(0xff2935);
+            const lightGreen = getSharedOverlayBasicMaterial(0x2ff072);
+            const lightWhite = getSharedOverlayBasicMaterial(0xffffff);
             const length = "passenger" === type ? 86 : "jet" === type ? 24 : "helicopter" === type ? 15 : 18;
             const bodyRadius = "passenger" === type ? 3.6 : "jet" === type ? 1.4 : "helicopter" === type ? 1.1 : 1.25;
-            const fuselage = new THREE.Mesh(new THREE.CylinderGeometry(bodyRadius, bodyRadius * .75, length, 18), white);
+            const fuselage = new THREE.Mesh(getSharedOverlayCylinderGeometry(bodyRadius, bodyRadius * .75, length, 18), white);
             fuselage.rotation.z = Math.PI / 2;
             group.add(fuselage);
             group.add(createEllipsoid([length * .58, bodyRadius * .55, bodyRadius * 1.62], accentColor, [-length * .04, -bodyRadius * .18, 0], accent));
-            const nose = new THREE.Mesh(new THREE.ConeGeometry(bodyRadius, bodyRadius * 2.2, 18), white);
+            const nose = new THREE.Mesh(getSharedOverlayConeGeometry(bodyRadius, bodyRadius * 2.2, 18), white);
             nose.rotation.z = -Math.PI / 2;
             nose.position.x = length / 2 + bodyRadius;
             group.add(nose);
-            const tail = new THREE.Mesh(new THREE.ConeGeometry(bodyRadius * .75, bodyRadius * 1.8, 18), accent);
+            const tail = new THREE.Mesh(getSharedOverlayConeGeometry(bodyRadius * .75, bodyRadius * 1.8, 18), accent);
             tail.rotation.z = Math.PI / 2;
             tail.position.x = -length / 2 - bodyRadius * .6;
             group.add(tail);
@@ -7344,7 +9534,7 @@
                 }
                 if ("passenger" === type)
                     for (const z of [-wingSpan * .23, wingSpan * .23]) {
-                        const engine = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 3.2, 16), dark);
+                        const engine = new THREE.Mesh(getSharedOverlayCylinderGeometry(1.2, 1.2, 3.2, 16), dark);
                         engine.rotation.z = Math.PI / 2;
                         engine.position.set(length * .02, -1.2, z);
                         group.add(engine);
@@ -7352,7 +9542,7 @@
                     }
                 if ("jet" === type)
                     for (const z of [-wingSpan * .22, wingSpan * .22]) {
-                        const engine = new THREE.Mesh(new THREE.CylinderGeometry(.62, .72, 2.8, 14), dark);
+                        const engine = new THREE.Mesh(getSharedOverlayCylinderGeometry(.62, .72, 2.8, 14), dark);
                         engine.rotation.z = Math.PI / 2;
                         engine.position.set(length * .06, -.62, z);
                         group.add(engine);
@@ -7375,7 +9565,7 @@
                 const gearXs = "passenger" === type ? [-length * .22, length * .22] : [-length * .22, length * .18];
                 for (const x of gearXs)
                     for (const z of [-bodyRadius * 1.05, bodyRadius * 1.05]) {
-                        const wheel = new THREE.Mesh(new THREE.CylinderGeometry(bodyRadius * .18, bodyRadius * .18, bodyRadius * .16, 12), dark);
+                        const wheel = new THREE.Mesh(getSharedOverlayCylinderGeometry(bodyRadius * .18, bodyRadius * .18, bodyRadius * .16, 12), dark);
                         wheel.rotation.x = Math.PI / 2;
                         wheel.position.set(x, -bodyRadius - .25, z);
                         group.add(wheel);
@@ -7384,7 +9574,7 @@
                         strut.material = makeMat(0xb8c2ce);
                         group.add(strut);
                     }
-                const noseGear = new THREE.Mesh(new THREE.CylinderGeometry(bodyRadius * .16, bodyRadius * .16, bodyRadius * .14, 12), dark);
+                const noseGear = new THREE.Mesh(getSharedOverlayCylinderGeometry(bodyRadius * .16, bodyRadius * .16, bodyRadius * .14, 12), dark);
                 noseGear.rotation.x = Math.PI / 2;
                 noseGear.position.set(length * .38, -bodyRadius - .2, 0);
                 group.add(noseGear);
@@ -7421,7 +9611,9 @@
                 return;
             const dt = clamp(Number(dtSeconds) || .016, 1 / 240, .08);
             const motion = Math.max(2, Math.abs(Number(speed) || 0));
-            for (const rotor of toSafeArray(group.userData.rotors)) {
+            const userData = group.userData || {};
+            const rotors = Array.isArray(userData.rotors) ? userData.rotors : [];
+            for (const rotor of rotors) {
                 if (!rotor || !rotor.group)
                     continue;
                 const delta = dt * motion * (Number(rotor.speed) || 24) / 12;
@@ -7432,12 +9624,17 @@
                 else
                     rotor.group.rotation.y += delta;
             }
-            const radius = Number(group.userData.wheelRadius) || .28;
-            for (const wheel of toSafeArray(group.userData.wheels))
+            const radius = Number(userData.wheelRadius) || .28;
+            const wheels = Array.isArray(userData.wheels) ? userData.wheels : [];
+            for (const wheel of wheels)
                 wheel.rotation.z -= motion * dt / radius;
             const flash = Math.floor(performance.now() / 160) % 2;
-            for (let index = 0; index < toSafeArray(group.userData.lights).length; index++)
-                group.userData.lights[index].visible = index === group.userData.lights.length - 1 || flash === index % 2;
+            const lights = Array.isArray(userData.lights) ? userData.lights : [];
+            const lastLightIndex = lights.length - 1;
+            for (let index = 0; index < lights.length; index++) {
+                const visible = index === lastLightIndex || flash === index % 2;
+                lights[index].visible !== visible && (lights[index].visible = visible);
+            }
         }
 
         function createAirportOverlay(airport, existingKeys) {
@@ -7493,8 +9690,14 @@
             if (!featureState.aircraft)
                 return;
             const airports = getAirportEntries();
-            const signature = airports.map(airport => airport.key).sort().join("|");
-            const existingKeys = new Set(runtimeState.overlayItems.filter(item => item && ("airport" === item.kind || "aircraft" === item.kind)).map(item => item.key));
+            const signatureKeys = [];
+            for (const airport of airports)
+                airport && signatureKeys.push(airport.key);
+            signatureKeys.sort();
+            const signature = signatureKeys.join("|");
+            const existingKeys = new Set;
+            for (const item of runtimeState.overlayItems)
+                item && ("airport" === item.kind || "aircraft" === item.kind) && item.key && existingKeys.add(item.key);
             if (runtimeState.airportOverlaySignature === signature && existingKeys.size >= airports.length * 5)
                 return;
             for (const airport of airports)
@@ -7537,13 +9740,16 @@
 
         function updateBotAircraft(dtSeconds) {
             maybeSpawnBotAircraft();
-            const keep = [];
-            for (const bot of toSafeArray(runtimeState.botAircraft)) {
+            const bots = toSafeArray(runtimeState.botAircraft);
+            let writeIndex = 0;
+            for (let index = 0; index < bots.length; index++) {
+                const bot = bots[index];
                 bot.age += dtSeconds;
                 const dir = bot.airport.direction;
                 bot.speed = Math.min("jet" === bot.type ? 110 : 86, bot.speed + dtSeconds * ("jet" === bot.type ? 18 : 12));
                 bot.group.position.addScaledVector(dir, bot.speed * dtSeconds);
-                const runwayProgress = bot.group.position.clone().sub(bot.airport.center).dot(dir);
+                const botPos = bot.group.position;
+                const runwayProgress = (botPos.x - bot.airport.center.x) * dir.x + (botPos.y - bot.airport.center.y) * dir.y + (botPos.z - bot.airport.center.z) * dir.z;
                 const groundY = getTerrainYWorld(bot.group.position, 0) + 1.6;
                 const climb = clamp((runwayProgress + bot.airport.length * .35) / Math.max(120, bot.airport.length * .8), 0, 1);
                 bot.group.position.y = groundY + climb * ("jet" === bot.type ? 420 : 280);
@@ -7551,11 +9757,12 @@
                 bot.group.rotation.z = Math.sin(bot.age * .8) * .05;
                 animateAircraftVisual(bot.group, bot.speed, dtSeconds);
                 if (bot.age < 95 && bot.group.parent)
-                    keep.push(bot);
+                    bots[writeIndex++] = bot;
                 else
                     bot.group.parent && bot.group.parent.remove(bot.group);
             }
-            runtimeState.botAircraft = keep;
+            bots.length = writeIndex;
+            runtimeState.botAircraft = bots;
         }
 
         function leaveAircraft() {
@@ -7625,14 +9832,14 @@
             if (!playerPos)
                 return !1;
             let best = null;
-            let bestDistance = 70;
+            let bestDistanceSq = 4900;
             for (const item of runtimeState.overlayItems) {
                 if (item.kind !== "aircraft")
                     continue;
-                const distance = getDistance2D(playerPos, item.group.position);
-                if (distance < bestDistance) {
+                const distanceSq = getDistanceSq2D(playerPos, item.group.position);
+                if (distanceSq < bestDistanceSq) {
                     best = item;
-                    bestDistance = distance;
+                    bestDistanceSq = distanceSq;
                 }
             }
             return !!best && enterAircraft(best);
@@ -7652,7 +9859,8 @@
             aircraft.speed = clamp((Number(aircraft.speed) || 0) + throttle * ("passenger" === type ? 13 : "jet" === type ? 22 : "helicopter" === type ? 9 : 11) * dtSeconds - braking * 28 * dtSeconds, 0, "jet" === type ? 135 : "passenger" === type ? 105 : "helicopter" === type ? 48 : 72);
             const steerInput = runtimeState.input.fastLeft || runtimeState.input.slowLeft || manager && manager.moveLeft ? 1 : runtimeState.input.fastRight || runtimeState.input.slowRight || manager && manager.moveRight ? -1 : Math.sign(Number(player.steeringTarget) || Number(player.steeringAngle) || 0);
             aircraft.heading += steerInput * ("helicopter" === type ? .9 : .35) * dtSeconds;
-            const forward = new globalState.THREE.Vector3(Math.cos(aircraft.heading),0,-Math.sin(aircraft.heading));
+            const forward = runtimeState.aircraftForwardVector || (runtimeState.aircraftForwardVector = new globalState.THREE.Vector3);
+            forward.set(Math.cos(aircraft.heading), 0, -Math.sin(aircraft.heading));
             group.position.addScaledVector(forward, aircraft.speed * dtSeconds);
             const groundY = getTerrainYWorld(group.position, 0) + ("helicopter" === type ? 2.5 : 1.4);
             if ("helicopter" === type) {
@@ -7686,41 +9894,45 @@
                 return;
             const rocket = createBox([1.6, .22, .22], 0xdedede, [0, 0, 0]);
             rocket.position.copy(group.position).addScaledVector(forward, 7);
-            rocket.userData.velocity = forward.clone().multiplyScalar(120);
+            rocket.userData.velocity = new globalState.THREE.Vector3(forward.x * 120,forward.y * 120,forward.z * 120);
             rocket.userData.life = 4;
             overlay.add(rocket);
             runtimeState.projectileModels.push(rocket);
         }
 
         function updateProjectiles(dtSeconds) {
-            const keep = [];
-            for (const projectile of runtimeState.projectileModels) {
+            const projectiles = runtimeState.projectileModels;
+            let writeIndex = 0;
+            for (let index = 0; index < projectiles.length; index++) {
+                const projectile = projectiles[index];
                 projectile.userData.life -= dtSeconds;
                 let target = null;
-                let targetDistance = 1 / 0;
+                let targetDistanceSq = 1 / 0;
                 for (const police of runtimeState.policeCars) {
-                    const distance = police.group ? police.group.position.distanceTo(projectile.position) : 1 / 0;
-                    if (distance < targetDistance) {
+                    const distanceSq = police.group ? police.group.position.distanceToSquared(projectile.position) : 1 / 0;
+                    if (distanceSq < targetDistanceSq) {
                         target = police.group;
-                        targetDistance = distance;
+                        targetDistanceSq = distanceSq;
                     }
                 }
-                if (target && targetDistance < 220) {
-                    const desired = target.position.clone().sub(projectile.position).normalize().multiplyScalar(120);
+                if (target && targetDistanceSq < 48400) {
+                    const desired = runtimeState.projectileTempVector || (runtimeState.projectileTempVector = new globalState.THREE.Vector3);
+                    desired.copy(target.position).sub(projectile.position).normalize().multiplyScalar(120);
                     projectile.userData.velocity.lerp(desired, Math.min(1, dtSeconds * 1.8));
                 }
                 projectile.position.addScaledVector(projectile.userData.velocity, dtSeconds);
-                if (target && targetDistance < 5) {
+                if (target && targetDistanceSq < 25) {
                     target.parent && target.parent.remove(target);
-                    runtimeState.policeCars = runtimeState.policeCars.filter(police => police.group !== target);
+                    for (let policeIndex = runtimeState.policeCars.length - 1; policeIndex >= 0; policeIndex--)
+                        runtimeState.policeCars[policeIndex] && runtimeState.policeCars[policeIndex].group === target && runtimeState.policeCars.splice(policeIndex, 1);
                     projectile.userData.life = 0;
                 }
                 if (projectile.userData.life > 0)
-                    keep.push(projectile);
+                    projectiles[writeIndex++] = projectile;
                 else
                     projectile.parent && projectile.parent.remove(projectile);
             }
-            runtimeState.projectileModels = keep;
+            projectiles.length = writeIndex;
         }
 
         function createBirdFlock(center, seed) {
@@ -7736,7 +9948,7 @@
                 bird.rotation.y = seededUnit(seed + i, 17) * Math.PI * 2;
                 const body = createEllipsoid([.62, .24, .2], 0x3d454d, [0, 0, 0], bodyMat);
                 const head = createEllipsoid([.2, .18, .16], 0x3d454d, [.28, .04, 0], bodyMat);
-                const beak = new THREE.Mesh(new THREE.ConeGeometry(.05, .16, 6), beakMat);
+                const beak = new THREE.Mesh(getSharedOverlayConeGeometry(.05, .16, 6), beakMat);
                 beak.rotation.z = -Math.PI / 2;
                 beak.position.set(.42, .03, 0);
                 const wingL = createEllipsoid([.42, .05, .22], 0x222a31, [-.05, .02, -.12], wingMat);
@@ -7790,15 +10002,24 @@
             const playerPos = getPlayerPosition();
             if (!overlay || !playerPos)
                 return;
-            const existingKeys = new Set(runtimeState.overlayItems.map(item => item && item.key).filter(Boolean));
+            const existingKeys = new Set;
+            for (const item of runtimeState.overlayItems)
+                item && item.key && existingKeys.add(item.key);
+            let createdThisTick = 0;
+            const birdSpawnDistanceSq = CUSTOM_BUILDING_PERF.wildlifeSpawnDistance * CUSTOM_BUILDING_PERF.wildlifeSpawnDistance;
+            const beeSpawnDistanceSq = CUSTOM_BUILDING_PERF.wildlifeBeeSpawnDistance * CUSTOM_BUILDING_PERF.wildlifeBeeSpawnDistance;
             if (featureState.birds) {
                 for (const chunk of getLoadedChunks()) {
+                    if (createdThisTick >= CUSTOM_BUILDING_PERF.wildlifeMaxNewPerTick)
+                        break;
                     const key = `birds:${chunkPoiKey(chunk)}`;
                     if (existingKeys.has(key))
                         continue;
                     if (seededUnit(chunk.cx + chunk.cz, 21) < .42)
                         continue;
-                    const center = chunk.centerVec ? chunk.centerVec.clone() : new globalState.THREE.Vector3(chunk.cx,0,chunk.cz);
+                    const center = chunk.centerVec || getChunkApproxCenter(chunk);
+                    if (!center || getDistanceSq2D(playerPos, center) > birdSpawnDistanceSq)
+                        continue;
                     const flock = createBirdFlock(center, chunk.cx + chunk.cz);
                     overlay.add(flock);
                     runtimeState.overlayItems.push({
@@ -7808,14 +10029,19 @@
                         position: center
                     });
                     existingKeys.add(key);
+                    createdThisTick++;
                 }
             }
             if (featureState.bees) {
                 for (const item of runtimeState.overlayItems) {
+                    if (createdThisTick >= CUSTOM_BUILDING_PERF.wildlifeMaxNewPerTick)
+                        break;
                     if (!item || item.kind !== "poi" || item.type !== "apiary")
                         continue;
                     const key = `bees:${item.key}`;
                     if (existingKeys.has(key))
+                        continue;
+                    if (!item.position || getDistanceSq2D(playerPos, item.position) > beeSpawnDistanceSq)
                         continue;
                     const bees = createBeeSwarm(item.position, item.position.x + item.position.z);
                     bees.position.copy(item.position);
@@ -7827,6 +10053,7 @@
                         position: item.position
                     });
                     existingKeys.add(key);
+                    createdThisTick++;
                 }
             }
         }
@@ -7838,39 +10065,53 @@
             if (!playerPos)
                 return;
             runtimeState.overlayTick += dtSeconds;
+            const now = performance.now();
+            if (now - (Number(runtimeState.overlayCleanupAt) || 0) > CUSTOM_BUILDING_PERF.overlayCleanupIntervalMs) {
+                runtimeState.overlayCleanupAt = now;
+                let writeIndex = 0;
+                for (let index = 0; index < runtimeState.overlayItems.length; index++) {
+                    const item = runtimeState.overlayItems[index];
+                    if (item && item.group && (item.group.parent || item.data && item.data.active))
+                        runtimeState.overlayItems[writeIndex++] = item;
+                }
+                runtimeState.overlayItems.length = writeIndex;
+            }
             runtimeState.overlayVisibilityAccumulator = (Number(runtimeState.overlayVisibilityAccumulator) || 0) + Math.max(.001, Number(dtSeconds) || .016);
             const refreshVisibility = runtimeState.overlayVisibilityAccumulator >= .22;
             refreshVisibility && (runtimeState.overlayVisibilityAccumulator = 0);
+            const overlayTick = runtimeState.overlayTick;
+            const towFlash = Math.floor(now / 180) % 2;
             for (const item of runtimeState.overlayItems) {
                 if (!item.group || !item.position)
                     continue;
                 if (refreshVisibility || "boolean" != typeof item.__tmVisibleByDistance) {
-                    const distance = getDistance2D(playerPos, item.group.position || item.position);
                     const limit = item.kind === "airport" || item.kind === "aircraft" ? 6500 : item.kind === "birds" ? 1800 : 900;
-                    item.__tmVisibleByDistance = !featureState.overlays || distance <= limit || item.data && item.data.active;
+                    item.__tmVisibleByDistance = !featureState.overlays || item.data && item.data.active || getDistanceSq2D(playerPos, item.group.position || item.position) <= limit * limit;
                 }
-                item.group.visible = item.__tmVisibleByDistance;
+                item.group.visible !== item.__tmVisibleByDistance && (item.group.visible = item.__tmVisibleByDistance);
                 if (!item.group.visible)
                     continue;
                 if (item.kind === "birds") {
-                    item.group.position.x += Math.sin(runtimeState.overlayTick * .2 + item.group.userData.seed) * dtSeconds * 5;
-                    item.group.position.z += Math.cos(runtimeState.overlayTick * .23 + item.group.userData.seed) * dtSeconds * 5;
+                    item.group.position.x += Math.sin(overlayTick * .2 + item.group.userData.seed) * dtSeconds * 5;
+                    item.group.position.z += Math.cos(overlayTick * .23 + item.group.userData.seed) * dtSeconds * 5;
                     item.group.rotation.y += dtSeconds * .12;
                     for (const child of item.group.children) {
-                        child.rotation.z = Math.sin(runtimeState.overlayTick * 8 + child.position.x) * .18;
-                        const flap = Math.sin(runtimeState.overlayTick * 14 + (child.userData.seed || 0)) * .82;
-                        for (const wing of toSafeArray(child.userData.wings))
+                        child.rotation.z = Math.sin(overlayTick * 8 + child.position.x) * .18;
+                        const flap = Math.sin(overlayTick * 14 + (child.userData.seed || 0)) * .82;
+                        const wings = Array.isArray(child.userData && child.userData.wings) ? child.userData.wings : [];
+                        for (const wing of wings)
                             wing.rotation.x = flap;
                     }
                 } else if (item.kind === "bees") {
                     for (let index = 0; index < item.group.children.length; index++) {
                         const bee = item.group.children[index];
-                        bee.position.x = Math.sin(runtimeState.overlayTick * 4 + index) * 2.2;
-                        bee.position.z = Math.cos(runtimeState.overlayTick * 3.3 + index * 1.7) * 2.2;
-                        bee.position.y = 1 + Math.sin(runtimeState.overlayTick * 6 + index * 1.2) * .55;
+                        bee.position.x = Math.sin(overlayTick * 4 + index) * 2.2;
+                        bee.position.z = Math.cos(overlayTick * 3.3 + index * 1.7) * 2.2;
+                        bee.position.y = 1 + Math.sin(overlayTick * 6 + index * 1.2) * .55;
                         bee.rotation.y += dtSeconds * 7;
-                        const flutter = Math.sin(runtimeState.overlayTick * 48 + (bee.userData.seed || 0)) * .95;
-                        for (const wing of toSafeArray(bee.userData.wings))
+                        const flutter = Math.sin(overlayTick * 48 + (bee.userData.seed || 0)) * .95;
+                        const wings = Array.isArray(bee.userData && bee.userData.wings) ? bee.userData.wings : [];
+                        for (const wing of wings)
                             wing.rotation.z = flutter;
                     }
                 } else if (item.kind === "aftermath" && item.data) {
@@ -7884,19 +10125,23 @@
                         item.group.position.z -= Math.sin(Number(item.data.heading) || 0) * Number(item.data.speed || 2) * dtSeconds;
                         item.group.position.y = getTerrainYWorld(item.group.position, item.group.position.y) + .74;
                         const limbs = item.group.userData.limbs || {};
-                        const gait = Math.sin(runtimeState.overlayTick * 8 + (item.group.userData.seed || 0)) * .7;
+                        const gait = Math.sin(overlayTick * 8 + (item.group.userData.seed || 0)) * .7;
                         limbs.armL && (limbs.armL.rotation.z = gait);
                         limbs.armR && (limbs.armR.rotation.z = -gait);
                         limbs.legL && (limbs.legL.rotation.z = -gait);
                         limbs.legR && (limbs.legR.rotation.z = gait);
                     } else if ("tow" === item.data.type) {
-                        item.group.position.x += Math.cos(Number(item.data.heading) || 0) * Number(item.data.speed || 6) * dtSeconds;
-                        item.group.position.z -= Math.sin(Number(item.data.heading) || 0) * Number(item.data.speed || 6) * dtSeconds;
+                        const heading = Number(item.data.heading) || 0;
+                        const travel = Number(item.data.speed || 6) * dtSeconds;
+                        item.group.position.x += Math.cos(heading) * travel;
+                        item.group.position.z -= Math.sin(heading) * travel;
                         item.group.position.y = getTerrainYWorld(item.group.position, item.group.position.y);
-                        const flash = Math.floor(performance.now() / 180) % 2;
-                        for (const light of toSafeArray(item.group.children[0] && item.group.children[0].userData && item.group.children[0].userData.lights))
-                            light.visible = 0 === flash;
-                        for (const wheel of toSafeArray(item.group.children[0] && item.group.children[0].userData && item.group.children[0].userData.wheels))
+                        const vehicleData = item.group.children[0] && item.group.children[0].userData || {};
+                        const lights = Array.isArray(vehicleData.lights) ? vehicleData.lights : [];
+                        for (const light of lights)
+                            light.visible = 0 === towFlash;
+                        const wheels = Array.isArray(vehicleData.wheels) ? vehicleData.wheels : [];
+                        for (const wheel of wheels)
                             wheel.rotation.z -= dtSeconds * 12;
                     }
                 } else if (item.kind === "aircraft" && !(item.data && item.data.active)) {
@@ -7925,7 +10170,7 @@
             const manager = getControlManager();
             const playerIsOnFoot = !!(manager && !manager.inCar);
             const playerPos = playerIsOnFoot ? getControlPosition() : null;
-            const worldPosition = new globalState.THREE.Vector3;
+            const now = performance.now();
             for (let index = runtimeState.customBuildingDoorItems.length - 1; index >= 0; index--) {
                 const item = runtimeState.customBuildingDoorItems[index];
                 const group = item && item.group;
@@ -7934,9 +10179,21 @@
                     runtimeState.customBuildingDoorItems.splice(index, 1);
                     continue;
                 }
-                group.getWorldPosition(worldPosition);
-                const target = playerPos && getDistance2D(playerPos, worldPosition) <= state.radius ? 1 : 0;
-                if (target && Number.isFinite(state.baseOpenY) && Number.isFinite(state.normalX) && Number.isFinite(state.normalZ)) {
+                if (!playerIsOnFoot && (!state.current || state.current < .003))
+                    continue;
+                const worldPosition = item.worldPosition || (group.getWorldPosition ? group.getWorldPosition(item.__tmWorldPosition || (item.__tmWorldPosition = new globalState.THREE.Vector3)) : null);
+                if (!worldPosition)
+                    continue;
+                const radius = Math.max(0, Number(state.radius) || 0);
+                const farRadius = CUSTOM_BUILDING_PERF.doorNearDistance + radius;
+                const distanceSq = playerPos ? getDistanceSq2D(playerPos, worldPosition) : 1 / 0;
+                if (distanceSq > farRadius * farRadius && (!state.current || state.current < .003)) {
+                    if (now - (Number(item.lastDoorUpdateAt) || 0) < CUSTOM_BUILDING_PERF.doorFarUpdateMs)
+                        continue;
+                    item.lastDoorUpdateAt = now;
+                }
+                const target = distanceSq <= radius * radius ? 1 : 0;
+                if (target && playerPos && Number.isFinite(state.baseOpenY) && Number.isFinite(state.normalX) && Number.isFinite(state.normalZ)) {
                     const side = ((Number(playerPos.x) || 0) - worldPosition.x) * state.normalX + ((Number(playerPos.z) || 0) - worldPosition.z) * state.normalZ;
                     state.openY = state.closedY + state.baseOpenY * (side >= 0 ? 1 : -1);
                 }
@@ -7974,15 +10231,28 @@
                 clearNaviGuidance("Ziel erreicht", !0);
                 return;
             }
-            panel.showNavigation && panel.showNavigation();
-            panel.updateStatus && panel.updateStatus(`Navi: ${guidance.label || "Ziel"}`);
-            panel.updateMissionDescriptiopn && panel.updateMissionDescriptiopn("Folge der Kompassrichtung zum gesetzten Navi-Ziel.");
+            const now = performance.now();
+            const label = guidance.label || "Ziel";
+            const distanceText = distance > 1000 ? `${(distance / 1000).toFixed(1)} km` : `${distance.toFixed(0)} m`;
+            const state = runtimeState.navGuidanceUiState || (runtimeState.navGuidanceUiState = {});
+            const staticKey = `${label}|${guidance.source || ""}`;
+            if (state.guidance !== guidance || state.staticKey !== staticKey || now - (Number(state.staticAt) || 0) > CUSTOM_BUILDING_PERF.navigationPanelStaticUpdateMs) {
+                panel.showNavigation && panel.showNavigation();
+                panel.updateStatus && panel.updateStatus(`Navi: ${label}`);
+                panel.updateMissionDescriptiopn && panel.updateMissionDescriptiopn("Folge der Kompassrichtung zum gesetzten Navi-Ziel.");
+                panel.updateEntry1 && panel.updateEntry1("Weg zeigen");
+                panel.updateEntry2 && panel.updateEntry2(label);
+                panel.updateEntry4 && panel.updateEntry4("");
+                state.guidance = guidance;
+                state.staticKey = staticKey;
+                state.staticAt = now;
+            }
             if (panel.updateCompass && player && "function" == typeof player.getHeadings)
                 panel.updateCompass(playerPos, player.getHeadings(), guidance.position);
-            panel.updateEntry1 && panel.updateEntry1("Weg zeigen");
-            panel.updateEntry2 && panel.updateEntry2(guidance.label || "Ziel");
-            panel.updateEntry3 && panel.updateEntry3(distance > 1000 ? `${(distance / 1000).toFixed(1)} km` : `${distance.toFixed(0)} m`);
-            panel.updateEntry4 && panel.updateEntry4("");
+            if (state.distanceText !== distanceText) {
+                panel.updateEntry3 && panel.updateEntry3(distanceText);
+                state.distanceText = distanceText;
+            }
         }
 
         function updateRuntimeSystems(game, dtSeconds) {
@@ -8001,7 +10271,8 @@
             runtimeState.activeAircraft && runFeatureModule("aircraft", (() => updateActiveAircraft(dt)), null, "Active aircraft");
             runtimeState.projectileModels.length && runFeatureModule("aircraft", (() => updateProjectiles(dt)), null, "Aircraft projectiles");
             runtimeState.overlayItems.length && runInternalModule("overlayRuntime", (() => updateOverlayCullingAndAnimation(dt)), null, "Overlay runtime");
-            (runtimeState.customBuildingDoorItems.length || isAny3dBuildingFeatureEnabled()) && runInternalModule("customBuildingDoors", (() => updateCustomBuildingDoors(dt)), null, "Custom-building doors");
+            runtimeState.customBuildingDoorItems.length && runInternalModule("customBuildingDoors", (() => updateCustomBuildingDoors(dt)), null, "Custom-building doors");
+            shouldRunRuntimeTask("customBuildingOverlayCulling", CUSTOM_BUILDING_PERF.cullIntervalMs) && runInternalModule("customBuildingOverlayCulling", updateCustomBuildingOverlayCulling, null, "Custom-building culling");
             featureState.collisionHook && runInternalModule("worldCollision", updateWorldHitboxCollisions, null, "World hitboxes");
             (runtimeState.policeCars.length || runtimeState.policeState) && updatePolice(dt);
             if (featureState.survival) {
@@ -8031,16 +10302,33 @@
             const THREE = globalState.THREE;
             if (!THREE)
                 return null;
+            const color = toThreeColor(colorValue, 0xffffff);
+            const opacity = null != options.opacity ? clamp(Number(options.opacity) || 0, .02, 1) : 1;
+            const side = null != options.side ? options.side : THREE.DoubleSide;
+            const key = [
+                "flat",
+                color && "function" == typeof color.getHexString ? color.getHexString() : String(colorValue),
+                options.transparent ? 1 : 0,
+                Math.round(opacity * 1e3) / 1e3,
+                side,
+                THREE.MeshBasicMaterial ? "basic" : THREE.MeshLambertMaterial ? "lambert" : "standard"
+            ].join("|");
+            const cache = getOverlayMaterialCache();
+            const cached = cache.get(key);
+            if (cached)
+                return cached;
             const baseOptions = {
-                color: toThreeColor(colorValue, 0xffffff),
+                color,
                 transparent: !!options.transparent,
-                opacity: null != options.opacity ? clamp(Number(options.opacity) || 0, .02, 1) : 1,
-                side: null != options.side ? options.side : THREE.DoubleSide
+                opacity,
+                side
             };
-            return THREE.MeshBasicMaterial ? new THREE.MeshBasicMaterial(baseOptions) : THREE.MeshLambertMaterial ? new THREE.MeshLambertMaterial(baseOptions) : new THREE.MeshStandardMaterial(Object.assign({
+            const material = THREE.MeshBasicMaterial ? new THREE.MeshBasicMaterial(baseOptions) : THREE.MeshLambertMaterial ? new THREE.MeshLambertMaterial(baseOptions) : new THREE.MeshStandardMaterial(Object.assign({
                 roughness: .6,
                 metalness: .1
             }, baseOptions));
+            markSharedResource(material, "overlay-material");
+            return rememberLimitedCache(cache, key, material, CUSTOM_BUILDING_PERF.overlayMaterialCacheSize);
         }
 
         function setTextureQuality(texture) {
@@ -8165,10 +10453,16 @@
         }
 
         function buildingPointsForWater(building) {
-            return toSafeArray(building && building.points).map(point => ({
-                x: Number(Array.isArray(point) ? point[0] : point.x) || 0,
-                z: Number(Array.isArray(point) ? point[1] : point.z) || 0
-            })).filter(point => Number.isFinite(point.x) && Number.isFinite(point.z));
+            const result = [];
+            for (const point of toSafeArray(building && building.points)) {
+                const x = Number(Array.isArray(point) ? point[0] : point.x) || 0;
+                const z = Number(Array.isArray(point) ? point[1] : point.z) || 0;
+                Number.isFinite(x) && Number.isFinite(z) && result.push({
+                    x,
+                    z
+                });
+            }
+            return result;
         }
 
         function createWaterHoleFromFootprint(points, padding=.8) {
@@ -8260,21 +10554,34 @@
         function enhanceTerrainMesh(chunk) {
             if (!featureState.enhancedTerrain || !chunk || !chunk.group)
                 return;
+            if (chunk.__tmTerrainEnhanceComplete)
+                return;
+            let foundTerrain = !1;
             chunk.group.traverse((node => {
                 if (!node || !node.isMesh || !node.__tmTerrainMesh)
+                    return;
+                if (node.__tmTerrainTextureEnhanced)
                     return;
                 const material = node.material;
                 if (!material)
                     return;
+                foundTerrain = !0;
                 material.map && setTextureQuality(material.map);
                 material.needsUpdate = !0;
+                node.__tmTerrainTextureEnhanced = !0;
             }
             ));
+            foundTerrain && (chunk.__tmTerrainEnhanceComplete = !0);
         }
 
         function createRoadMaterial(baseMaterial) {
             if (!globalState.THREE)
                 return baseMaterial;
+            if (baseMaterial && runtimeState.roadMaterialCache instanceof WeakMap) {
+                const cached = runtimeState.roadMaterialCache.get(baseMaterial);
+                if (cached)
+                    return cached;
+            }
             const material = baseMaterial && baseMaterial.clone ? baseMaterial.clone() : baseMaterial;
             if (material) {
                 material.side = globalState.THREE.DoubleSide;
@@ -8285,6 +10592,7 @@
                 });
                 material.needsUpdate = !0;
             }
+            baseMaterial && runtimeState.roadMaterialCache instanceof WeakMap && runtimeState.roadMaterialCache.set(baseMaterial, material || baseMaterial);
             return material || baseMaterial;
         }
 
@@ -8324,7 +10632,7 @@
                     enhanceTerrainMesh(chunk);
                     enhanceRoadMeshes(chunk);
                     rebuildTunnelBridgeOverlay(chunk);
-                    isAny3dBuildingFeatureEnabled() ? rebuildCustomBuildingsForChunk(chunk) : cleanupChunkCustomVisuals(chunk);
+                    isAny3dBuildingFeatureEnabled() ? rebuildCustomBuildingsForChunk(chunk, reason) : cleanupChunkCustomVisuals(chunk);
                 } catch (visualError) {
                     error(`Fehler beim Visual-Refresh fuer Chunk ${chunk.cx}/${chunk.cz}:`, visualError);
                 }
@@ -8334,7 +10642,13 @@
         }
 
         function mergeGeometriesSafe(geometries) {
-            const usable = geometries.filter(Boolean);
+            let usable;
+            if (isDeveloperToggleEnabled("perfGeometryMergeFilter")) {
+                usable = [];
+                for (const geometry of toSafeArray(geometries))
+                    geometry && usable.push(geometry);
+            } else
+                usable = geometries.filter(Boolean);
             if (!usable.length)
                 return null;
             const merger = runtimeState.bufferGeometryUtils && (runtimeState.bufferGeometryUtils.mergeBufferGeometries || runtimeState.bufferGeometryUtils.mergeGeometries);
@@ -8361,11 +10675,29 @@
                 normalized.dispose && normalized.dispose();
                 normalized = nonIndexed;
             }
+            let attributeNames = null;
+            if (!(material && material.map) && normalized.attributes.normal && !normalized.index) {
+                if (isDeveloperToggleEnabled("perfNormalizeGeometryAttributes")) {
+                    let simpleAttributes = !0;
+                    for (const name in normalized.attributes)
+                        if (Object.prototype.hasOwnProperty.call(normalized.attributes, name) && "position" !== name && "normal" !== name) {
+                            simpleAttributes = !1;
+                            break;
+                        }
+                    if (simpleAttributes)
+                        return normalized;
+                } else {
+                    attributeNames = Object.keys(normalized.attributes);
+                    if (attributeNames.every(name => "position" === name || "normal" === name))
+                        return normalized;
+                }
+            }
             if (material && material.map) {
                 if (!normalized.attributes.uv)
                     normalized.setAttribute("uv", new globalState.THREE.Float32BufferAttribute(new Float32Array(2 * normalized.attributes.position.count),2));
             } else {
-                for (const attributeName of Object.keys(normalized.attributes))
+                attributeNames || (attributeNames = Object.keys(normalized.attributes));
+                for (const attributeName of attributeNames)
                     if ("position" !== attributeName && "normal" !== attributeName)
                         normalized.deleteAttribute(attributeName);
             }
@@ -8379,7 +10711,7 @@
             const color = material.color && "function" == typeof material.color.getHexString ? material.color.getHexString() : "none";
             const map = material.map ? material.map.uuid || material.map.id || "map" : "none";
             const opacity = null != material.opacity ? Math.round(1e3 * material.opacity) / 1e3 : 1;
-            return [
+            const signature = isDeveloperToggleEnabled("perfBatchMaterialKey") ? `${material.type || "Material"}|${color}|${map}|${material.transparent || opacity < 1 ? 1 : 0}|${opacity}|${null != material.side ? material.side : "side"}|${material.depthWrite === !1 ? 0 : 1}|${material.vertexColors ? 1 : 0}` : [
                 material.type || "Material",
                 color,
                 map,
@@ -8389,6 +10721,12 @@
                 material.depthWrite === !1 ? 0 : 1,
                 material.vertexColors ? 1 : 0
             ].join("|");
+            material.userData || (material.userData = {});
+            if (material.userData.tmBatchSignature === signature && material.userData.tmBatchKey)
+                return material.userData.tmBatchKey;
+            material.userData.tmBatchSignature = signature;
+            material.userData.tmBatchKey = signature;
+            return signature;
         }
 
         function cloneMaterialForBatch(material) {
@@ -8397,6 +10735,10 @@
                 color: 0xffffff,
                 side: THREE.DoubleSide
             });
+            if (clone.userData && clone.userData.tmSharedResource) {
+                clone.userData = Object.assign({}, clone.userData);
+                delete clone.userData.tmSharedResource;
+            }
             if (clone.transparent || Number(clone.opacity) < 1) {
                 clone.transparent = !0;
                 clone.depthWrite = !1;
@@ -8421,12 +10763,12 @@
         function disposeMeshOnly(mesh) {
             if (!mesh || !mesh.isMesh)
                 return;
-            mesh.geometry && "function" == typeof mesh.geometry.dispose && mesh.geometry.dispose();
+            mesh.geometry && !isSharedResource(mesh.geometry) && "function" == typeof mesh.geometry.dispose && mesh.geometry.dispose();
             if (Array.isArray(mesh.material))
                 for (const material of mesh.material)
-                    material && "function" == typeof material.dispose && material.dispose();
+                    material && !isSharedResource(material) && "function" == typeof material.dispose && material.dispose();
             else
-                mesh.material && "function" == typeof mesh.material.dispose && mesh.material.dispose();
+                mesh.material && !isSharedResource(mesh.material) && "function" == typeof mesh.material.dispose && mesh.material.dispose();
         }
 
         function pruneEmptyGroups(group, root) {
@@ -8444,11 +10786,14 @@
         function clearCustomBuildingOverlayChildren(overlay) {
             if (!overlay)
                 return;
-            while (overlay.children.length) {
-                const child = overlay.children[0];
+            for (let index = overlay.children.length - 1; index >= 0; index--) {
+                const child = overlay.children[index];
                 overlay.remove(child);
                 disposeObject3D(child);
             }
+            overlay.userData && (overlay.userData.tmBatchableMeshCount = 0,
+            overlay.userData.tmBatchableMeshCountValid = !1,
+            overlay.userData.tmBatchableMeshCountLimit = 0);
         }
 
         function optimizeCustomBuildingOverlay(overlay) {
@@ -8505,10 +10850,12 @@
                     }
                 }
                 outputGeometries.length || outputGeometries.push(...batch.geometries);
+                const canCloneBatchMaterial = !!(batch.material && batch.material.clone);
                 for (const geometry of outputGeometries) {
                     geometry.computeBoundingSphere && geometry.computeBoundingSphere();
                     geometry.computeBoundingBox && geometry.computeBoundingBox();
-                    const mesh = new THREE.Mesh(geometry,batch.material.clone ? batch.material.clone() : batch.material);
+                    const material = 1 === outputGeometries.length || !canCloneBatchMaterial ? batch.material : batch.material.clone();
+                    const mesh = new THREE.Mesh(geometry,material);
                     mesh.name = batch.transparent ? "__tmCustomBuildingGlassBatch" : "__tmCustomBuildingStaticBatch";
                     mesh.userData.tmNoBatch = !0;
                     if (batch.transparent) {
@@ -8518,8 +10865,11 @@
                     }
                     overlay.add(mesh);
                 }
-                batch.material && "function" == typeof batch.material.dispose && batch.material.dispose();
+                outputGeometries.length > 1 && canCloneBatchMaterial && batch.material && "function" == typeof batch.material.dispose && batch.material.dispose();
             }
+            overlay.userData && (overlay.userData.tmBatchableMeshCount = 0,
+            overlay.userData.tmBatchableMeshCountValid = !0,
+            overlay.userData.tmBatchableMeshCountLimit = 1 / 0);
         }
 
         function transformGeometry(geometry, options) {
@@ -8644,6 +10994,15 @@
             const output = Object.assign({}, base || {});
             if (!extra || "object" != typeof extra)
                 return output;
+            if (isDeveloperToggleEnabled("perfDeepMergeLoop")) {
+                for (const key in extra) {
+                    if (!Object.prototype.hasOwnProperty.call(extra, key))
+                        continue;
+                    const value = extra[key];
+                    output[key] = value && "object" == typeof value && !Array.isArray(value) ? deepMergeConfig(output[key], value) : Array.isArray(value) ? value.slice() : value;
+                }
+                return output;
+            }
             for (const [key, value] of Object.entries(extra))
                 output[key] = value && "object" == typeof value && !Array.isArray(value) ? deepMergeConfig(output[key], value) : Array.isArray(value) ? value.slice() : value;
             return output;
@@ -8657,11 +11016,54 @@
             }
         }
 
+        function rememberLimitedCache(cache, key, value, maxSize) {
+            if (!cache || !key)
+                return value;
+            cache.set(key, value);
+            const limit = Math.max(20, Number(maxSize) || 200);
+            if (isDeveloperToggleEnabled("perfCacheEvictionFastPath") && cache.size <= limit)
+                return value;
+            while (cache.size > limit) {
+                const oldest = cache.keys().next().value;
+                if (void 0 === oldest)
+                    break;
+                const oldValue = cache.get(oldest);
+                if (oldValue && oldValue.userData && oldValue.userData.tmSharedResource)
+                    oldValue.userData.tmEvictedFromCache = !0;
+                cache.delete(oldest);
+            }
+            return value;
+        }
+
+        function markSharedResource(resource, kind) {
+            if (resource) {
+                resource.userData || (resource.userData = {});
+                resource.userData.tmSharedResource = kind || !0;
+            }
+            return resource;
+        }
+
+        function isSharedResource(resource) {
+            return !!(resource && resource.userData && resource.userData.tmSharedResource);
+        }
+
         function getBuildingDebugId(chunk, building) {
             return `${Math.round(Number(chunk && chunk.cx) || 0)}:${Math.round(Number(chunk && chunk.cz) || 0)}/${Number(building && building.index) || 0}`;
         }
 
-        function refreshCustomBuildingDebug() {
+        function refreshCustomBuildingDebug(force=!1) {
+            const now = performance.now();
+            const last = Number(runtimeState.customBuildingDebugAt) || 0;
+            if (!force && last && now - last < CUSTOM_BUILDING_PERF.debugRefreshMs) {
+                if (!runtimeState.customBuildingDebugTimer)
+                    runtimeState.customBuildingDebugTimer = setTimeout((() => {
+                        runtimeState.customBuildingDebugTimer = null;
+                        refreshCustomBuildingDebug(!0);
+                    }
+                    ), CUSTOM_BUILDING_PERF.debugRefreshMs);
+                return;
+            }
+            runtimeState.customBuildingDebugAt = now;
             const entries = [];
             for (const chunk of getLoadedChunks())
                 for (const building of toSafeArray(chunk.buildings))
@@ -8791,15 +11193,19 @@
 
         function assignUniqueBuildingCatalogIds(buildings) {
             const seen = new Map;
-            return toSafeArray(buildings).map((entry, index) => {
+            const source = toSafeArray(buildings);
+            const result = [];
+            for (let index = 0; index < source.length; index++) {
+                const entry = source[index];
                 const baseId = normalizeBuildingCatalogId(entry && entry.id, index);
                 const count = Number(seen.get(baseId)) || 0;
                 seen.set(baseId, count + 1);
                 const id = count ? `${baseId}_${count + 1}` : baseId;
-                return entry && entry.id === id ? entry : Object.assign({}, entry || {}, {
+                result.push(entry && entry.id === id ? entry : Object.assign({}, entry || {}, {
                     id
-                });
-            });
+                }));
+            }
+            return result;
         }
 
         function normalizeBuildingCatalog(rawCatalog) {
@@ -8807,14 +11213,24 @@
                 return {
                     templates: {},
                     buildings: []
-                };
+            };
             const templates = rawCatalog.templates && "object" == typeof rawCatalog.templates ? cloneJson(rawCatalog.templates, {}) : {};
             const rawBuildings = rawCatalog.buildings && "object" == typeof rawCatalog.buildings ? rawCatalog.buildings : rawCatalog;
-            const buildings = Array.isArray(rawBuildings) ? rawBuildings.map(((entry, index) => Object.assign({
-                id: `entry_${index}`
-            }, entry))) : Object.entries(rawBuildings).filter((([key]) => "templates" !== key)).map((([key, entry]) => Object.assign({
-                id: key
-            }, entry)));
+            const buildings = [];
+            if (Array.isArray(rawBuildings)) {
+                for (let index = 0; index < rawBuildings.length; index++)
+                    buildings.push(Object.assign({
+                        id: `entry_${index}`
+                    }, rawBuildings[index]));
+            } else {
+                for (const key of Object.keys(rawBuildings || {})) {
+                    if ("templates" === key)
+                        continue;
+                    buildings.push(Object.assign({
+                        id: key
+                    }, rawBuildings[key]));
+                }
+            }
             return {
                 templates,
                 buildings: assignUniqueBuildingCatalogIds(buildings)
@@ -8839,6 +11255,11 @@
                 </div>
             `;
             document.body.appendChild(panel);
+            panel.__tmProgressNodes = {
+                label: panel.querySelector('[data-role="label"]'),
+                value: panel.querySelector('[data-role="value"]'),
+                bar: panel.querySelector('[data-role="bar"]')
+            };
             runtimeState.customBuildingProgress = {
                 panel,
                 hideTimer: 0
@@ -8856,13 +11277,19 @@
                 });
                 state.hideTimer && clearTimeout(state.hideTimer);
                 const percent = total > 0 ? clamp(Math.round(done / total * 100), 0, 100) : 0;
-                const labelNode = panel.querySelector('[data-role="label"]');
-                const valueNode = panel.querySelector('[data-role="value"]');
-                const barNode = panel.querySelector('[data-role="bar"]');
-                labelNode && (labelNode.textContent = label || "Haeuser optimieren");
-                valueNode && (valueNode.textContent = `${percent}%`);
-                barNode && (barNode.style.width = `${percent}%`);
-                panel.style.display = "block";
+                const nodes = panel.__tmProgressNodes || (panel.__tmProgressNodes = {
+                    label: panel.querySelector('[data-role="label"]'),
+                    value: panel.querySelector('[data-role="value"]'),
+                    bar: panel.querySelector('[data-role="bar"]')
+                });
+                const safeLabel = label || "Haeuser optimieren";
+                const percentText = `${percent}%`;
+                nodes.label && state.lastLabel !== safeLabel && (nodes.label.textContent = safeLabel);
+                nodes.value && state.lastPercentText !== percentText && (nodes.value.textContent = percentText);
+                nodes.bar && state.lastPercentText !== percentText && (nodes.bar.style.width = percentText);
+                state.lastLabel = safeLabel;
+                state.lastPercentText = percentText;
+                panel.style.display !== "block" && (panel.style.display = "block");
                 percent >= 100 && finishCustomBuildingProgress();
             }
             ), null, "Fortschrittspanel");
@@ -8876,10 +11303,13 @@
                 runtimeState.customBuildingProgress.hideTimer && clearTimeout(runtimeState.customBuildingProgress.hideTimer);
                 runtimeState.customBuildingProgress.hideTimer = setTimeout((() => {
                     panel.style.display = "none";
-                    const valueNode = panel.querySelector('[data-role="value"]');
-                    const barNode = panel.querySelector('[data-role="bar"]');
-                    valueNode && (valueNode.textContent = "0%");
-                    barNode && (barNode.style.width = "0%");
+                    const nodes = panel.__tmProgressNodes || (panel.__tmProgressNodes = {
+                        value: panel.querySelector('[data-role="value"]'),
+                        bar: panel.querySelector('[data-role="bar"]')
+                    });
+                    nodes.value && (nodes.value.textContent = "0%");
+                    nodes.bar && (nodes.bar.style.width = "0%");
+                    runtimeState.customBuildingProgress.lastPercentText = "0%";
                 }
                 ), 900);
             }
@@ -8949,6 +11379,7 @@
         function reloadCustomBuildingCatalog() {
             runtimeState.buildingConfigPromise = null;
             runtimeState.buildingConfig = null;
+            clearCustomBuildingTransientPerfCaches(!0);
             invalidateWorldCollisionCache();
             for (const chunk of getLoadedChunks()) {
                 resetCustomBuildingPreparationForChunk(chunk);
@@ -8963,7 +11394,7 @@
 
         function getOriginalBuildingMeshesForChunk(chunk) {
             const factory = chunk && chunk.buildingFactory;
-            return toSafeArray(factory && factory.__tmOriginalBuildingMeshes).filter(Boolean);
+            return Array.isArray(factory && factory.__tmOriginalBuildingMeshes) ? factory.__tmOriginalBuildingMeshes : [];
         }
 
         function shouldHideOriginalBuildingMeshesForChunk(chunk) {
@@ -9046,6 +11477,8 @@
             chunk.__tmCustomBuildingsPreparePromise = null;
             chunk.__tmMatchedCustomBuildings = [];
             chunk.__tmCustomBuildingOverlayReady = !1;
+            chunk.__tmCustomBuildingOverlayBounds = null;
+            runtimeState.customBuildingPrepareSignatures.delete(chunk);
             runtimeState.customBuildingEntriesByChunk.delete(chunk);
             chunk.__tmOriginalBuildingMeshesVisible = null;
             applyOriginalBuildingMeshVisibilityForChunk(chunk);
@@ -9062,7 +11495,9 @@
                 return;
             factory.lastIndex = 0;
             factory.loadedStarted = !1;
-            Array.isArray(factory.allHouses) && (factory.allHouses = factory.allHouses.map((() => [])));
+            if (Array.isArray(factory.allHouses))
+                for (let index = 0; index < factory.allHouses.length; index++)
+                    factory.allHouses[index] = [];
             Array.isArray(factory.allRoofs) && (factory.allRoofs = []);
             Array.isArray(factory.allBuildingWithouTex) && (factory.allBuildingWithouTex = []);
             Array.isArray(factory.allBasements) && (factory.allBasements = []);
@@ -9148,32 +11583,43 @@
                     x: 0,
                     z: 0
                 };
-            const center = points.reduce(((acc, point) => ({
-                x: acc.x + (Number(point.x) || 0),
-                z: acc.z + (Number(point.z) || 0)
-            })), {
+            const center = {
                 x: 0,
                 z: 0
-            });
+            };
+            for (const point of points) {
+                center.x += Number(point.x) || 0;
+                center.z += Number(point.z) || 0;
+            }
             center.x /= points.length;
             center.z /= points.length;
             return center;
         }
 
         function moveFootprint(points, offsetX, offsetZ) {
-            return toSafeArray(points).map((point => ({
-                x: (Number(point.x) || 0) + (Number(offsetX) || 0),
-                z: (Number(point.z) || 0) + (Number(offsetZ) || 0)
-            })));
+            const source = toSafeArray(points);
+            const result = [];
+            const safeOffsetX = Number(offsetX) || 0;
+            const safeOffsetZ = Number(offsetZ) || 0;
+            for (const point of source)
+                result.push({
+                    x: (Number(point.x) || 0) + safeOffsetX,
+                    z: (Number(point.z) || 0) + safeOffsetZ
+                });
+            return result;
         }
 
         function scaleFootprint(points, scale, centerPoint) {
             const center = centerPoint || getFootprintCenter(points);
             const factor = Math.max(.1, Number(scale) || 1);
-            return toSafeArray(points).map((point => ({
-                x: center.x + ((Number(point.x) || 0) - center.x) * factor,
-                z: center.z + ((Number(point.z) || 0) - center.z) * factor
-            })));
+            const source = toSafeArray(points);
+            const result = [];
+            for (const point of source)
+                result.push({
+                    x: center.x + ((Number(point.x) || 0) - center.x) * factor,
+                    z: center.z + ((Number(point.z) || 0) - center.z) * factor
+                });
+            return result;
         }
 
         function getFootprintBounds(points) {
@@ -9220,22 +11666,23 @@
 
         function getFootprintSamplePoints(points) {
             const samples = [];
-            const center = getFootprintCenter(points);
-            for (const point of toSafeArray(points))
+            const source = toSafeArray(points);
+            const center = getFootprintCenter(source);
+            for (const point of source)
                 samples.push({
                     x: Number(point.x) || 0,
                     z: Number(point.z) || 0
                 });
-            for (let index = 0; index < points.length; index++) {
-                const current = points[index];
-                const next = points[(index + 1) % points.length];
+            for (let index = 0; index < source.length; index++) {
+                const current = source[index];
+                const next = source[(index + 1) % source.length];
                 samples.push({
                     x: ((Number(current.x) || 0) + (Number(next.x) || 0)) / 2,
                     z: ((Number(current.z) || 0) + (Number(next.z) || 0)) / 2
                 });
             }
             samples.push(center);
-            const bounds = getFootprintBounds(points);
+            const bounds = getFootprintBounds(source);
             const stepX = Math.max(.1, (bounds.maxX - bounds.minX) / 2);
             const stepZ = Math.max(.1, (bounds.maxZ - bounds.minZ) / 2);
             for (let gx = 0; gx < 3; gx++)
@@ -9244,7 +11691,7 @@
                         x: bounds.minX + stepX * gx,
                         z: bounds.minZ + stepZ * gz
                     };
-                    isPointInsideFootprint(probe, points) && samples.push(probe);
+                    isPointInsideFootprint(probe, source) && samples.push(probe);
                 }
             return samples;
         }
@@ -9330,11 +11777,28 @@
             for (const building of toSafeArray(chunk.__tmOriginalBuildings || chunk.buildings)) {
                 if (!building || building === excludeBuilding || !Array.isArray(building.points) || building.points.length < 3)
                     continue;
-                const otherPoints = building.points.map((point => ({
-                    x: Number(Array.isArray(point) ? point[0] : point.x) || 0,
-                    z: Number(Array.isArray(point) ? point[1] : point.z) || 0
-                })));
-                const otherBounds = getFootprintBounds(otherPoints);
+                const otherBounds = {
+                    minX: 1 / 0,
+                    maxX: -1 / 0,
+                    minZ: 1 / 0,
+                    maxZ: -1 / 0
+                };
+                let otherSumX = 0;
+                let otherSumZ = 0;
+                let otherCount = 0;
+                for (const point of building.points) {
+                    const x = Number(Array.isArray(point) ? point[0] : point.x) || 0;
+                    const z = Number(Array.isArray(point) ? point[1] : point.z) || 0;
+                    otherBounds.minX = Math.min(otherBounds.minX, x);
+                    otherBounds.maxX = Math.max(otherBounds.maxX, x);
+                    otherBounds.minZ = Math.min(otherBounds.minZ, z);
+                    otherBounds.maxZ = Math.max(otherBounds.maxZ, z);
+                    otherSumX += x;
+                    otherSumZ += z;
+                    otherCount++;
+                }
+                if (!otherCount || !Number.isFinite(otherBounds.minX))
+                    continue;
                 const otherExpanded = {
                     minX: otherBounds.minX - padding,
                     maxX: otherBounds.maxX + padding,
@@ -9344,7 +11808,10 @@
                 if (!boundsOverlap(expanded, otherExpanded))
                     continue;
                 count += 1;
-                const otherCenter = getFootprintCenter(otherPoints);
+                const otherCenter = {
+                    x: otherSumX / otherCount,
+                    z: otherSumZ / otherCount
+                };
                 const dx = center.x - otherCenter.x;
                 const dz = center.z - otherCenter.z;
                 const distance = Math.hypot(dx, dz) || 1;
@@ -9513,7 +11980,7 @@
             for (const sample of getFootprintSamplePoints(points)) {
                 const worldX = worldOffset.x + (Number(sample.x) || 0);
                 const worldZ = worldOffset.z + (Number(sample.z) || 0);
-                const terrainY = getTerrainYWorld(new globalState.THREE.Vector3(worldX, baseY, worldZ), baseY);
+                const terrainY = getCachedCustomTerrainYWorld(new globalState.THREE.Vector3(worldX, baseY, worldZ), baseY);
                 minY = Math.min(minY, terrainY);
                 maxY = Math.max(maxY, terrainY);
             }
@@ -9543,7 +12010,7 @@
                     const terrainY = chunk.getTerrainYLoc(localX, localZ);
                     Number.isFinite(terrainY) && terrainY > -999 && (y = terrainY);
                 } else
-                    y = getTerrainYWorld(position, 0);
+                    y = getCachedCustomTerrainYWorld(position, 0);
             } catch (terrainError) {}
             const half = getStandaloneBuildingHalfSize(entry);
             const initialPoints = [{
@@ -9568,6 +12035,9 @@
                 }
             } catch (shiftedTerrainError) {}
             const THREE = globalState.THREE;
+            const packedPoints = [];
+            for (const point of points)
+                packedPoints.push([point.x, point.z]);
             return {
                 __tmStandaloneAddressBuilding: !0,
                 index: -1 - (Number(index) || 0),
@@ -9577,7 +12047,7 @@
                 chunkCenter: new THREE.Vector3(cx,0,cz),
                 houseCenterLocal: new THREE.Vector3(center.x,y,center.z),
                 houseCenter: new THREE.Vector3(cx + center.x,y,cz + center.z),
-                points: points.map((point => [point.x, point.z]))
+                points: packedPoints
             };
         }
 
@@ -9607,8 +12077,18 @@
             for (const templateName of templateNames)
                 if (templates && templates[templateName])
                     return templateName;
-            const fallback = templates && Object.keys(templates).find((templateName => templateName && "modeler_house_demo" !== templateName));
-            return fallback || null;
+            if (templates) {
+                if (isDeveloperToggleEnabled("perfTemplateKeyLoop")) {
+                    for (const templateName in templates)
+                        if (Object.prototype.hasOwnProperty.call(templates, templateName) && templateName && "modeler_house_demo" !== templateName)
+                            return templateName;
+                } else {
+                    for (const templateName of Object.keys(templates))
+                        if (templateName && "modeler_house_demo" !== templateName)
+                            return templateName;
+                }
+            }
+            return null;
         }
 
         function pickAutoBuildingTemplate(building, chunk, templates) {
@@ -9773,6 +12253,11 @@
                 return null;
             const templateName = pickAutoBuildingTemplate(building, chunk, catalog && catalog.templates);
             const id = `auto3d_${getBuildingDebugId(chunk, building)}`;
+            const cacheKey = `${id}|${templateName || "generated"}`;
+            const useAutoEntryCache = isDeveloperToggleEnabled("perfAuto3dEntryCache");
+            const cached = useAutoEntryCache && runtimeState.customBuildingAutoEntryCache.get(cacheKey);
+            if (cached)
+                return cloneJson(cached, cached);
             const entry = templateName ? {
                 id,
                 template: templateName,
@@ -9782,44 +12267,55 @@
                 __tmAuto3d: !0
             } : createGeneratedAuto3dBuildingEntry(building, chunk, id);
             const resolved = resolveBuildingTemplate(entry, catalog && catalog.templates);
-            return deepMergeConfig(resolved, {
+            const merged = deepMergeConfig(resolved, {
                 __tmAuto3d: !0,
                 windows: {
                     cutHoles: !0
                 }
             });
+            if (useAutoEntryCache) {
+                runtimeState.customBuildingAutoEntryCache.set(cacheKey, cloneJson(merged, merged));
+                if (runtimeState.customBuildingAutoEntryCache.size > 1200) {
+                    const oldest = runtimeState.customBuildingAutoEntryCache.keys().next().value;
+                    oldest && runtimeState.customBuildingAutoEntryCache.delete(oldest);
+                }
+            }
+            return cloneJson(merged, merged);
         }
 
         function getBuildingFootprint(building, spec) {
             const rawPoints = Array.isArray(spec && spec.footprint) && spec.footprint.length >= 3 ? spec.footprint : toSafeArray(building && building.points);
             if (!rawPoints.length)
                 return [];
-            const points = rawPoints.map((point => ({
-                x: Number(Array.isArray(point) ? point[0] : point.x) || 0,
-                z: Number(Array.isArray(point) ? point[1] : point.z) || 0
-            })));
+            const points = [];
+            let sumX = 0;
+            let sumZ = 0;
+            for (const point of rawPoints) {
+                const x = Number(Array.isArray(point) ? point[0] : point.x) || 0;
+                const z = Number(Array.isArray(point) ? point[1] : point.z) || 0;
+                points.push({
+                    x,
+                    z
+                });
+                sumX += x;
+                sumZ += z;
+            }
             const inset = Number(spec && spec.base && spec.base.inset) || 0;
             if (Math.abs(inset) < 1e-6)
                 return points;
-            const centroid = points.reduce(((acc, point) => ({
-                x: acc.x + point.x,
-                z: acc.z + point.z
-            })), {
-                x: 0,
-                z: 0
-            });
-            centroid.x /= points.length;
-            centroid.z /= points.length;
-            return points.map((point => {
-                const directionX = centroid.x - point.x;
-                const directionZ = centroid.z - point.z;
+            const centroidX = sumX / points.length;
+            const centroidZ = sumZ / points.length;
+            for (let index = 0; index < points.length; index++) {
+                const point = points[index];
+                const directionX = centroidX - point.x;
+                const directionZ = centroidZ - point.z;
                 const length = Math.hypot(directionX, directionZ) || 1;
-                return {
+                points[index] = {
                     x: point.x + directionX / length * inset,
                     z: point.z + directionZ / length * inset
                 };
             }
-            ));
+            return points;
         }
 
         function createShapeFromFootprint(points) {
@@ -9892,12 +12388,24 @@
         }
 
         function createCustomBuildingMaterial(colorValue, spec) {
+            const color = toThreeColor(colorValue, 0xffffff);
+            const textureValue = getCustomBuildingTextureValue(spec);
+            const repeatValue = spec && (spec.textureRepeat || spec.repeat || spec.base && (spec.base.textureRepeat || spec.base.repeat));
+            const repeatKey = Array.isArray(repeatValue) ? `${roundNumberForCacheKey(Number(repeatValue[0]) || 1, 100)}:${roundNumberForCacheKey(Number(repeatValue[1]) || 1, 100)}` : "1:1";
+            const materialKey = ["customBase", color, textureValue ? resolveCustomBuildingTextureUrl(textureValue) : "none", repeatKey].join("|");
+            const useMaterialCache = isDeveloperToggleEnabled("perfMaterialCaches");
+            if (useMaterialCache) {
+                const cached = runtimeState.customBuildingMaterialCache.get(materialKey);
+                if (cached)
+                    return cached;
+            }
             const material = new globalState.THREE.MeshBasicMaterial({
-                color: toThreeColor(colorValue, 0xffffff),
+                color,
                 side: globalState.THREE.DoubleSide
             });
-            const textureValue = getCustomBuildingTextureValue(spec);
-            return textureValue ? applyCustomBuildingTexture(material, textureValue, spec && (spec.textureRepeat || spec.repeat || spec.base && (spec.base.textureRepeat || spec.base.repeat))) : material;
+            textureValue && applyCustomBuildingTexture(material, textureValue, repeatValue);
+            useMaterialCache && markSharedResource(material, "custom-building-material");
+            return useMaterialCache ? rememberLimitedCache(runtimeState.customBuildingMaterialCache, materialKey, material, CUSTOM_BUILDING_PERF.materialCacheSize) : material;
         }
 
         function computeWindowLayout(edgeLength, bodyHeight, sideSpec) {
@@ -9910,9 +12418,14 @@
             const height = Math.max(.35, Number(sideSpec.height) || 1.35);
             const gap = Math.max(.15, Number(sideSpec.gap) || .65);
             const rows = Math.max(1, Math.round(Number(sideSpec.rows) || Math.max(1, Math.round((bodyHeight - 1.8) / 2.4))));
+            const layoutKey = makeRoundedNumberKey([edgeLength, bodyHeight, margin, width, height, gap, rows, sideSpec.cols, sideSpec.sill, sideSpec.topPadding], 100, "|");
+            const useLayoutCache = isDeveloperToggleEnabled("perfWindowLayoutCache");
+            const cachedLayout = useLayoutCache && runtimeState.customBuildingWindowLayoutCache.get(layoutKey);
+            if (cachedLayout)
+                return cachedLayout;
             const availableLength = Math.max(0, edgeLength - 2 * margin);
-            if (availableLength < width)
-                return {
+            if (availableLength < width) {
+                const emptyLayout = {
                     rects: [],
                     width,
                     height,
@@ -9922,6 +12435,8 @@
                     bottom: 0,
                     rowSpacing: 0
                 };
+                return useLayoutCache ? rememberLimitedCache(runtimeState.customBuildingWindowLayoutCache, layoutKey, emptyLayout, CUSTOM_BUILDING_PERF.layoutCacheSize) : emptyLayout;
+            }
             const cols = Math.max(1, Math.floor(Number(sideSpec.cols) || Math.max(1, Math.floor((availableLength + gap) / (width + gap)))));
             const runLength = cols * width + Math.max(0, cols - 1) * gap;
             const startOffset = (edgeLength - runLength) / 2 + width / 2;
@@ -9954,7 +12469,7 @@
                             height
                         });
                 }
-            return {
+            const layout = {
                 rects,
                 width,
                 height,
@@ -9964,6 +12479,15 @@
                 bottom,
                 rowSpacing
             };
+            return useLayoutCache ? rememberLimitedCache(runtimeState.customBuildingWindowLayoutCache, layoutKey, layout, CUSTOM_BUILDING_PERF.layoutCacheSize) : layout;
+        }
+
+        function getSideSpecForIndex(baseSpec, index) {
+            const sides = baseSpec && baseSpec.sides;
+            const override = sides && (sides[index] || sides[String(index)]);
+            if (!isDeveloperToggleEnabled("perfSideSpecFastPath"))
+                return deepMergeConfig(baseSpec, override || {});
+            return override ? deepMergeConfig(baseSpec, override) : baseSpec;
         }
 
         function getCustomBuildingWorldOffset(spec) {
@@ -9978,12 +12502,24 @@
                 return !0;
             const worldOffset = getCustomBuildingWorldOffset(spec);
             const terrainMargin = .35;
+            if (isDeveloperToggleEnabled("perfTerrainSampleLoops")) {
+                for (let index = 0; index < 3; index++) {
+                    const alongOffset = 0 === index ? 0 : 1 === index ? -rect.width * .22 : rect.width * .22;
+                    const along = rect.centerU - edgeFrame.length / 2 + alongOffset;
+                    const worldX = worldOffset.x + edgeFrame.midX + edgeFrame.alongX * along;
+                    const worldZ = worldOffset.z + edgeFrame.midZ + edgeFrame.alongZ * along;
+                    const terrainY = getCachedCustomTerrainYWorld(new globalState.THREE.Vector3(worldX, baseY + rect.y1, worldZ), baseY);
+                    if (baseY + rect.y1 <= terrainY + terrainMargin)
+                        return !1;
+                }
+                return !0;
+            }
             const sampleOffsets = [0, -rect.width * .22, rect.width * .22];
             for (const alongOffset of sampleOffsets) {
                 const along = rect.centerU - edgeFrame.length / 2 + alongOffset;
                 const worldX = worldOffset.x + edgeFrame.midX + edgeFrame.alongX * along;
                 const worldZ = worldOffset.z + edgeFrame.midZ + edgeFrame.alongZ * along;
-                const terrainY = getTerrainYWorld(new globalState.THREE.Vector3(worldX, baseY + rect.y1, worldZ), baseY);
+                const terrainY = getCachedCustomTerrainYWorld(new globalState.THREE.Vector3(worldX, baseY + rect.y1, worldZ), baseY);
                 if (baseY + rect.y1 <= terrainY + terrainMargin)
                     return !1;
             }
@@ -10000,13 +12536,80 @@
             return a.x1 < b.x2 + padding && a.x2 > b.x1 - padding && a.y1 < b.y2 + padding && a.y2 > b.y1 - padding;
         }
 
+        function roundNumberForCacheKey(value, scale=1e3) {
+            return Math.round((Number(value) || 0) * scale) / scale;
+        }
+
+        function makeRoundedNumberKey(values, scale=1e3, separator=":") {
+            let key = "";
+            for (let index = 0; index < values.length; index++)
+                key += (index ? separator : "") + roundNumberForCacheKey(values[index], scale);
+            return key;
+        }
+
+        function getUniqueRoundedSortedCuts(values) {
+            const seen = new Set;
+            const result = [];
+            for (const value of toSafeArray(values)) {
+                const rounded = roundNumberForCacheKey(value);
+                if (seen.has(rounded))
+                    continue;
+                seen.add(rounded);
+                result.push(rounded);
+            }
+            result.length > 1 && result.sort((a, b) => a - b);
+            return result;
+        }
+
+        function rectOverlapsAnyCutout(rect, cutouts, padding=-.012) {
+            if (!rect || !Array.isArray(cutouts) || !cutouts.length)
+                return !1;
+            for (let index = 0; index < cutouts.length; index++)
+                if (rectsOverlap2D(rect, cutouts[index], padding))
+                    return !0;
+            return !1;
+        }
+
         function getWallOpenings(spec, kind, edgeIndex) {
             const store = spec && spec.__tmWallOpenings || {};
-            return toSafeArray(store[kind]).filter(opening => opening && opening.edgeIndex === edgeIndex);
+            if (spec && isDeveloperToggleEnabled("perfWallOpeningIndex")) {
+                let index = spec.__tmWallOpeningIndex;
+                if (!index || index.store !== store) {
+                    index = {
+                        store,
+                        doors: new Map,
+                        windows: new Map
+                    };
+                    for (const opening of toSafeArray(store.doors)) {
+                        if (!opening)
+                            continue;
+                        const list = index.doors.get(opening.edgeIndex) || [];
+                        list.push(opening);
+                        index.doors.set(opening.edgeIndex, list);
+                    }
+                    for (const opening of toSafeArray(store.windows)) {
+                        if (!opening)
+                            continue;
+                        const list = index.windows.get(opening.edgeIndex) || [];
+                        list.push(opening);
+                        index.windows.set(opening.edgeIndex, list);
+                    }
+                    spec.__tmWallOpeningIndex = index;
+                }
+                return ("doors" === kind ? index.doors : index.windows).get(edgeIndex) || [];
+            }
+            const source = toSafeArray(store[kind]);
+            const result = [];
+            for (const opening of source)
+                opening && opening.edgeIndex === edgeIndex && result.push(opening);
+            return result;
         }
 
         function isRectClearOfWallOpenings(rect, openings, padding=.08) {
-            return !toSafeArray(openings).some(opening => rectsOverlap2D(rect, opening.rect || opening, padding));
+            for (const opening of toSafeArray(openings))
+                if (rectsOverlap2D(rect, opening && (opening.rect || opening), padding))
+                    return !1;
+            return !0;
         }
 
         function getWallFrames(points) {
@@ -10027,6 +12630,18 @@
             return frames;
         }
 
+        function getWallFramesForSpec(points, spec) {
+            // Reuse the expensive wall frame calculation across openings, visible details and fallback doors.
+            if (spec && spec.__tmWallFramesSource === points && Array.isArray(spec.__tmWallFrames))
+                return spec.__tmWallFrames;
+            const frames = getWallFrames(points);
+            if (spec) {
+                spec.__tmWallFramesSource = points;
+                spec.__tmWallFrames = frames;
+            }
+            return frames;
+        }
+
         function projectPointToWallFrame(point, frame) {
             const dx = (Number(frame.end.x) || 0) - (Number(frame.start.x) || 0);
             const dz = (Number(frame.end.z) || 0) - (Number(frame.start.z) || 0);
@@ -10034,15 +12649,15 @@
             return clamp((((Number(point.x) || 0) - (Number(frame.start.x) || 0)) * dx + ((Number(point.z) || 0) - (Number(frame.start.z) || 0)) * dz) / lengthSq, 0, 1);
         }
 
-        function findWallFrameForDetail(points, desiredPoint, detail) {
-            const frames = getWallFrames(points);
+        function findWallFrameForDetail(points, desiredPoint, detail, spec) {
+            const frames = getWallFramesForSpec(points, spec);
             if (!frames.length)
                 return null;
             const requestedIndex = Number(detail && (detail.wallIndex ?? detail.edgeIndex ?? detail.sideIndex));
             if (Number.isInteger(requestedIndex)) {
-                const requested = frames.find(frame => frame.index === requestedIndex);
-                if (requested)
-                    return requested;
+                for (const frame of frames)
+                    if (frame && frame.index === requestedIndex)
+                        return frame;
             }
             let best = null;
             for (const frame of frames) {
@@ -10067,13 +12682,26 @@
                 return Number(baseY) || 0;
             const worldOffset = getCustomBuildingWorldOffset(spec);
             const sampleRange = Math.max(.08, Number(width) * .44 || .44);
+            if (isDeveloperToggleEnabled("perfTerrainSampleLoops")) {
+                let bestY = Number(baseY) || 0;
+                for (let index = 0; index < 3; index++) {
+                    const sample = 0 === index ? 0 : 1 === index ? -sampleRange : sampleRange;
+                    const sampleU = clamp((Number(centerU) || 0) + sample, 0, Number(frame.length) || 0);
+                    const worldX = worldOffset.x + (Number(frame.start.x) || 0) + frame.alongX * sampleU;
+                    const worldZ = worldOffset.z + (Number(frame.start.z) || 0) + frame.alongZ * sampleU;
+                    const terrainY = getCachedCustomTerrainYWorld(new globalState.THREE.Vector3(worldX,bestY,worldZ), bestY);
+                    if (Number.isFinite(terrainY))
+                        bestY = Math.min(bestY, terrainY);
+                }
+                return bestY;
+            }
             const samples = [0, -sampleRange, sampleRange];
             let bestY = Number(baseY) || 0;
             for (const sample of samples) {
                 const sampleU = clamp((Number(centerU) || 0) + sample, 0, Number(frame.length) || 0);
                 const worldX = worldOffset.x + (Number(frame.start.x) || 0) + frame.alongX * sampleU;
                 const worldZ = worldOffset.z + (Number(frame.start.z) || 0) + frame.alongZ * sampleU;
-                const terrainY = getTerrainYWorld(new globalState.THREE.Vector3(worldX,bestY,worldZ), bestY);
+                const terrainY = getCachedCustomTerrainYWorld(new globalState.THREE.Vector3(worldX,bestY,worldZ), bestY);
                 if (Number.isFinite(terrainY))
                     bestY = Math.min(bestY, terrainY);
             }
@@ -10091,7 +12719,7 @@
                 x: anchorX + (Number(position[0]) || 0),
                 z: anchorZ + (Number(position[2]) || 0)
             };
-            const frame = findWallFrameForDetail(points, desired, detail);
+            const frame = findWallFrameForDetail(points, desired, detail, spec);
             if (!frame)
                 return null;
             const width = Math.max(.2, Number(size && size[0]) || 1);
@@ -10133,8 +12761,10 @@
         function createFallbackDoorDetailForFootprint(points, baseY, bodyHeight, spec, anchorPoint) {
             if (!Array.isArray(points) || points.length < 3 || !anchorPoint || bodyHeight < 2.05)
                 return null;
-            const frames = getWallFrames(points).filter(frame => frame.length >= 1.4);
-            const bestFrame = frames.sort((a, b) => b.length - a.length)[0];
+            let bestFrame = null;
+            for (const frame of getWallFramesForSpec(points, spec))
+                if (frame && frame.length >= 1.4 && (!bestFrame || frame.length > bestFrame.length))
+                    bestFrame = frame;
             if (!bestFrame)
                 return null;
             const wallDepth = Math.max(.42, Number(spec && spec.base && (spec.base.wallDepth || spec.base.depth)) || .42);
@@ -10159,11 +12789,24 @@
             if (!spec || !Array.isArray(points) || points.length < 3)
                 return;
             spec.__tmWallPoints = points;
+            spec.__tmWallFrames = getWallFramesForSpec(points, spec);
             spec.__tmBaseY = baseY;
             spec.__tmBodyHeight = bodyHeight;
             const openings = {
                 doors: [],
                 windows: []
+            };
+            const doorsByEdge = new Map;
+            const addDoorOpening = placement => {
+                const opening = {
+                    edgeIndex: placement.edgeIndex,
+                    rect: placement.rect,
+                    kind: "door"
+                };
+                openings.doors.push(opening);
+                const list = doorsByEdge.get(placement.edgeIndex) || [];
+                list.push(opening);
+                doorsByEdge.set(placement.edgeIndex, list);
             };
             const parts = toSafeArray(spec.parts);
             const placePart = (part, kind) => {
@@ -10181,11 +12824,7 @@
                 const placement = placePart(part, "door");
                 if (!placement)
                     continue;
-                openings.doors.push({
-                    edgeIndex: placement.edgeIndex,
-                    rect: placement.rect,
-                    kind: "door"
-                });
+                addDoorOpening(placement);
                 hasDoor = !0;
             }
             if (!hasDoor) {
@@ -10195,11 +12834,7 @@
                     if (placement) {
                         fallback.__tmWallPlacement = placement;
                         spec.__tmFallbackDoorDetail = fallback;
-                        openings.doors.push({
-                            edgeIndex: placement.edgeIndex,
-                            rect: placement.rect,
-                            kind: "door"
-                        });
+                        addDoorOpening(placement);
                         hasDoor = !0;
                     }
                 }
@@ -10212,7 +12847,7 @@
                 const placement = placePart(part, "window");
                 if (!placement)
                     continue;
-                if (!isRectClearOfWallOpenings(placement.rect, openings.doors.filter(opening => opening.edgeIndex === placement.edgeIndex), .72)) {
+                if (!isRectClearOfWallOpenings(placement.rect, doorsByEdge.get(placement.edgeIndex), .72)) {
                     part.__tmWallPlacement = null;
                     part.__tmSkipRender = !0;
                     continue;
@@ -10302,7 +12937,10 @@
         }
 
         function hasExplicitFloorPart(spec) {
-            return toSafeArray(spec && spec.parts).some((part => "floor" === String(part && part.type || "").toLowerCase()));
+            for (const part of toSafeArray(spec && spec.parts))
+                if ("floor" === String(part && part.type || "").toLowerCase())
+                    return !0;
+            return !1;
         }
 
         function clampWallCutoutRect(rect, edgeLength, bodyHeight) {
@@ -10324,10 +12962,22 @@
             const edgeLength = edgeFrame && edgeFrame.length || 0;
             const cutouts = [];
             const doorOpenings = getWallOpenings(spec, "doors", index);
-            const explicitOpenings = doorOpenings.concat(getWallOpenings(spec, "windows", index));
-            for (const opening of explicitOpenings) {
+            const windowOpenings = getWallOpenings(spec, "windows", index);
+            const useFastCutouts = isDeveloperToggleEnabled("perfWallCutoutFastPath");
+            const addOpeningCutout = opening => {
+                if (!opening)
+                    return;
                 const rect = clampWallCutoutRect(opening.rect || opening, edgeLength, bodyHeight);
                 rect && cutouts.push(rect);
+            };
+            if (useFastCutouts) {
+                for (const opening of doorOpenings)
+                    addOpeningCutout(opening);
+                for (const opening of windowOpenings)
+                    addOpeningCutout(opening);
+            } else {
+                for (const opening of doorOpenings.concat(windowOpenings))
+                    addOpeningCutout(opening);
             }
             if (!1 === sideSpec.enabled || !1 === sideSpec.cutHoles)
                 return cutouts;
@@ -10336,7 +12986,7 @@
                     continue;
                 if (!isRectClearOfWallOpenings(rect, doorOpenings, .72))
                     continue;
-                if (!isRectClearOfWallOpenings(rect, explicitOpenings, .28))
+                if (!isRectClearOfWallOpenings(rect, useFastCutouts ? windowOpenings : doorOpenings.concat(windowOpenings), .28))
                     continue;
                 const cutout = clampWallCutoutRect(rect, edgeLength, bodyHeight);
                 cutout && cutouts.push(cutout);
@@ -10364,15 +13014,17 @@
             const edgeLength = frame && frame.length || 0;
             if (edgeLength < .4 || bodyHeight < .1)
                 return;
+            const useFastCutouts = isDeveloperToggleEnabled("perfWallCutoutFastPath");
+            const safeCutouts = toSafeArray(cutouts);
             const xCuts = [0, edgeLength];
             const yCuts = [0, bodyHeight];
-            for (const rect of toSafeArray(cutouts)) {
+            for (const rect of safeCutouts) {
                 xCuts.push(clamp(rect.x1, 0, edgeLength), clamp(rect.x2, 0, edgeLength));
                 yCuts.push(clamp(rect.y1, 0, bodyHeight), clamp(rect.y2, 0, bodyHeight));
             }
-            const uniqueCuts = values => Array.from(new Set(values.map(value => Math.round(value * 1e3) / 1e3))).sort(((a, b) => a - b));
-            const xs = uniqueCuts(xCuts);
-            const ys = uniqueCuts(yCuts);
+            const uniqueCuts = values => Array.from(new Set(values.map(value => Math.round(value * 1e3) / 1e3))).sort((a, b) => a - b);
+            const xs = useFastCutouts ? getUniqueRoundedSortedCuts(xCuts) : uniqueCuts(xCuts);
+            const ys = useFastCutouts ? getUniqueRoundedSortedCuts(yCuts) : uniqueCuts(yCuts);
             for (let xi = 0; xi < xs.length - 1; xi++)
                 for (let yi = 0; yi < ys.length - 1; yi++) {
                     const x1 = xs[xi];
@@ -10387,7 +13039,7 @@
                         y1: (y1 + y2) / 2,
                         y2: (y1 + y2) / 2
                     };
-                    if (toSafeArray(cutouts).some(rect => rectsOverlap2D(center, rect, -.012)))
+                    if (useFastCutouts ? rectOverlapsAnyCutout(center, safeCutouts, -.012) : safeCutouts.some(rect => rectsOverlap2D(center, rect, -.012)))
                         continue;
                     addWallSegmentBox(group, material, frame, baseY, wallDepth, x1, x2, y1, y2);
                 }
@@ -10400,13 +13052,14 @@
             const group = new THREE.Group;
             group.name = "__tmCustomBuildingWindowCutBody";
             const material = createCustomBuildingMaterial(colorValue, spec);
-            const center = points.reduce(((acc, point) => ({
-                x: acc.x + point.x,
-                z: acc.z + point.z
-            })), {
+            const center = {
                 x: 0,
                 z: 0
-            });
+            };
+            for (const point of points) {
+                center.x += point.x;
+                center.z += point.z;
+            }
             center.x /= points.length;
             center.z /= points.length;
             const windowsSpec = deepMergeConfig(spec && spec.windows || {}, {
@@ -10419,7 +13072,7 @@
                 const edgeFrame = getWallEdgeFrame(current, next, center);
                 if (!edgeFrame || edgeFrame.length < .4)
                     continue;
-                const sideSpec = deepMergeConfig(windowsSpec, windowsSpec.sides && (windowsSpec.sides[index] || windowsSpec.sides[String(index)]) || {});
+                const sideSpec = getSideSpecForIndex(windowsSpec, index);
                 const layout = computeWindowLayout(edgeFrame.length, bodyHeight, sideSpec);
                 const cutouts = collectWallCutoutsForEdge(index, edgeFrame, baseY, bodyHeight, sideSpec, layout, spec);
                 addThickWallSegments(group, material, edgeFrame, baseY, bodyHeight, wallDepth, cutouts);
@@ -10474,13 +13127,14 @@
                 x: -direction.z,
                 z: direction.x
             };
-            const centroid = points.reduce(((acc, point) => ({
-                x: acc.x + point.x,
-                z: acc.z + point.z
-            })), {
+            const centroid = {
                 x: 0,
                 z: 0
-            });
+            };
+            for (const point of points) {
+                centroid.x += point.x;
+                centroid.z += point.z;
+            }
             centroid.x /= points.length;
             centroid.z /= points.length;
             let minU = 1 / 0;
@@ -10633,7 +13287,7 @@
             if (!frame || frame.length < .4)
                 return null;
             const thickness = Math.max(.03, Number(depth) || .08);
-            const mesh = new globalState.THREE.Mesh(new globalState.THREE.BoxGeometry(frame.length, height, thickness), new globalState.THREE.MeshBasicMaterial({
+            const mesh = createRuntimeBox([frame.length, height, thickness], new globalState.THREE.MeshBasicMaterial({
                 color: toThreeColor(colorValue, 0xffffff)
             }));
             mesh.position.set(frame.midX + frame.normalX * thickness / 2, baseY + height / 2, frame.midZ + frame.normalZ * thickness / 2);
@@ -10641,22 +13295,35 @@
             return mesh;
         }
 
+        // Window pieces are tiny but numerous; route them through the shared box
+        // cache so chunk streaming does not allocate fresh geometries for each pane.
+        function addWindowBoxPart(group, size, basePointX, basePointZ, centerY, frame, alongOffset, yOffset, material, normalOffset) {
+            const mesh = createRuntimeBox(size, material, [
+                basePointX + frame.alongX * alongOffset + frame.normalX * normalOffset,
+                centerY + yOffset,
+                basePointZ + frame.alongZ * alongOffset + frame.normalZ * normalOffset
+            ]);
+            mesh.rotation.y = frame.rotationY;
+            group.add(mesh);
+        }
+
         function createWindowsForFootprint(group, points, baseY, bodyHeight, spec) {
             if (!globalState.THREE || !group || !points.length || !spec || !1 === spec.enabled)
                 return;
-            const center = points.reduce(((acc, point) => ({
-                x: acc.x + point.x,
-                z: acc.z + point.z
-            })), {
+            const center = {
                 x: 0,
                 z: 0
-            });
+            };
+            for (const point of points) {
+                center.x += point.x;
+                center.z += point.z;
+            }
             center.x /= points.length;
             center.z /= points.length;
             for (let index = 0; index < points.length; index++) {
                 const current = points[index];
                 const next = points[(index + 1) % points.length];
-                const sideSpec = deepMergeConfig(spec, spec.sides && (spec.sides[index] || spec.sides[String(index)]) || {});
+                const sideSpec = getSideSpecForIndex(spec, index);
                 if (!1 === sideSpec.enabled)
                     continue;
                 const frame = getWallEdgeFrame(current, next, center);
@@ -10667,8 +13334,6 @@
                 const dz = frame.alongZ;
                 const midX = frame.midX;
                 const midZ = frame.midZ;
-                const normalX = frame.normalX;
-                const normalZ = frame.normalZ;
                 const layout = computeWindowLayout(edgeLength, bodyHeight, sideSpec);
                 if (sideSpec.color) {
                     const panel = createWallPanel(current, next, center, baseY + .1, Math.max(.3, bodyHeight - .2), sideSpec.color, Number(sideSpec.claddingDepth) || .05);
@@ -10699,13 +13364,13 @@
                 const frameNormalOffset = wallDepth / 2;
                 const glassNormalOffset = wallDepth / 2;
                 const doorOpenings = getWallOpenings(spec, "doors", index);
-                const reservedOpenings = doorOpenings.concat(getWallOpenings(spec, "windows", index));
+                const windowOpenings = getWallOpenings(spec, "windows", index);
                 for (const rect of layout.rects) {
                     if (!isWindowRectClearOfTerrain(rect, frame, baseY, spec))
                         continue;
                     if (!isRectClearOfWallOpenings(rect, doorOpenings, .72))
                         continue;
-                    if (!isRectClearOfWallOpenings(rect, reservedOpenings, .28))
+                    if (!isRectClearOfWallOpenings(rect, windowOpenings, .28))
                         continue;
                     const width = rect.width;
                     const height = rect.height;
@@ -10716,17 +13381,11 @@
                     const basePointX = midX + dx * along;
                     const basePointZ = midZ + dz * along;
                     const centerY = baseY + rect.centerY;
-                    const addWindowPart = (size, alongOffset, yOffset, material, normalOffset) => {
-                        const mesh = new globalState.THREE.Mesh(new globalState.THREE.BoxGeometry(size[0], size[1], size[2]), material);
-                        mesh.position.set(basePointX + dx * alongOffset + normalX * normalOffset, centerY + yOffset, basePointZ + dz * alongOffset + normalZ * normalOffset);
-                        mesh.rotation.y = frame.rotationY;
-                        group.add(mesh);
-                    };
-                    addWindowPart([width, frameThickness, frameDepth], 0, height / 2 - frameThickness / 2, frameMaterial, frameNormalOffset);
-                    addWindowPart([width, frameThickness, frameDepth], 0, -height / 2 + frameThickness / 2, frameMaterial, frameNormalOffset);
-                    addWindowPart([frameThickness, Math.max(.08, height - 2 * frameThickness), frameDepth], -width / 2 + frameThickness / 2, 0, frameMaterial, frameNormalOffset);
-                    addWindowPart([frameThickness, Math.max(.08, height - 2 * frameThickness), frameDepth], width / 2 - frameThickness / 2, 0, frameMaterial, frameNormalOffset);
-                    addWindowPart([Math.max(.1, width - 2 * frameThickness), Math.max(.1, height - 2 * frameThickness), Math.max(.03, Math.min(frameDepth * .45, wallDepth * .4))], 0, 0, glassMaterial, glassNormalOffset);
+                    addWindowBoxPart(group, [width, frameThickness, frameDepth], basePointX, basePointZ, centerY, frame, 0, height / 2 - frameThickness / 2, frameMaterial, frameNormalOffset);
+                    addWindowBoxPart(group, [width, frameThickness, frameDepth], basePointX, basePointZ, centerY, frame, 0, -height / 2 + frameThickness / 2, frameMaterial, frameNormalOffset);
+                    addWindowBoxPart(group, [frameThickness, Math.max(.08, height - 2 * frameThickness), frameDepth], basePointX, basePointZ, centerY, frame, -width / 2 + frameThickness / 2, 0, frameMaterial, frameNormalOffset);
+                    addWindowBoxPart(group, [frameThickness, Math.max(.08, height - 2 * frameThickness), frameDepth], basePointX, basePointZ, centerY, frame, width / 2 - frameThickness / 2, 0, frameMaterial, frameNormalOffset);
+                    addWindowBoxPart(group, [Math.max(.1, width - 2 * frameThickness), Math.max(.1, height - 2 * frameThickness), Math.max(.03, Math.min(frameDepth * .45, wallDepth * .4))], basePointX, basePointZ, centerY, frame, 0, 0, glassMaterial, glassNormalOffset);
                 }
             }
         }
@@ -10811,8 +13470,25 @@
             const preset = getDetailMaterialPreset(overrides.materialKind || detail && detail.materialKind);
             const transparent = null != overrides.transparent ? overrides.transparent : !!(detail && detail.transparent) || null != (detail && detail.opacity) && Number(detail.opacity) < 1 || detail && "glass" === detail.materialKind && "window" !== String(detail.type || "").toLowerCase();
             const opacity = null != overrides.opacity ? overrides.opacity : null != (detail && detail.opacity) ? clamp(Number(detail.opacity) || 0, .05, 1) : 1;
+            const color = toThreeColor(null != overrides.color ? overrides.color : null != (detail && detail.color) ? detail.color : 12632256, 12632256);
+            const materialKey = [
+                "detail",
+                overrides.materialKind || detail && detail.materialKind || "default",
+                color,
+                Math.round(1e3 * opacity) / 1e3,
+                transparent ? 1 : 0,
+                null != overrides.roughness ? overrides.roughness : preset.roughness,
+                null != overrides.metalness ? overrides.metalness : preset.metalness,
+                THREE.MeshBasicMaterial ? "basic" : THREE.MeshStandardMaterial ? "standard" : "lambert"
+            ].join("|");
+            const useMaterialCache = isDeveloperToggleEnabled("perfMaterialCaches");
+            if (useMaterialCache) {
+                const cached = runtimeState.customBuildingMaterialCache.get(materialKey);
+                if (cached)
+                    return cached;
+            }
             const materialOptions = {
-                color: toThreeColor(null != overrides.color ? overrides.color : null != (detail && detail.color) ? detail.color : 12632256, 12632256),
+                color,
                 roughness: null != overrides.roughness ? overrides.roughness : preset.roughness,
                 metalness: null != overrides.metalness ? overrides.metalness : preset.metalness,
                 transparent,
@@ -10820,23 +13496,40 @@
                 depthWrite: !(transparent || opacity < 1),
                 side: THREE.DoubleSide
             };
-            if (THREE.MeshBasicMaterial)
-                return new THREE.MeshBasicMaterial({
+            const material = THREE.MeshBasicMaterial ? new THREE.MeshBasicMaterial({
                     color: materialOptions.color,
                     transparent: materialOptions.transparent,
                     opacity: materialOptions.opacity,
                     depthWrite: materialOptions.depthWrite,
                     side: materialOptions.side
-                });
-            return THREE.MeshStandardMaterial ? new THREE.MeshStandardMaterial(materialOptions) : new THREE.MeshLambertMaterial(materialOptions);
+                }) : THREE.MeshStandardMaterial ? new THREE.MeshStandardMaterial(materialOptions) : new THREE.MeshLambertMaterial(materialOptions);
+            useMaterialCache && markSharedResource(material, "custom-building-material");
+            return useMaterialCache ? rememberLimitedCache(runtimeState.customBuildingMaterialCache, materialKey, material, CUSTOM_BUILDING_PERF.materialCacheSize) : material;
         }
 
         function createDetailMaterial(detail) {
             return createDetailStandardMaterial(detail);
         }
 
+        function getSharedBoxGeometry(size) {
+            const safeSize = [
+                Math.max(.001, Number(size && size[0]) || .001),
+                Math.max(.001, Number(size && size[1]) || .001),
+                Math.max(.001, Number(size && size[2]) || .001)
+            ];
+            if (!isDeveloperToggleEnabled("perfSharedGeometryCaches"))
+                return new globalState.THREE.BoxGeometry(safeSize[0], safeSize[1], safeSize[2]);
+            const key = makeRoundedNumberKey(safeSize);
+            const cached = runtimeState.customBuildingBoxGeometryCache.get(key);
+            if (cached)
+                return cached;
+            const geometry = new globalState.THREE.BoxGeometry(safeSize[0], safeSize[1], safeSize[2]);
+            markSharedResource(geometry, "custom-building-box-geometry");
+            return rememberLimitedCache(runtimeState.customBuildingBoxGeometryCache, key, geometry, CUSTOM_BUILDING_PERF.geometryCacheSize);
+        }
+
         function createRuntimeBox(size, material, position=[0, 0, 0]) {
-            const mesh = new globalState.THREE.Mesh(new globalState.THREE.BoxGeometry(size[0], size[1], size[2]),material);
+            const mesh = new globalState.THREE.Mesh(getSharedBoxGeometry(size),material);
             mesh.position.set(position[0], position[1], position[2]);
             mesh.castShadow = !0;
             mesh.receiveShadow = !0;
@@ -11363,7 +14056,10 @@
         }
 
         function specHasDoorPart(spec) {
-            return toSafeArray(spec && spec.parts).some((part => isDoorDetail(part)));
+            for (const part of toSafeArray(spec && spec.parts))
+                if (isDoorDetail(part))
+                    return !0;
+            return !1;
         }
 
         function createDoorDetailObject(detail, anchorPoint) {
@@ -11563,7 +14259,7 @@
                 x: (Number(anchorPoint.x) || 0) + (Number(position[0]) || 0),
                 z: (Number(anchorPoint.z) || 0) + (Number(position[2]) || 0)
             };
-            return findWallFrameForDetail(points, desired, detail);
+            return findWallFrameForDetail(points, desired, detail, spec);
         }
 
         function createWallDetailWithOpenings(detail, anchorPoint, spec, size) {
@@ -11582,10 +14278,10 @@
             };
             const centerU = projectPointToWallFrame(desired, frame) * frame.length;
             const cutouts = [];
-            for (const opening of getWallOpenings(spec, "doors", frame.index).concat(getWallOpenings(spec, "windows", frame.index))) {
+            const addOpeningCutout = opening => {
                 const rect = opening && (opening.rect || opening);
                 if (!rect)
-                    continue;
+                    return;
                 const x1 = Math.max(-wallWidth / 2, (Number(rect.x1) || 0) - centerU);
                 const x2 = Math.min(wallWidth / 2, (Number(rect.x2) || 0) - centerU);
                 const y1 = Math.max(-wallHeight / 2, baseY + (Number(rect.y1) || 0) - wallCenterY);
@@ -11597,7 +14293,11 @@
                         y1,
                         y2
                     });
-            }
+            };
+            for (const opening of getWallOpenings(spec, "doors", frame.index))
+                addOpeningCutout(opening);
+            for (const opening of getWallOpenings(spec, "windows", frame.index))
+                addOpeningCutout(opening);
             if (!cutouts.length)
                 return null;
             const group = new globalState.THREE.Group;
@@ -11610,9 +14310,8 @@
                 xCuts.push(rect.x1, rect.x2);
                 yCuts.push(rect.y1, rect.y2);
             }
-            const uniqueCuts = values => Array.from(new Set(values.map(value => Math.round(value * 1e3) / 1e3))).sort(((a, b) => a - b));
-            const xs = uniqueCuts(xCuts);
-            const ys = uniqueCuts(yCuts);
+            const xs = getUniqueRoundedSortedCuts(xCuts);
+            const ys = getUniqueRoundedSortedCuts(yCuts);
             for (let xi = 0; xi < xs.length - 1; xi++)
                 for (let yi = 0; yi < ys.length - 1; yi++) {
                     const x1 = xs[xi];
@@ -11627,7 +14326,7 @@
                         y1: (y1 + y2) / 2,
                         y2: (y1 + y2) / 2
                     };
-                    if (cutouts.some(rect => rectsOverlap2D(pointRect, rect, -.012)))
+                    if (rectOverlapsAnyCutout(pointRect, cutouts, -.012))
                         continue;
                     group.add(createRuntimeBox([x2 - x1 + .22, y2 - y1 + .12, wallDepth + .16], material, [(x1 + x2) / 2, (y1 + y2) / 2, 0]));
                 }
@@ -11648,7 +14347,7 @@
                 return createWindowDetailObject(detail, anchorPoint);
             if (isDoorDetail(detail))
                 return createDoorDetailObject(detail, anchorPoint);
-            if (["chair", "table", "sofa", "bed", "cabinet", "counter", "shelf", "stove", "chimney"].includes(type))
+            if (isDeveloperToggleEnabled("perfDetailTypeLookup") ? DETAIL_FURNITURE_TYPES.has(type) : ["chair", "table", "sofa", "bed", "cabinet", "counter", "shelf", "stove", "chimney"].includes(type))
                 return createFurnitureDetailObject(detail, anchorPoint);
             if ("box" === type || "wall" === type || "floor" === type || "panel" === type || "roofpanel" === type) {
                 const fallback = "panel" === type || "roofpanel" === type ? [1, 1, .04] : [1, 1, .1];
@@ -11756,8 +14455,9 @@
             };
             const group = new globalState.THREE.Group;
             group.name = `tmCustomBuilding:${match.id}`;
-            const rawPoints = getBuildingFootprint(match.building, spec);
-            const points = fitBuildingFootprintToEnvironment(rawPoints, match);
+            const points = getMatchCollisionLocalFootprint(match);
+            if (!points.length)
+                return null;
             match.__tmCollisionLocalFootprint = points;
             const originalBaseY = Number(spec.base && spec.base.y) || Number(match.building.y) || 0;
             const bodyHeight = Math.max(1.4, Number(spec.base && spec.base.height) || Math.max(1, Number(spec.base && spec.base.floors) || 2) * Math.max(2.4, Number(spec.base && spec.base.floorHeight) || 3));
@@ -11802,26 +14502,72 @@
             return group;
         }
 
+        function getCatalogTemplateCount(catalog) {
+            if (!catalog || !catalog.templates)
+                return 0;
+            if (Number.isFinite(Number(catalog.__tmTemplateCount)))
+                return Number(catalog.__tmTemplateCount);
+            let count = 0;
+            for (const key in catalog.templates)
+                Object.prototype.hasOwnProperty.call(catalog.templates, key) && count++;
+            catalog.__tmTemplateCount = count;
+            return count;
+        }
+
+        function getCustomBuildingPrepareSignature(chunk, catalog) {
+            const sourceBuildings = toSafeArray(chunk && (chunk.__tmOriginalBuildings || chunk.buildings));
+            const catalogBuildings = toSafeArray(catalog && catalog.buildings);
+            if (isDeveloperToggleEnabled("perfPrepareSignatureLoop")) {
+                let sourceSignature = "";
+                for (let index = 0, limit = Math.min(180, sourceBuildings.length); index < limit; index++) {
+                    const building = sourceBuildings[index];
+                    sourceSignature += `${sourceSignature ? "," : ""}${building && building.index}.${building && building.type}.${building && building.level}.${toSafeArray(building && building.points).length}`;
+                }
+                return `${featureState.customBuildings ? 1 : 0}|${featureState.auto3dBuildings ? 1 : 0}|${sourceBuildings.length}|${toSafeArray(chunk && (chunk.__tmOriginalCustomBuildings || chunk.custome_buildings)).length}|${catalogBuildings.length}|${getCatalogTemplateCount(catalog)}|${sourceSignature}`;
+            }
+            const sourceSignatureParts = [];
+            for (let index = 0, limit = Math.min(180, sourceBuildings.length); index < limit; index++) {
+                const building = sourceBuildings[index];
+                sourceSignatureParts.push([building && building.index, building && building.type, building && building.level, toSafeArray(building && building.points).length].join("."));
+            }
+            return [
+                featureState.customBuildings ? 1 : 0,
+                featureState.auto3dBuildings ? 1 : 0,
+                sourceBuildings.length,
+                toSafeArray(chunk && (chunk.__tmOriginalCustomBuildings || chunk.custome_buildings)).length,
+                catalogBuildings.length,
+                getCatalogTemplateCount(catalog),
+                sourceSignatureParts.join(",")
+            ].join("|");
+        }
+
         function prepareCustomBuildingMatchesForChunk(chunk, catalog) {
             if (!chunk)
                 return [];
             chunk.__tmOriginalCustomBuildings || (chunk.__tmOriginalCustomBuildings = cloneJson(toSafeArray(chunk.custome_buildings), []));
             if (!Array.isArray(chunk.__tmOriginalBuildings))
                 chunk.__tmOriginalBuildings = Array.isArray(chunk.buildings) ? chunk.buildings.slice() : [];
+            const prepareSignature = getCustomBuildingPrepareSignature(chunk, catalog);
+            if (chunk.__tmCustomBuildingsPrepared && runtimeState.customBuildingPrepareSignatures.get(chunk) === prepareSignature)
+                return chunk.__tmMatchedCustomBuildings || runtimeState.customBuildingEntriesByChunk.get(chunk) || [];
             const sourceBuildings = toSafeArray(chunk.__tmOriginalBuildings);
+            const originalCustomBuildings = toSafeArray(chunk.__tmOriginalCustomBuildings);
+            const catalogBuildings = toSafeArray(catalog && catalog.buildings);
+            const templates = catalog && catalog.templates;
             const matched = [];
             const suppressions = [];
             const matchedBuildings = new Set;
             if (!isAny3dBuildingFeatureEnabled()) {
                 chunk.buildings = sourceBuildings.slice();
-                chunk.custome_buildings = toSafeArray(chunk.__tmOriginalCustomBuildings);
+                chunk.custome_buildings = originalCustomBuildings;
                 syncBuildingFactoryBuildingSources(chunk, !0);
                 chunk.__tmMatchedCustomBuildings = matched;
                 chunk.__tmCustomBuildingsPrepared = !0;
                 chunk.__tmCustomBuildingOverlayReady = !1;
+                runtimeState.customBuildingPrepareSignatures.set(chunk, prepareSignature);
                 runtimeState.customBuildingEntriesByChunk.set(chunk, matched);
                 applyOriginalBuildingMeshVisibilityForChunk(chunk);
-                invalidateWorldCollisionCacheForChunk(chunk);
+                queueCustomBuildingCollisionInvalidation(chunk);
                 return matched;
             }
             const addCustomBuildingMatch = (id, entry, building, options={}) => {
@@ -11841,9 +14587,9 @@
                 });
             };
             if (featureState.customBuildings)
-                for (let entryIndex = 0; entryIndex < toSafeArray(catalog && catalog.buildings).length; entryIndex++) {
-                    const rawEntry = toSafeArray(catalog && catalog.buildings)[entryIndex];
-                    const resolved = resolveBuildingTemplate(rawEntry, catalog && catalog.templates);
+                for (let entryIndex = 0; entryIndex < catalogBuildings.length; entryIndex++) {
+                    const rawEntry = catalogBuildings[entryIndex];
+                    const resolved = resolveBuildingTemplate(rawEntry, templates);
                     let matchedExistingBuilding = !1;
                     for (const building of sourceBuildings)
                         if (building && building.houseCenter && matchBuildingEntry(resolved, chunk, building)) {
@@ -11865,15 +14611,19 @@
                     const autoEntry = createAuto3dBuildingEntry(building, chunk, catalog || {});
                     autoEntry && addCustomBuildingMatch(autoEntry.id || getBuildingDebugId(chunk, building), autoEntry, building);
                 }
-            chunk.buildings = sourceBuildings.filter((building => !matchedBuildings.has(building)));
-            chunk.custome_buildings = toSafeArray(chunk.__tmOriginalCustomBuildings).concat(suppressions);
+            const remainingBuildings = [];
+            for (const building of sourceBuildings)
+                matchedBuildings.has(building) || remainingBuildings.push(building);
+            chunk.buildings = remainingBuildings;
+            chunk.custome_buildings = originalCustomBuildings.concat(suppressions);
             syncBuildingFactoryBuildingSources(chunk, !0);
             chunk.__tmMatchedCustomBuildings = matched;
             chunk.__tmCustomBuildingsPrepared = !0;
             chunk.__tmCustomBuildingOverlayReady = !1;
+            runtimeState.customBuildingPrepareSignatures.set(chunk, prepareSignature);
             runtimeState.customBuildingEntriesByChunk.set(chunk, matched);
             applyOriginalBuildingMeshVisibilityForChunk(chunk);
-            invalidateWorldCollisionCacheForChunk(chunk);
+            queueCustomBuildingCollisionInvalidation(chunk);
             log(`3D-Haeuser vorbereitet fuer Chunk ${chunk.cx}/${chunk.cz}: ${matched.length} ersetzt, ${chunk.buildings.length} PNG-Haeuser bleiben.`);
             return matched;
         }
@@ -11896,26 +14646,50 @@
         function getChunkApproxCenter(chunk) {
             if (!globalState.THREE || !chunk)
                 return null;
-            return chunk.centerVec && chunk.centerVec.clone ? chunk.centerVec.clone() : new globalState.THREE.Vector3(Number(chunk.cx) || 0,0,Number(chunk.cz) || 0);
+            if (chunk.centerVec)
+                return chunk.centerVec;
+            if (!chunk.__tmApproxCenter)
+                chunk.__tmApproxCenter = new globalState.THREE.Vector3(Number(chunk.cx) || 0,0,Number(chunk.cz) || 0);
+            return chunk.__tmApproxCenter;
         }
 
         function addCustomBuildingPriorityTarget(position, label) {
             const target = cloneVector3(position);
             if (!target)
                 return;
+            const now = performance.now();
             runtimeState.customBuildingPriorityTargets.push({
                 position: target,
                 label: label || "Adresse",
-                createdAt: performance.now()
+                createdAt: now
             });
-            runtimeState.customBuildingPriorityTargets = runtimeState.customBuildingPriorityTargets.filter((entry => entry && entry.position && performance.now() - (Number(entry.createdAt) || 0) < 10 * 60 * 1e3)).slice(-8);
+            let writeIndex = 0;
+            for (let index = 0; index < runtimeState.customBuildingPriorityTargets.length; index++) {
+                const entry = runtimeState.customBuildingPriorityTargets[index];
+                entry && entry.position && now - (Number(entry.createdAt) || 0) < 10 * 60 * 1e3 && (runtimeState.customBuildingPriorityTargets[writeIndex++] = entry);
+            }
+            runtimeState.customBuildingPriorityTargets.length = writeIndex;
+            while (runtimeState.customBuildingPriorityTargets.length > 8)
+                runtimeState.customBuildingPriorityTargets.shift();
         }
 
         function isPriorityCustomBuildingChunk(chunk) {
             const center = getChunkApproxCenter(chunk);
             if (!center)
                 return !1;
-            return runtimeState.customBuildingPriorityTargets.some((entry => entry && entry.position && getDistance2D(center, entry.position) <= 1800));
+            return isPointNearCustomBuildingPriorityTarget(center);
+        }
+
+        function isPointNearCustomBuildingPriorityTarget(center) {
+            if (!center)
+                return !1;
+            const targets = runtimeState.customBuildingPriorityTargets;
+            for (let index = 0; index < targets.length; index++) {
+                const entry = targets[index];
+                if (entry && entry.position && getDistanceSq2D(center, entry.position) <= 3240000)
+                    return !0;
+            }
+            return !1;
         }
 
         function needsCustomBuildingChunkWork(chunk) {
@@ -11924,9 +14698,11 @@
             if (!chunk.__tmCustomBuildingsPrepared)
                 return !0;
             const matches = chunk.__tmMatchedCustomBuildings || runtimeState.customBuildingEntriesByChunk.get(chunk) || [];
-            if (!toSafeArray(matches).length)
+            if (!Array.isArray(matches) || !matches.length)
                 return !1;
             const overlay = runtimeState.chunkCustomOverlayGroups.get(chunk);
+            if (isDeveloperToggleEnabled("perfNeedsChunkWorkFastPath") && !(overlay && overlay.parent === chunk.group && overlay.userData && chunk.__tmCustomBuildingOverlayReady))
+                return !0;
             const signature = getCustomBuildingOverlaySignature(matches);
             return !(overlay && overlay.parent === chunk.group && overlay.userData && overlay.userData.tmBuildSignature === signature && chunk.__tmCustomBuildingOverlayReady);
         }
@@ -11936,7 +14712,14 @@
                 clearCustomBuildingVisualsForLoadedChunks();
                 return;
             }
-            const unique = Array.from(new Set(toSafeArray(chunks).filter(Boolean))).filter(needsCustomBuildingChunkWork);
+            const unique = [];
+            const seenChunks = new Set;
+            for (const chunk of toSafeArray(chunks)) {
+                if (!chunk || seenChunks.has(chunk) || !needsCustomBuildingChunkWork(chunk))
+                    continue;
+                seenChunks.add(chunk);
+                unique.push(chunk);
+            }
             if (!unique.length)
                 return;
             const showProgress = featureState.customBuildings || "address" === reason;
@@ -11945,7 +14728,7 @@
                 showProgress && setCustomBuildingProgress(index, unique.length, reason === "address" ? "Adress-Haeuser vorbereiten" : "3D-Haeuser optimieren");
                 try {
                     await ensureChunkCustomBuildingsPrepared(chunk);
-                    rebuildCustomBuildingsForChunk(chunk);
+                    rebuildCustomBuildingsForChunk(chunk, reason);
                 } catch (prepareError) {
                     warn(`Custom-Haeuser konnten fuer Chunk ${chunk && chunk.cx}/${chunk && chunk.cz} nicht vorbereitet werden:`, prepareError);
                 }
@@ -11957,107 +14740,544 @@
         function prepareCustomBuildingsNearPosition(position, reason) {
             if (!featureState.customBuildings || !position)
                 return;
-            const chunks = getLoadedChunks().filter((chunk => {
+            const loadedChunks = getLoadedChunks();
+            if (isDeveloperToggleEnabled("perfPrepareNearChunkCache")) {
+                const key = `${Math.round((Number(position.x) || 0) / 80)}:${Math.round((Number(position.z) || 0) / 80)}:${reason || "near"}`;
+                const cached = runtimeState.prepareNearChunkCache;
+                if (cached && cached.key === key && cached.loadedChunks === loadedChunks) {
+                    cached.chunks.length && prepareCustomBuildingsForChunks(cached.chunks, reason || "near");
+                    return;
+                }
+                const chunks = [];
+                for (const chunk of loadedChunks) {
+                    const center = getChunkApproxCenter(chunk);
+                    center && getDistanceSq2D(center, position) <= 4840000 && chunks.push(chunk);
+                }
+                runtimeState.prepareNearChunkCache = {
+                    key,
+                    loadedChunks,
+                    chunks
+                };
+                chunks.length && prepareCustomBuildingsForChunks(chunks, reason || "near");
+                return;
+            }
+            const chunks = [];
+            for (const chunk of loadedChunks) {
                 const center = getChunkApproxCenter(chunk);
-                return center && getDistance2D(center, position) <= 2200;
-            }));
+                center && getDistanceSq2D(center, position) <= 4840000 && chunks.push(chunk);
+            }
             chunks.length && prepareCustomBuildingsForChunks(chunks, reason || "near");
         }
 
+        function removeCustomBuildingDoorItemsForChunk(chunk) {
+            const kept = [];
+            for (const item of runtimeState.customBuildingDoorItems)
+                item && item.chunk !== chunk && kept.push(item);
+            runtimeState.customBuildingDoorItems = kept;
+        }
+
+        function removeCustomBuildingBuildQueueChunk(chunk) {
+            const queue = runtimeState.customBuildingBuildQueue;
+            for (let index = queue.length - 1; index >= 0; index--)
+                queue[index] === chunk && queue.splice(index, 1);
+        }
+
+        function removeCustomBuildingOptimizeQueueOverlay(overlay) {
+            const kept = [];
+            for (const item of runtimeState.customBuildingOptimizeQueue)
+                item && item.overlay !== overlay && kept.push(item);
+            runtimeState.customBuildingOptimizeQueue = kept;
+        }
+
         function collectCustomBuildingDoorsForChunk(chunk, overlay) {
-            runtimeState.customBuildingDoorItems = runtimeState.customBuildingDoorItems.filter((item => item && item.chunk !== chunk && item.group && item.group.parent));
-            if (!overlay)
+            const keptDoors = [];
+            for (const item of runtimeState.customBuildingDoorItems)
+                item && item.chunk !== chunk && item.group && item.group.parent && keptDoors.push(item);
+            runtimeState.customBuildingDoorItems = keptDoors;
+            const THREE = globalState.THREE;
+            if (!overlay || !THREE)
                 return;
             overlay.traverse((node => {
-                if (node && node.userData && node.userData.tmDoor)
+                if (node && node.userData && node.userData.tmDoor) {
+                    const position = node.getWorldPosition ? node.getWorldPosition(new THREE.Vector3) : null;
                     runtimeState.customBuildingDoorItems.push({
                         chunk,
-                        group: node
+                        group: node,
+                        worldPosition: position
                     });
+                }
             }
             ));
         }
 
         function getCustomBuildingOverlaySignature(matches) {
-            return toSafeArray(matches).map((match => {
+            if (isDeveloperToggleEnabled("perfOverlaySignatureCache") && Array.isArray(matches) && matches.__tmOverlaySignature && matches.__tmOverlaySignatureLength === matches.length)
+                return matches.__tmOverlaySignature;
+            if (isDeveloperToggleEnabled("perfOverlaySignatureLoop")) {
+                let signature = "";
+                for (const match of toSafeArray(matches)) {
+                    const building = match && match.building;
+                    const entry = match && match.entry;
+                    signature += `${signature ? "|" : ""}${match && match.id || ""}:${building && building.index}:${entry && entry.__tmAuto3d ? "a" : "e"}:${toSafeArray(entry && entry.parts).length}:${entry && entry.base && !1 === entry.base.enabled ? 0 : 1}:${entry && entry.windows && !1 === entry.windows.enabled ? 0 : 1}`;
+                }
+                if (isDeveloperToggleEnabled("perfOverlaySignatureCache") && Array.isArray(matches)) {
+                    matches.__tmOverlaySignature = signature;
+                    matches.__tmOverlaySignatureLength = matches.length;
+                }
+                return signature;
+            }
+            const parts = [];
+            for (const match of toSafeArray(matches)) {
                 const building = match && match.building;
                 const entry = match && match.entry;
-                return [
+                parts.push([
                     match && match.id || "",
                     building && building.index,
                     entry && entry.__tmAuto3d ? "a" : "e",
                     toSafeArray(entry && entry.parts).length,
                     entry && entry.base && !1 === entry.base.enabled ? 0 : 1,
                     entry && entry.windows && !1 === entry.windows.enabled ? 0 : 1
-                ].join(":");
+                ].join(":"));
             }
-            )).join("|");
+            const signature = parts.join("|");
+            if (isDeveloperToggleEnabled("perfOverlaySignatureCache") && Array.isArray(matches)) {
+                matches.__tmOverlaySignature = signature;
+                matches.__tmOverlaySignatureLength = matches.length;
+            }
+            return signature;
         }
 
-        function rebuildCustomBuildingsForChunk(chunk) {
-            if (!chunk || !chunk.group || !globalState.THREE)
-                return;
-            const matches = chunk.__tmMatchedCustomBuildings || runtimeState.customBuildingEntriesByChunk.get(chunk) || [];
-            let overlay = runtimeState.chunkCustomOverlayGroups.get(chunk);
-            if (!overlay) {
+        function getOrCreateCustomBuildingOverlay(chunk) {
+            let overlay = chunk && runtimeState.chunkCustomOverlayGroups.get(chunk);
+            if (!overlay && chunk && globalState.THREE) {
                 overlay = new globalState.THREE.Group;
                 overlay.name = "__tmCustomBuildingsOverlay";
                 runtimeState.chunkCustomOverlayGroups.set(chunk, overlay);
             }
-            const signature = getCustomBuildingOverlaySignature(matches);
-            if (overlay.parent === chunk.group && overlay.userData && overlay.userData.tmBuildSignature === signature)
+            return overlay;
+        }
+
+        function countBatchableOverlayMeshes(overlay, limit=1 / 0) {
+            if (isDeveloperToggleEnabled("perfBatchableMeshCountCache") && overlay && overlay.userData && overlay.userData.tmBatchableMeshCountValid && Number(overlay.userData.tmBatchableMeshCountLimit) >= limit)
+                return Number(overlay.userData.tmBatchableMeshCount) || 0;
+            let count = 0;
+            overlay && overlay.traverse && overlay.traverse(node => {
+                if (count >= limit || !node || !node.isMesh || node.userData && (node.userData.tmDynamicDoor || node.userData.tmNoBatch) || Array.isArray(node.material) || !node.geometry)
+                    return;
+                count++;
+            });
+            isDeveloperToggleEnabled("perfBatchableMeshCountCache") && overlay && overlay.userData && (overlay.userData.tmBatchableMeshCount = count,
+            overlay.userData.tmBatchableMeshCountValid = !0,
+            overlay.userData.tmBatchableMeshCountLimit = limit);
+            return count;
+        }
+
+        function getRuntimeCamera() {
+            const game = runtimeState.game || townSignsState.game;
+            const manager = getControlManager();
+            return game && (game.camera || game.activeCamera || game.mainCamera || game.cm && game.cm.camera || game.cameraManager && game.cameraManager.camera) || manager && (manager.camera || manager.cm && manager.cm.camera) || null;
+        }
+
+        function getCustomBuildingOverlayBounds(chunk, matches) {
+            const existing = chunk && chunk.__tmCustomBuildingOverlayBounds;
+            if (existing)
+                return existing;
+            let pointCount = 0;
+            let sumX = 0;
+            let sumZ = 0;
+            let minX = 1 / 0;
+            let maxX = -1 / 0;
+            let minZ = 1 / 0;
+            let maxZ = -1 / 0;
+            let maxHeight = 4;
+            for (const match of toSafeArray(matches || chunk && (chunk.__tmMatchedCustomBuildings || runtimeState.customBuildingEntriesByChunk.get(chunk)))) {
+                const points = getMatchCollisionWorldFootprint(match, chunk);
+                for (const point of points) {
+                    const x = Number(point && point.x) || 0;
+                    const z = Number(point && point.z) || 0;
+                    sumX += x;
+                    sumZ += z;
+                    pointCount++;
+                    x < minX && (minX = x);
+                    x > maxX && (maxX = x);
+                    z < minZ && (minZ = z);
+                    z > maxZ && (maxZ = z);
+                }
+                const entry = match && match.entry || {};
+                const building = match && match.building || {};
+                const base = entry.base || {};
+                const bodyHeight = Number(base.height) || Math.max(1, Number(base.floors) || Number(building.level) || 2) * Math.max(2.4, Number(base.floorHeight) || 3);
+                const roofHeight = Number(entry.roof && entry.roof.height) || 2;
+                maxHeight = Math.max(maxHeight, bodyHeight + roofHeight);
+            }
+            if (!pointCount)
+                return null;
+            const centerX = sumX / pointCount;
+            const centerZ = sumZ / pointCount;
+            const radius = Math.hypot(Math.max(Math.abs(maxX - centerX), Math.abs(centerX - minX)), Math.max(Math.abs(maxZ - centerZ), Math.abs(centerZ - minZ)));
+            const y = Number(chunk && chunk.centerVec && chunk.centerVec.y) || 0;
+            const bounds = {
+                center: new globalState.THREE.Vector3(centerX,y + maxHeight / 2,centerZ),
+                radius: Math.max(12, radius + maxHeight + 18)
+            };
+            chunk && (chunk.__tmCustomBuildingOverlayBounds = bounds);
+            return bounds;
+        }
+
+        function updateCustomBuildingOverlayCulling() {
+            if (!isAny3dBuildingFeatureEnabled() || !globalState.THREE)
                 return;
-            runtimeState.customBuildingDoorItems = runtimeState.customBuildingDoorItems.filter((item => item && item.chunk !== chunk));
-            clearCustomBuildingOverlayChildren(overlay);
-            overlay.userData.tmBuildSignature = "";
-            chunk.__tmCustomBuildingOverlayReady = !1;
-            if (!matches.length || !isAny3dBuildingFeatureEnabled()) {
-                overlay.parent && overlay.parent.remove(overlay);
-                applyOriginalBuildingMeshVisibilityForChunk(chunk);
-                invalidateWorldCollisionCacheForChunk(chunk);
+            const chunks = getLoadedChunks();
+            if (!chunks.length) {
+                runtimeState.customBuildingCullCursor = 0;
                 return;
             }
-            let builtCount = 0;
-            for (const match of matches) {
+            if (!isDeveloperToggleEnabled("perfCustomBuildingCulling")) {
+                for (const chunk of chunks) {
+                    const overlay = chunk && runtimeState.chunkCustomOverlayGroups.get(chunk);
+                    overlay && (overlay.visible = !0);
+                }
+                runtimeState.customBuildingCullCursor = 0;
+                return;
+            }
+            let temp = runtimeState.customBuildingCullTemp;
+            if (!temp || !temp.matrix || !temp.frustum || !temp.sphere)
+                temp = runtimeState.customBuildingCullTemp = {
+                    matrix: new globalState.THREE.Matrix4,
+                    frustum: new globalState.THREE.Frustum,
+                    sphere: new globalState.THREE.Sphere
+                };
+            const playerPos = getPlayerPosition();
+            const camera = getRuntimeCamera();
+            let frustum = null;
+            if (camera && camera.projectionMatrix && camera.matrixWorldInverse) {
+                camera.updateMatrixWorld && camera.updateMatrixWorld(!0);
+                camera.updateProjectionMatrix && camera.updateProjectionMatrix();
+                temp.matrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+                frustum = temp.frustum;
+                frustum.setFromProjectionMatrix(temp.matrix);
+            }
+            const limit = Math.min(chunks.length, CUSTOM_BUILDING_PERF.cullChunksPerTick);
+            let cursor = Math.max(0, Number(runtimeState.customBuildingCullCursor) || 0);
+            for (let checked = 0; checked < limit; checked++) {
+                const chunk = chunks[cursor % chunks.length];
+                cursor++;
+                const overlay = chunk && runtimeState.chunkCustomOverlayGroups.get(chunk);
+                if (!overlay || !chunk.__tmCustomBuildingOverlayReady)
+                    continue;
+                const bounds = getCustomBuildingOverlayBounds(chunk);
+                if (!bounds)
+                    continue;
+                let visible = !0;
+                if (playerPos) {
+                    const limit = CUSTOM_BUILDING_PERF.cullDistance + (overlay.visible ? CUSTOM_BUILDING_PERF.cullDistanceHysteresis : 0) + bounds.radius;
+                    visible = getDistanceSq2D(playerPos, bounds.center) <= limit * limit || isPriorityCustomBuildingChunk(chunk);
+                }
+                if (visible && frustum) {
+                    temp.sphere.set(bounds.center, bounds.radius + 60);
+                    visible = frustum.intersectsSphere(temp.sphere);
+                }
+                overlay.visible !== visible && (overlay.visible = visible);
+            }
+            runtimeState.customBuildingCullCursor = cursor % chunks.length;
+        }
+
+        function scheduleCustomBuildingOptimizePump(delayMs=420) {
+            if (runtimeState.customBuildingOptimizeTimer)
+                return;
+            runtimeState.customBuildingOptimizeTimer = scheduleIdleTask(processCustomBuildingOptimizeQueue, delayMs, 1800);
+        }
+
+        function queueCustomBuildingOverlayOptimization(chunk, overlay, signature, delayMs=420) {
+            if (!chunk || !overlay || !signature || overlay.userData && overlay.userData.tmOptimizedSignature === signature)
+                return;
+            let writeIndex = 0;
+            for (let index = 0; index < runtimeState.customBuildingOptimizeQueue.length; index++) {
+                const item = runtimeState.customBuildingOptimizeQueue[index];
+                const keep = item && item.overlay && item.overlay.parent && item.overlay.userData && item.overlay.userData.tmOptimizedSignature !== item.signature;
+                keep && (runtimeState.customBuildingOptimizeQueue[writeIndex++] = item);
+            }
+            runtimeState.customBuildingOptimizeQueue.length = writeIndex;
+            runtimeState.customBuildingOptimizeQueued = new WeakSet;
+            for (const item of runtimeState.customBuildingOptimizeQueue)
+                item && item.overlay && runtimeState.customBuildingOptimizeQueued.add(item.overlay);
+            if (runtimeState.customBuildingOptimizeQueued.has(overlay))
+                return;
+            const limit = Math.max(4, CUSTOM_BUILDING_PERF.optimizeQueueLimit);
+            while (runtimeState.customBuildingOptimizeQueue.length >= limit) {
+                const oldItem = runtimeState.customBuildingOptimizeQueue.shift();
+                oldItem && oldItem.overlay && runtimeState.customBuildingOptimizeQueued.delete(oldItem.overlay);
+            }
+            runtimeState.customBuildingOptimizeQueued.add(overlay);
+            runtimeState.customBuildingOptimizeQueue.push({
+                chunk,
+                overlay,
+                signature
+            });
+            scheduleCustomBuildingOptimizePump(delayMs);
+        }
+
+        function processCustomBuildingOptimizeQueue(deadline) {
+            runtimeState.customBuildingOptimizeTimer = null;
+            if (!runtimeState.customBuildingOptimizeQueue.length)
+                return;
+            const item = runtimeState.customBuildingOptimizeQueue.shift();
+            item && item.overlay && runtimeState.customBuildingOptimizeQueued.delete(item.overlay);
+            if (item && item.chunk && item.overlay && item.overlay.parent === item.chunk.group && item.overlay.userData && item.overlay.userData.tmBuildSignature === item.signature) {
+                const player = getPlayerCar();
+                const playerMoving = player && speedAbs(player.speed) > 2.2;
+                const cachedMeshCount = Number(item.overlay.userData.tmBatchableMeshCount);
+                const meshCount = cachedMeshCount > 0 ? cachedMeshCount : countBatchableOverlayMeshes(item.overlay, CUSTOM_BUILDING_PERF.maxOptimizeMeshes + 1);
+                if (meshCount < CUSTOM_BUILDING_PERF.minBatchMeshes) {
+                    item.overlay.userData.tmOptimizedSignature = item.signature;
+                    runtimeState.customBuildingOptimizeQueue.length && scheduleCustomBuildingOptimizePump(180);
+                    return;
+                }
+                if (playerMoving && meshCount > CUSTOM_BUILDING_PERF.maxOptimizeMeshes) {
+                    queueCustomBuildingOverlayOptimization(item.chunk, item.overlay, item.signature, 900);
+                    return;
+                }
+                try {
+                    optimizeCustomBuildingOverlay(item.overlay);
+                    item.overlay.userData.tmOptimizedSignature = item.signature;
+                } catch (optimizeError) {
+                    warn("Custom-Building-Optimierung fehlgeschlagen, zeige unoptimierte Geometrie:", optimizeError);
+                }
+            }
+            runtimeState.customBuildingOptimizeQueue.length && scheduleCustomBuildingOptimizePump(520);
+        }
+
+        function scheduleCustomBuildingBuildPump(delayMs=CUSTOM_BUILDING_PERF.queueDelayMs, forceSoon=!1) {
+            if (runtimeState.customBuildingBuildTimer) {
+                if (!forceSoon)
+                    return;
+                clearTimeout(runtimeState.customBuildingBuildTimer);
+                runtimeState.customBuildingBuildTimer = null;
+            }
+            runtimeState.customBuildingBuildTimer = scheduleIdleTask(processCustomBuildingBuildQueue, delayMs, 450);
+        }
+
+        function getCustomBuildingStreamSpeedFactor() {
+            const car = getPlayerCar();
+            return car ? clamp(speedAbs(car.speed) / 30, 0, 1) : 0;
+        }
+
+        function getCustomBuildingQueueDelay(priority) {
+            if (priority)
+                return 0;
+            const speedFactor = getCustomBuildingStreamSpeedFactor();
+            return CUSTOM_BUILDING_PERF.queueDelayMs + Math.round(speedFactor * 80);
+        }
+
+        function getCustomBuildingSliceBudget(priority, idleBudget) {
+            if (priority)
+                return CUSTOM_BUILDING_PERF.prioritySliceBudgetMs;
+            const speedFactor = getCustomBuildingStreamSpeedFactor();
+            return Math.max(2.4, Math.min(Number(idleBudget) || CUSTOM_BUILDING_PERF.sliceBudgetMs, CUSTOM_BUILDING_PERF.sliceBudgetMs * (1 - speedFactor * .38)));
+        }
+
+        function sortCustomBuildingBuildQueue() {
+            if (!isDeveloperToggleEnabled("perfPriorityQueueSort") || runtimeState.customBuildingBuildQueue.length < 2)
+                return;
+            const now = performance.now();
+            if (now - (Number(runtimeState.customBuildingLastQueueSortAt) || 0) < 350)
+                return;
+            runtimeState.customBuildingLastQueueSortAt = now;
+            const playerPos = getPlayerPosition();
+            const scored = [];
+            const useScoreReuse = isDeveloperToggleEnabled("perfBuildQueueScoreReuse");
+            const priorityTargets = runtimeState.customBuildingPriorityTargets || [];
+            const lastPriorityTarget = priorityTargets[priorityTargets.length - 1];
+            const priorityKey = `${priorityTargets.length}:${Math.round(Number(lastPriorityTarget && lastPriorityTarget.createdAt) || 0)}`;
+            const playerKey = playerPos ? `${Math.round((Number(playerPos.x) || 0) / 16)}:${Math.round((Number(playerPos.z) || 0) / 16)}` : "none";
+            for (const chunk of runtimeState.customBuildingBuildQueue) {
+                if (!chunk)
+                    continue;
+                const scoreKey = `${playerKey}:${priorityKey}`;
+                let priorityRank;
+                let distanceSq;
+                if (useScoreReuse && chunk.__tmBuildQueueScoreKey === scoreKey) {
+                    priorityRank = chunk.__tmBuildQueuePriorityRank;
+                    distanceSq = chunk.__tmBuildQueueDistanceSq;
+                } else {
+                    const center = getChunkApproxCenter(chunk);
+                    priorityRank = center && isPointNearCustomBuildingPriorityTarget(center) ? 0 : 1;
+                    distanceSq = playerPos && center ? getDistanceSq2D(playerPos, center) : 0;
+                    useScoreReuse && (chunk.__tmBuildQueueScoreKey = scoreKey,
+                    chunk.__tmBuildQueuePriorityRank = priorityRank,
+                    chunk.__tmBuildQueueDistanceSq = distanceSq);
+                }
+                scored.push({
+                    chunk,
+                    priorityRank,
+                    distanceSq
+                });
+            }
+            scored.sort((a, b) => a.priorityRank - b.priorityRank || a.distanceSq - b.distanceSq);
+            runtimeState.customBuildingBuildQueue.length = scored.length;
+            for (let index = 0; index < scored.length; index++)
+                runtimeState.customBuildingBuildQueue[index] = scored[index].chunk;
+        }
+
+        function queueCustomBuildingRebuild(chunk, reason) {
+            if (!chunk)
+                return;
+            if (!isAny3dBuildingFeatureEnabled()) {
+                cleanupChunkCustomVisuals(chunk);
+                return;
+            }
+            const priority = isPriorityCustomBuildingChunk(chunk) || "address" === reason;
+            if (!runtimeState.customBuildingQueuedChunks.has(chunk)) {
+                runtimeState.customBuildingQueuedChunks.add(chunk);
+                priority ? runtimeState.customBuildingBuildQueue.unshift(chunk) : runtimeState.customBuildingBuildQueue.push(chunk);
+            } else if (priority && runtimeState.customBuildingBuildQueue[0] !== chunk) {
+                const queueIndex = runtimeState.customBuildingBuildQueue.indexOf(chunk);
+                queueIndex > -1 && runtimeState.customBuildingBuildQueue.splice(queueIndex, 1);
+                runtimeState.customBuildingBuildQueue.unshift(chunk);
+            }
+            scheduleCustomBuildingBuildPump(getCustomBuildingQueueDelay(priority), priority);
+        }
+
+        function finishCustomBuildingOverlayBuild(chunk, overlay, signature, builtCount) {
+            overlay.userData.tmBuildJob = null;
+            if (!builtCount) {
+                overlay.parent && overlay.parent.remove(overlay);
+                applyOriginalBuildingMeshVisibilityForChunk(chunk);
+                queueCustomBuildingCollisionInvalidation(chunk);
+                return !0;
+            }
+            overlay.userData.tmBuildSignature = signature;
+            overlay.userData.tmOptimizedSignature = "";
+            overlay.parent !== chunk.group && chunk.group.add(overlay);
+            chunk.__tmCustomBuildingOverlayBounds = getCustomBuildingOverlayBounds(chunk);
+            collectCustomBuildingDoorsForChunk(chunk, overlay);
+            chunk.__tmCustomBuildingOverlayReady = !0;
+            applyOriginalBuildingMeshVisibilityForChunk(chunk);
+            queueCustomBuildingCollisionInvalidation(chunk);
+            overlay.userData.tmBatchableMeshCount = countBatchableOverlayMeshes(overlay, CUSTOM_BUILDING_PERF.maxOptimizeMeshes + 1);
+            overlay.userData.tmBatchableMeshCountValid = !0;
+            overlay.userData.tmBatchableMeshCountLimit = CUSTOM_BUILDING_PERF.maxOptimizeMeshes + 1;
+            queueCustomBuildingOverlayOptimization(chunk, overlay, signature);
+            return !0;
+        }
+
+        function rebuildCustomBuildingsForChunkSlice(chunk, budgetMs, maxBuilds) {
+            if (!chunk || !chunk.group || !globalState.THREE)
+                return !0;
+            const matches = chunk.__tmMatchedCustomBuildings || runtimeState.customBuildingEntriesByChunk.get(chunk) || [];
+            const overlay = getOrCreateCustomBuildingOverlay(chunk);
+            if (!overlay)
+                return !0;
+            const signature = getCustomBuildingOverlaySignature(matches);
+            if (overlay.parent === chunk.group && overlay.userData && overlay.userData.tmBuildSignature === signature && chunk.__tmCustomBuildingOverlayReady)
+                return !0;
+            if (!matches.length || !isAny3dBuildingFeatureEnabled()) {
+                removeCustomBuildingDoorItemsForChunk(chunk);
+                clearCustomBuildingOverlayChildren(overlay);
+                overlay.userData.tmBuildSignature = "";
+                overlay.userData.tmBuildJob = null;
+                chunk.__tmCustomBuildingOverlayReady = !1;
+                overlay.parent && overlay.parent.remove(overlay);
+                applyOriginalBuildingMeshVisibilityForChunk(chunk);
+                queueCustomBuildingCollisionInvalidation(chunk);
+                return !0;
+            }
+            let job = overlay.userData && overlay.userData.tmBuildJob;
+            if (!job || job.signature !== signature) {
+                removeCustomBuildingDoorItemsForChunk(chunk);
+                overlay.parent && overlay.parent.remove(overlay);
+                clearCustomBuildingOverlayChildren(overlay);
+                overlay.userData.tmBuildSignature = "";
+                chunk.__tmCustomBuildingOverlayReady = !1;
+                job = {
+                    signature,
+                    matches: isDeveloperToggleEnabled("perfBuildJobMatchReuse") && Array.isArray(matches) ? matches : toSafeArray(matches).slice(),
+                    index: 0,
+                    builtCount: 0
+                };
+                overlay.userData.tmBuildJob = job;
+            }
+            const startedAt = performance.now();
+            const budget = Math.max(2, Number(budgetMs) || CUSTOM_BUILDING_PERF.sliceBudgetMs);
+            let builtThisSlice = 0;
+            const sliceBuildLimit = Math.max(1, Number(maxBuilds) || CUSTOM_BUILDING_PERF.maxBuildsPerSlice);
+            while (job.index < job.matches.length && builtThisSlice < sliceBuildLimit && (builtThisSlice < 1 || performance.now() - startedAt < budget)) {
+                const match = job.matches[job.index++];
                 try {
                     const object = buildCustomBuildingObject(match);
                     if (object) {
                         overlay.add(object);
-                        builtCount++;
+                        job.builtCount++;
                     }
                 } catch (buildError) {
                     markFeatureFault(match && match.entry && match.entry.__tmAuto3d ? "auto3dBuildings" : "customBuildings", buildError, `3D-Haus ${match && match.id || ""}`.trim());
                 }
+                builtThisSlice++;
             }
-            if (!builtCount) {
-                overlay.parent && overlay.parent.remove(overlay);
-                applyOriginalBuildingMeshVisibilityForChunk(chunk);
-                invalidateWorldCollisionCacheForChunk(chunk);
+            return job.index >= job.matches.length ? finishCustomBuildingOverlayBuild(chunk, overlay, signature, job.builtCount) : !1;
+        }
+
+        function processCustomBuildingBuildQueue(deadline) {
+            runtimeState.customBuildingBuildTimer = null;
+            if (!isAny3dBuildingFeatureEnabled()) {
+                runtimeState.customBuildingBuildQueue = [];
+                runtimeState.customBuildingQueuedChunks = new WeakSet;
+                clearCustomBuildingVisualsForLoadedChunks();
                 return;
             }
-            try {
-                optimizeCustomBuildingOverlay(overlay);
-            } catch (optimizeError) {
-                warn("Custom-Building-Optimierung fehlgeschlagen, zeige unoptimierte Geometrie:", optimizeError);
+            const startedAt = performance.now();
+            const idleBudget = getIdleTimeRemaining(deadline, CUSTOM_BUILDING_PERF.sliceBudgetMs);
+            const baseBudget = Math.max(CUSTOM_BUILDING_PERF.sliceBudgetMs, idleBudget);
+            sortCustomBuildingBuildQueue();
+            while (runtimeState.customBuildingBuildQueue.length) {
+                const chunk = runtimeState.customBuildingBuildQueue[0];
+                if (!chunk || !chunk.group) {
+                    runtimeState.customBuildingBuildQueue.shift();
+                    chunk && runtimeState.customBuildingQueuedChunks.delete(chunk);
+                    continue;
+                }
+                if (!chunk.__tmCustomBuildingsPrepared) {
+                    ensureChunkCustomBuildingsPrepared(chunk).catch(customBuildingError => warn(`Custom-Building-Vorbereitung fehlgeschlagen fuer Chunk ${chunk.cx}/${chunk.cz}:`, customBuildingError)).finally(() => scheduleCustomBuildingBuildPump(0));
+                    break;
+                }
+                const priority = isPriorityCustomBuildingChunk(chunk);
+                const speedFactor = getCustomBuildingStreamSpeedFactor();
+                const maxBuilds = priority ? CUSTOM_BUILDING_PERF.maxBuildsPerSlice + 1 : Math.max(1, CUSTOM_BUILDING_PERF.maxBuildsPerSlice - Math.round(speedFactor * 2));
+                const done = rebuildCustomBuildingsForChunkSlice(chunk, getCustomBuildingSliceBudget(priority, baseBudget), maxBuilds);
+                if (done) {
+                    runtimeState.customBuildingBuildQueue.shift();
+                    runtimeState.customBuildingQueuedChunks.delete(chunk);
+                    if (performance.now() - startedAt > baseBudget)
+                        break;
+                    continue;
+                }
+                break;
             }
-            overlay.userData.tmBuildSignature = signature;
-            overlay.parent !== chunk.group && chunk.group.add(overlay);
-            collectCustomBuildingDoorsForChunk(chunk, overlay);
-            chunk.__tmCustomBuildingOverlayReady = !0;
-            applyOriginalBuildingMeshVisibilityForChunk(chunk);
-            invalidateWorldCollisionCacheForChunk(chunk);
+            if (runtimeState.customBuildingBuildQueue.length)
+                scheduleCustomBuildingBuildPump(performance.now() - startedAt > baseBudget ? 18 : getCustomBuildingQueueDelay(!1));
+        }
+
+        function rebuildCustomBuildingsForChunk(chunk, reason) {
+            queueCustomBuildingRebuild(chunk, reason);
         }
 
         function cleanupChunkCustomVisuals(chunk) {
             invalidateWorldCollisionCacheForChunk(chunk);
+            if (chunk) {
+                runtimeState.customBuildingQueuedChunks.delete(chunk);
+                removeCustomBuildingBuildQueueChunk(chunk);
+            }
             const overlay = chunk && runtimeState.chunkCustomOverlayGroups.get(chunk);
             if (overlay) {
+                runtimeState.customBuildingOptimizeQueued.delete(overlay);
+                removeCustomBuildingOptimizeQueueOverlay(overlay);
                 overlay.parent && overlay.parent.remove(overlay);
                 clearCustomBuildingOverlayChildren(overlay);
             }
             chunk && (chunk.__tmCustomBuildingOverlayReady = !1);
+            chunk && (chunk.__tmCustomBuildingOverlayBounds = null);
             runtimeState.chunkCustomOverlayGroups.delete(chunk);
-            runtimeState.customBuildingDoorItems = runtimeState.customBuildingDoorItems.filter((item => item && item.chunk !== chunk));
+            removeCustomBuildingDoorItemsForChunk(chunk);
             resetCustomBuildingPreparationForChunk(chunk);
         }
 
@@ -12301,7 +15521,7 @@
                         rebuildTunnelBridgeOverlay(this);
                         refreshCustomBuildingDebug();
                         queueTownRebuild("chunk_build");
-                        isAny3dBuildingFeatureEnabled() ? ensureChunkCustomBuildingsPrepared(this).catch((customBuildingError => warn(`Custom-Building-Vorbereitung fehlgeschlagen fuer Chunk ${this.cx}/${this.cz}:`, customBuildingError))).finally((() => rebuildCustomBuildingsForChunk(this))) : cleanupChunkCustomVisuals(this);
+                        isAny3dBuildingFeatureEnabled() ? ensureChunkCustomBuildingsPrepared(this).catch((customBuildingError => warn(`Custom-Building-Vorbereitung fehlgeschlagen fuer Chunk ${this.cx}/${this.cz}:`, customBuildingError))).finally((() => rebuildCustomBuildingsForChunk(this, "chunk_build"))) : cleanupChunkCustomVisuals(this);
                         return result;
                     };
                     chunkProto.__tmTownSignsBuildPatched = !0;
@@ -12339,7 +15559,7 @@
                             refreshCustomBuildingDebug();
                             queueTownRebuild("chunk_check_loaded");
                             rebuildTunnelBridgeOverlay(this);
-                            isAny3dBuildingFeatureEnabled() ? rebuildCustomBuildingsForChunk(this) : cleanupChunkCustomVisuals(this);
+                            isAny3dBuildingFeatureEnabled() ? rebuildCustomBuildingsForChunk(this, "chunk_check_loaded") : cleanupChunkCustomVisuals(this);
                             showProgress && setCustomBuildingProgress(2, 2, isPriorityCustomBuildingChunk(this) ? "Adress-Haus vorbereiten" : "3D-Haeuser vorbereiten");
                             showProgress && finishCustomBuildingProgress();
                             return result;
@@ -12501,13 +15721,13 @@
                             for (const [aiId, aiCar] of this.carMaps) {
                                 if (!this.actives[aiId] || !this.carReady[aiId] || null == aiCar)
                                     continue;
-                                if (aiCar.getPosition().distanceTo(playerPosition) > 100)
+                                if (aiCar.getPosition().distanceToSquared(playerPosition) > 10000)
                                     continue;
 
                                 const relative = aiCar.getPosition().sub(player.getPosition());
                                 const sameDirection = Math.abs(aiCar.getForwardVector().angleTo(player.getForwardVector())) < Math.PI / 5;
                                 const relAngle = Math.abs(relative.clone().normalize().angleTo(aiCar.getForwardVector()));
-                                const aiAhead = relative.length() > aiCar.getPosition().add(aiCar.getForwardVector()).distanceTo(player.getPosition());
+                                const aiAhead = relative.lengthSq() > aiCar.getPosition().add(aiCar.getForwardVector()).distanceToSquared(player.getPosition());
                                 const nearlyStraight = relAngle < Math.PI / 10;
                                 const collisionState = aiCar.isInCollision3D(player);
                                 const combinedFront = this.frontSize[aiId] + playerTail + 5;
@@ -12854,6 +16074,7 @@
         }
 
         ensureStartMenuFeatureWatcher();
+        ensureDeveloperMenuHotkey();
         log("Bootstrap gestartet.", "readyState=", document.readyState, "realm=page", "href=", location.href);
         printFunctionHealthTable("bootstrap");
         installBundleSourceHook();
