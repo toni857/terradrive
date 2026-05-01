@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.2.7.37
+// @version      2.2.7.38
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -200,7 +200,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.2.7.37",
+            version: "2.2.7.38",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -595,6 +595,58 @@
             key: "perfSameEdgeDirectionSelect",
             label: "Same-edge direction select",
             defaultValue: !0
+        }, {
+            key: "perfCookieReadDirect",
+            label: "Cookie read direct",
+            defaultValue: !0
+        }, {
+            key: "perfFeatureSnapshotLoop",
+            label: "Feature snapshot loop",
+            defaultValue: !0
+        }, {
+            key: "perfFeatureDiagnosticLoop",
+            label: "Feature diagnostic loop",
+            defaultValue: !0
+        }, {
+            key: "perfInternalDiagnosticLoop",
+            label: "Internal diagnostic loop",
+            defaultValue: !0
+        }, {
+            key: "perfModuleFaultByFeatureLoop",
+            label: "Module fault by feature loop",
+            defaultValue: !0
+        }, {
+            key: "perfDependentFeatureLoop",
+            label: "Dependent feature loop",
+            defaultValue: !0
+        }, {
+            key: "perfFeatureMenuHtmlLoop",
+            label: "Feature menu HTML loop",
+            defaultValue: !0
+        }, {
+            key: "perfDeveloperMenuHtmlLoop",
+            label: "Developer menu HTML loop",
+            defaultValue: !0
+        }, {
+            key: "perfEscapeDeveloperTextFastPath",
+            label: "Escape developer text fast path",
+            defaultValue: !0
+        }, {
+            key: "perfHealthRowsAppend",
+            label: "Health rows append",
+            defaultValue: !0
+        }, {
+            key: "perfFeatureCookieLoadLoop",
+            label: "Feature cookie load loop",
+            defaultValue: !0
+        }, {
+            key: "perfFeatureSideEffectChunkReuse",
+            label: "Feature side-effect chunk reuse",
+            defaultValue: !0
+        }, {
+            key: "perfFeatureDependencyEnableLoop",
+            label: "Feature dependency enable loop",
+            defaultValue: !0
         }];
         const DEVELOPER_PERFORMANCE_ITEM_BY_KEY = Object.create(null);
         for (const item of DEVELOPER_PERFORMANCE_TOGGLE_ITEMS)
@@ -891,14 +943,34 @@
 
         function readCookieValue(name) {
             const prefix = `${name}=`;
+            if (isDeveloperToggleEnabled("perfCookieReadDirect")) {
+                const cookieText = document.cookie || "";
+                let start = 0;
+                for (let index = 0; index <= cookieText.length; index++) {
+                    if (index < cookieText.length && ";" !== cookieText[index])
+                        continue;
+                    let part = cookieText.slice(start, index);
+                    part.charAt(0) === " " && (part = part.trim());
+                    if (part.startsWith(prefix))
+                        return decodeURIComponent(part.slice(prefix.length));
+                    start = index + 1;
+                }
+                return "";
+            }
             const cookie = document.cookie.split(";").map((part => part.trim())).find((part => part.startsWith(prefix)));
             return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : "";
         }
 
         function getFeatureStateSnapshot() {
             const snapshot = {};
-            for (const key of Object.keys(featureState))
-                snapshot[key] = !!featureState[key];
+            if (isDeveloperToggleEnabled("perfFeatureSnapshotLoop"))
+                for (const key in featureState) {
+                    if (Object.prototype.hasOwnProperty.call(featureState, key))
+                        snapshot[key] = !!featureState[key];
+                }
+            else
+                for (const key of Object.keys(featureState))
+                    snapshot[key] = !!featureState[key];
             return snapshot;
         }
 
@@ -910,8 +982,14 @@
                 const features = JSON.parse(cookieValue);
                 if (!features || "object" != typeof features || Array.isArray(features))
                     return;
-                for (const key of Object.keys(featureState))
-                    key in features && (featureState[key] = !!features[key]);
+                if (isDeveloperToggleEnabled("perfFeatureCookieLoadLoop"))
+                    for (const key in featureState) {
+                        if (Object.prototype.hasOwnProperty.call(featureState, key) && key in features)
+                            featureState[key] = !!features[key];
+                    }
+                else
+                    for (const key of Object.keys(featureState))
+                        key in features && (featureState[key] = !!features[key]);
             } catch (e) {
                 console.warn('[TM] Failed to load feature state from cookies:', e);
             }
@@ -1268,6 +1346,29 @@
 
         // Central health output: one compact console.table is much easier to read than hundreds of scattered startup logs.
         function getFeatureDiagnosticRows() {
+            if (isDeveloperToggleEnabled("perfFeatureDiagnosticLoop")) {
+                const rows = [];
+                for (const item of FEATURE_MENU_ITEMS) {
+                    const fault = getFeatureFault(item.feature);
+                    const moduleFault = getInternalModuleFaultForFeature(item.feature);
+                    const dependencies = toSafeArray(FEATURE_DEPENDENCIES[item.feature]);
+                    const missingDependencies = [];
+                    for (const dependency of dependencies)
+                        featureState[dependency] || missingDependencies.push(dependency);
+                    const active = !!featureState[item.feature];
+                    const ok = active && !fault && !moduleFault && !missingDependencies.length;
+                    rows.push({
+                        typ: "feature",
+                        name: item.feature,
+                        label: item.label,
+                        aktiv: active,
+                        funktioniert: ok,
+                        abhaengigkeiten: dependencies.join(", ") || "-",
+                        fehler: fault && fault.message || moduleFault && moduleFault.message || missingDependencies.length && `Dependency aus: ${missingDependencies.join(", ")}` || ""
+                    });
+                }
+                return rows;
+            }
             return FEATURE_MENU_ITEMS.map(item => {
                 const fault = getFeatureFault(item.feature);
                 const moduleFault = getInternalModuleFaultForFeature(item.feature);
@@ -1288,6 +1389,27 @@
         }
 
         function getInternalDiagnosticRows() {
+            if (isDeveloperToggleEnabled("perfInternalDiagnosticLoop")) {
+                const rows = [];
+                for (const name in INTERNAL_MODULES) {
+                    if (!Object.prototype.hasOwnProperty.call(INTERNAL_MODULES, name))
+                        continue;
+                    const meta = INTERNAL_MODULES[name];
+                    const fault = getInternalModuleFault(name);
+                    const featureActive = meta.feature ? !!featureState[meta.feature] : !0;
+                    const enabled = isInternalModuleEnabled(name);
+                    rows.push({
+                        typ: "internal",
+                        name,
+                        label: meta.label,
+                        aktiv: enabled && featureActive,
+                        funktioniert: enabled && featureActive && !fault,
+                        abhaengigkeiten: meta.feature || "-",
+                        fehler: fault && fault.message || ""
+                    });
+                }
+                return rows;
+            }
             return Object.entries(INTERNAL_MODULES).map(([name, meta]) => {
                 const fault = getInternalModuleFault(name);
                 const featureActive = meta.feature ? !!featureState[meta.feature] : !0;
@@ -1305,7 +1427,14 @@
         }
 
         function printFunctionHealthTable(reason="manual") {
-            const rows = getFeatureDiagnosticRows().concat(getInternalDiagnosticRows());
+            let rows;
+            if (isDeveloperToggleEnabled("perfHealthRowsAppend")) {
+                rows = getFeatureDiagnosticRows();
+                const internalRows = getInternalDiagnosticRows();
+                for (const row of internalRows)
+                    rows.push(row);
+            } else
+                rows = getFeatureDiagnosticRows().concat(getInternalDiagnosticRows());
             console.groupCollapsed(`${PREFIX} Funktionsstatus (${reason})`);
             console.table(rows);
             console.groupEnd();
@@ -1326,6 +1455,18 @@
         function getInternalModuleFaultForFeature(featureName) {
             if (!featureName || !runtimeState.moduleFaults)
                 return null;
+            if (isDeveloperToggleEnabled("perfModuleFaultByFeatureLoop")) {
+                for (const moduleName in runtimeState.moduleFaults) {
+                    if (!Object.prototype.hasOwnProperty.call(runtimeState.moduleFaults, moduleName))
+                        continue;
+                    const fault = runtimeState.moduleFaults[moduleName];
+                    if (fault && getInternalModuleMeta(moduleName).feature === featureName)
+                        return Object.assign({
+                            moduleName
+                        }, fault);
+                }
+                return null;
+            }
             for (const [moduleName, fault] of Object.entries(runtimeState.moduleFaults))
                 if (fault && getInternalModuleMeta(moduleName).feature === featureName)
                     return Object.assign({
@@ -1345,8 +1486,12 @@
         }
 
         function clearInternalModuleFaultsForFeature(featureName) {
-            for (const moduleName of Object.keys(INTERNAL_MODULES))
-                getInternalModuleMeta(moduleName).feature === featureName && clearInternalModuleFault(moduleName);
+            if (isDeveloperToggleEnabled("perfModuleFaultByFeatureLoop")) {
+                for (const moduleName in INTERNAL_MODULES)
+                    Object.prototype.hasOwnProperty.call(INTERNAL_MODULES, moduleName) && getInternalModuleMeta(moduleName).feature === featureName && clearInternalModuleFault(moduleName);
+            } else
+                for (const moduleName of Object.keys(INTERNAL_MODULES))
+                    getInternalModuleMeta(moduleName).feature === featureName && clearInternalModuleFault(moduleName);
         }
 
         function markInternalModuleFault(name, failure, context) {
@@ -6472,10 +6617,11 @@
             if ("customBuildings" === name || "auto3dBuildings" === name) {
                 invalidateWorldCollisionCache();
                 clearCustomBuildingTransientPerfCaches(!0);
-                for (const chunk of getLoadedChunks())
+                const chunks = isDeveloperToggleEnabled("perfFeatureSideEffectChunkReuse") ? getLoadedChunks() : null;
+                for (const chunk of chunks || getLoadedChunks())
                     resetCustomBuildingPreparationForChunk(chunk);
                 if (isAny3dBuildingFeatureEnabled())
-                    prepareCustomBuildingsForChunks(getLoadedChunks(), "feature_toggle");
+                    prepareCustomBuildingsForChunks(chunks || getLoadedChunks(), "feature_toggle");
                 else
                     clearCustomBuildingVisualsForLoadedChunks();
             } else if ("townSigns" === name) {
@@ -6516,8 +6662,20 @@
 
         function getDependentFeatures(featureName) {
             const dependents = [];
-            for (const [feature, dependencies] of Object.entries(FEATURE_DEPENDENCIES))
-                toSafeArray(dependencies).includes(featureName) && dependents.push(feature);
+            if (isDeveloperToggleEnabled("perfDependentFeatureLoop")) {
+                for (const feature in FEATURE_DEPENDENCIES) {
+                    if (!Object.prototype.hasOwnProperty.call(FEATURE_DEPENDENCIES, feature))
+                        continue;
+                    const dependencies = toSafeArray(FEATURE_DEPENDENCIES[feature]);
+                    for (let index = 0; index < dependencies.length; index++)
+                        if (dependencies[index] === featureName) {
+                            dependents.push(feature);
+                            break;
+                        }
+                }
+            } else
+                for (const [feature, dependencies] of Object.entries(FEATURE_DEPENDENCIES))
+                    toSafeArray(dependencies).includes(featureName) && dependents.push(feature);
             return dependents;
         }
 
@@ -6532,16 +6690,28 @@
         }
 
         function enableFeatureDependencies(featureName) {
-            for (const dependency of toSafeArray(FEATURE_DEPENDENCIES[featureName])) {
-                if (!(dependency in featureState))
-                    continue;
-                if (featureState[dependency])
-                    continue;
-                featureState[dependency] = !0;
-                clearFeatureFault(dependency);
-                clearInternalModuleFaultsForFeature(dependency);
-                applyFeatureSideEffects(dependency);
-            }
+            const dependencies = toSafeArray(FEATURE_DEPENDENCIES[featureName]);
+            if (isDeveloperToggleEnabled("perfFeatureDependencyEnableLoop"))
+                for (let index = 0; index < dependencies.length; index++) {
+                    const dependency = dependencies[index];
+                    if (!(dependency in featureState) || featureState[dependency])
+                        continue;
+                    featureState[dependency] = !0;
+                    clearFeatureFault(dependency);
+                    clearInternalModuleFaultsForFeature(dependency);
+                    applyFeatureSideEffects(dependency);
+                }
+            else
+                for (const dependency of dependencies) {
+                    if (!(dependency in featureState))
+                        continue;
+                    if (featureState[dependency])
+                        continue;
+                    featureState[dependency] = !0;
+                    clearFeatureFault(dependency);
+                    clearInternalModuleFaultsForFeature(dependency);
+                    applyFeatureSideEffects(dependency);
+                }
         }
 
         function markFeatureFault(name, failure, context) {
@@ -6632,13 +6802,19 @@
             panel = document.createElement("div");
             panel.id = id;
             panel.style.cssText = "box-sizing:border-box;width:min(760px,calc(100% - 24px));margin:12px auto 0;padding:10px 12px;border-top:1px solid rgba(255,255,255,.16);border-bottom:1px solid rgba(255,255,255,.08);color:inherit;font:600 12px/1.35 Arial,Helvetica,sans-serif;text-align:left;";
+            let featureHtml = "";
+            if (isDeveloperToggleEnabled("perfFeatureMenuHtmlLoop"))
+                for (const item of FEATURE_MENU_ITEMS)
+                    featureHtml += `<label style="display:flex;gap:6px;align-items:center;"><input type="checkbox" data-feature="${item.feature}"> ${item.label}</label>`;
+            else
+                featureHtml = FEATURE_MENU_ITEMS.map(item => `<label style="display:flex;gap:6px;align-items:center;"><input type="checkbox" data-feature="${item.feature}"> ${item.label}</label>`).join("");
             panel.innerHTML = `
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;">
                     <div style="letter-spacing:.04em;text-transform:uppercase;opacity:.82;">${title}</div>
                     <button type="button" data-role="openNavi" style="border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.08);color:inherit;border-radius:8px;padding:5px 8px;font:inherit;cursor:pointer;">Navi</button>
                 </div>
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:6px 12px;">
-                    ${FEATURE_MENU_ITEMS.map(item => `<label style="display:flex;gap:6px;align-items:center;"><input type="checkbox" data-feature="${item.feature}"> ${item.label}</label>`).join("")}
+                    ${featureHtml}
                 </div>
             `;
             panel.addEventListener("change", (event => {
@@ -6655,7 +6831,10 @@
         }
 
         function escapeDeveloperText(value) {
-            return String(value == null ? "" : value).replace(/[&<>"']/g, char => ({
+            const text = String(value == null ? "" : value);
+            if (isDeveloperToggleEnabled("perfEscapeDeveloperTextFastPath") && !/[&<>"']/.test(text))
+                return text;
+            return text.replace(/[&<>"']/g, char => ({
                 "&": "&amp;",
                 "<": "&lt;",
                 ">": "&gt;",
@@ -6679,9 +6858,23 @@
             panel = document.createElement("div");
             panel.id = id;
             panel.style.cssText = "position:fixed;z-index:2147483646;left:50%;top:48px;transform:translateX(-50%);box-sizing:border-box;width:min(920px,calc(100vw - 24px));max-height:calc(100vh - 96px);overflow:auto;padding:12px;border:1px solid rgba(255,190,80,.55);background:rgba(18,18,20,.96);box-shadow:0 18px 50px rgba(0,0,0,.45);color:#f8f3e8;font:600 12px/1.35 Arial,Helvetica,sans-serif;text-align:left;display:none;";
-            const featureHtml = Object.keys(featureState).sort().map(feature => `<label style="${getDeveloperLabelStyle()}"><input type="checkbox" data-dev-feature="${escapeDeveloperText(feature)}"> <span>${escapeDeveloperText(feature)}</span></label>`).join("");
-            const moduleHtml = getDeveloperModuleItems().map(item => `<label style="${getDeveloperLabelStyle()}"><input type="checkbox" data-dev-module="${escapeDeveloperText(item.name)}"> <span>${escapeDeveloperText(item.label)}${item.feature ? ` (${escapeDeveloperText(item.feature)})` : ""}</span></label>`).join("");
-            const perfHtml = DEVELOPER_PERFORMANCE_TOGGLE_ITEMS.map(item => `<label style="${getDeveloperLabelStyle()}"><input type="checkbox" data-dev-toggle="${escapeDeveloperText(item.key)}"> <span>${escapeDeveloperText(item.label)}</span></label>`).join("");
+            let featureHtml = "";
+            let moduleHtml = "";
+            let perfHtml = "";
+            if (isDeveloperToggleEnabled("perfDeveloperMenuHtmlLoop")) {
+                const labelStyle = getDeveloperLabelStyle();
+                const featureNames = Object.keys(featureState).sort();
+                for (const feature of featureNames)
+                    featureHtml += `<label style="${labelStyle}"><input type="checkbox" data-dev-feature="${escapeDeveloperText(feature)}"> <span>${escapeDeveloperText(feature)}</span></label>`;
+                for (const item of getDeveloperModuleItems())
+                    moduleHtml += `<label style="${labelStyle}"><input type="checkbox" data-dev-module="${escapeDeveloperText(item.name)}"> <span>${escapeDeveloperText(item.label)}${item.feature ? ` (${escapeDeveloperText(item.feature)})` : ""}</span></label>`;
+                for (const item of DEVELOPER_PERFORMANCE_TOGGLE_ITEMS)
+                    perfHtml += `<label style="${labelStyle}"><input type="checkbox" data-dev-toggle="${escapeDeveloperText(item.key)}"> <span>${escapeDeveloperText(item.label)}</span></label>`;
+            } else {
+                featureHtml = Object.keys(featureState).sort().map(feature => `<label style="${getDeveloperLabelStyle()}"><input type="checkbox" data-dev-feature="${escapeDeveloperText(feature)}"> <span>${escapeDeveloperText(feature)}</span></label>`).join("");
+                moduleHtml = getDeveloperModuleItems().map(item => `<label style="${getDeveloperLabelStyle()}"><input type="checkbox" data-dev-module="${escapeDeveloperText(item.name)}"> <span>${escapeDeveloperText(item.label)}${item.feature ? ` (${escapeDeveloperText(item.feature)})` : ""}</span></label>`).join("");
+                perfHtml = DEVELOPER_PERFORMANCE_TOGGLE_ITEMS.map(item => `<label style="${getDeveloperLabelStyle()}"><input type="checkbox" data-dev-toggle="${escapeDeveloperText(item.key)}"> <span>${escapeDeveloperText(item.label)}</span></label>`).join("");
+            }
             panel.innerHTML = `
                 <details open>
                     <summary style="cursor:pointer;letter-spacing:.04em;text-transform:uppercase;color:#ffd79a;">Developer Menu (F8)</summary>
