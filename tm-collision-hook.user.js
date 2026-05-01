@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.2.7.14
+// @version      2.2.7.15
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -200,7 +200,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.1.7.14",
+            version: "2.2.7.15",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -10061,6 +10061,25 @@
             return best && best.frame;
         }
 
+        function getDoorGroundYForWallFrame(frame, centerU, width, baseY, spec) {
+            // Doors must start at terrain height, even when the house floor was raised and a foundation exists.
+            if (!frame || !globalState.THREE)
+                return Number(baseY) || 0;
+            const worldOffset = getCustomBuildingWorldOffset(spec);
+            const sampleRange = Math.max(.08, Number(width) * .44 || .44);
+            const samples = [0, -sampleRange, sampleRange];
+            let bestY = Number(baseY) || 0;
+            for (const sample of samples) {
+                const sampleU = clamp((Number(centerU) || 0) + sample, 0, Number(frame.length) || 0);
+                const worldX = worldOffset.x + (Number(frame.start.x) || 0) + frame.alongX * sampleU;
+                const worldZ = worldOffset.z + (Number(frame.start.z) || 0) + frame.alongZ * sampleU;
+                const terrainY = getTerrainYWorld(new globalState.THREE.Vector3(worldX,bestY,worldZ), bestY);
+                if (Number.isFinite(terrainY))
+                    bestY = Math.min(bestY, terrainY);
+            }
+            return bestY;
+        }
+
         function computeWallDetailPlacement(points, baseY, bodyHeight, spec, anchorPoint, detail, size, kind) {
             // Most exported parts are relative to the house center; this converts them to an actual wall-local opening.
             if (!Array.isArray(points) || points.length < 3 || !anchorPoint || detail && detail.absolute)
@@ -10085,12 +10104,13 @@
             const localZ = (Number(frame.start.z) || 0) + frame.alongZ * centerU + frame.normalZ * wallDepth / 2;
             const rawCenterY = (Number(anchorPoint.y) || 0) + (Number(position[1]) || 0);
             const grounded = "door" === kind;
-            const minCenterY = baseY + height / 2;
+            const doorGroundY = grounded ? getDoorGroundYForWallFrame(frame, centerU, width, baseY, spec) : baseY;
+            const minCenterY = doorGroundY + height / 2;
             const maxCenterY = baseY + Math.max(height / 2 + .02, bodyHeight - height / 2 - .08);
             const centerY = grounded ? minCenterY : clamp(rawCenterY || baseY + 1.25 + height / 2, minCenterY + .45, maxCenterY);
             const openingPad = grounded ? .018 : .018;
             const yPad = grounded ? .075 : openingPad;
-            const y1 = grounded ? -.08 : Math.max(.025, centerY - baseY - height / 2 - yPad);
+            const y1 = grounded ? doorGroundY - baseY - yPad : Math.max(.025, centerY - baseY - height / 2 - yPad);
             const y2 = Math.min(bodyHeight - .025, centerY - baseY + height / 2 + openingPad);
             return {
                 edgeIndex: frame.index,
@@ -10099,6 +10119,7 @@
                 normalX: frame.normalX,
                 normalZ: frame.normalZ,
                 wallDepth,
+                doorGroundY,
                 kind,
                 rect: {
                     x1: Math.max(.025, centerU - width / 2 - openingPad),
@@ -10209,11 +10230,43 @@
             return getFootprintTerrainExtents(points, baseY, spec).minY;
         }
 
+        function createFoundationDoorOpenings(spec, baseY, foundationY, foundationHeight) {
+            // Foundation meshes use their own Y-space, so door cutouts are shifted down from the wall body.
+            const height = Math.max(0, Number(foundationHeight) || 0);
+            if (height <= .06)
+                return null;
+            const doors = [];
+            for (const opening of toSafeArray(spec && spec.__tmWallOpenings && spec.__tmWallOpenings.doors)) {
+                const rect = opening && (opening.rect || opening);
+                if (!rect)
+                    continue;
+                const y1 = clamp((Number(baseY) || 0) + (Number(rect.y1) || 0) - (Number(foundationY) || 0), 0, height);
+                const y2 = height;
+                if ((Number(rect.x2) || 0) - (Number(rect.x1) || 0) <= .06 || y2 - y1 <= .06)
+                    continue;
+                doors.push({
+                    edgeIndex: opening.edgeIndex,
+                    kind: "door",
+                    rect: {
+                        x1: Number(rect.x1) || 0,
+                        x2: Number(rect.x2) || 0,
+                        y1,
+                        y2
+                    }
+                });
+            }
+            return doors.length ? {
+                doors,
+                windows: []
+            } : null;
+        }
+
         function createCustomBuildingFoundation(points, baseY, foundationY, colorValue, spec) {
             const height = Math.max(0, Number(baseY) - Number(foundationY));
             if (height < BUILDING_FIT_CONFIG.foundationMinHeight)
                 return null;
-            return createCustomBuildingBody(points, foundationY, height, null != colorValue ? colorValue : 14540253, deepMergeConfig(spec || {}, {
+            const foundationOpenings = createFoundationDoorOpenings(spec, baseY, foundationY, height);
+            const foundationSpec = deepMergeConfig(spec || {}, {
                 windows: {
                     enabled: !1,
                     cutHoles: !1
@@ -10222,9 +10275,12 @@
                     enabled: !1
                 },
                 base: {
-                    solid: !0
+                    solid: !foundationOpenings
                 }
-            }));
+            });
+            if (foundationOpenings)
+                foundationSpec.__tmWallOpenings = foundationOpenings;
+            return createCustomBuildingBody(points, foundationY, height, null != colorValue ? colorValue : 14540253, foundationSpec);
         }
 
         function createCustomBuildingSlab(points, baseY, thickness, colorValue, spec, name) {
