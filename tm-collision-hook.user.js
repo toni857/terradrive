@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.2.7.38
+// @version      2.2.7.39
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -200,7 +200,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.2.7.38",
+            version: "2.2.7.39",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -647,6 +647,42 @@
             key: "perfFeatureDependencyEnableLoop",
             label: "Feature dependency enable loop",
             defaultValue: !0
+        }, {
+            key: "perfTownLabelWhitespaceFastPath",
+            label: "Town-label whitespace fast path",
+            defaultValue: !0
+        }, {
+            key: "perfTownLabelLetterScan",
+            label: "Town-label letter scan",
+            defaultValue: !0
+        }, {
+            key: "perfElementLabelTextFastPath",
+            label: "Element label text fast path",
+            defaultValue: !0
+        }, {
+            key: "perfOverlayClearKindFastPath",
+            label: "Overlay clear kind fast path",
+            defaultValue: !0
+        }, {
+            key: "perfNaviPresetHtmlLoop",
+            label: "Navi preset HTML loop",
+            defaultValue: !0
+        }, {
+            key: "perfBuildingDebugIdCache",
+            label: "Building debug-id cache",
+            defaultValue: !0
+        }, {
+            key: "perfChunkBoundsCache",
+            label: "Chunk bounds cache",
+            defaultValue: !0
+        }, {
+            key: "perfFootprintBoundsLoop",
+            label: "Footprint bounds loop",
+            defaultValue: !0
+        }, {
+            key: "perfBuildingFootprintLoop",
+            label: "Building footprint loop",
+            defaultValue: !0
         }];
         const DEVELOPER_PERFORMANCE_ITEM_BY_KEY = Object.create(null);
         for (const item of DEVELOPER_PERFORMANCE_TOGGLE_ITEMS)
@@ -950,7 +986,7 @@
                     if (index < cookieText.length && ";" !== cookieText[index])
                         continue;
                     let part = cookieText.slice(start, index);
-                    part.charAt(0) === " " && (part = part.trim());
+                    part.charCodeAt(0) <= 32 && (part = part.trim());
                     if (part.startsWith(prefix))
                         return decodeURIComponent(part.slice(prefix.length));
                     start = index + 1;
@@ -2715,6 +2751,28 @@
 
         function normalizeTownLabel(value) {
             const raw = String(value || "");
+            if (isDeveloperToggleEnabled("perfTownLabelWhitespaceFastPath")) {
+                let alreadyNormalized = !0;
+                let previousSpace = !1;
+                for (let index = 0; index < raw.length; index++) {
+                    const code = raw.charCodeAt(index);
+                    if (code > 126) {
+                        alreadyNormalized = !1;
+                        break;
+                    }
+                    const isSpace = 32 === code;
+                    if (code <= 32) {
+                        if (!isSpace || 0 === index || index === raw.length - 1 || previousSpace) {
+                            alreadyNormalized = !1;
+                            break;
+                        }
+                        previousSpace = !0;
+                    } else
+                        previousSpace = !1;
+                }
+                if (alreadyNormalized)
+                    return raw;
+            }
             if (!isDeveloperToggleEnabled("perfTownLabelCache"))
                 return raw.replace(/\s+/g, " ").trim();
             const cache = runtimeState.normalizedLabelCache instanceof Map ? runtimeState.normalizedLabelCache : runtimeState.normalizedLabelCache = new Map;
@@ -2727,7 +2785,17 @@
 
         function isLikelyTownLabel(value) {
             const text = normalizeTownLabel(value);
-            return text.length >= 2 && text.length <= 48 && /[A-Za-z]/.test(text);
+            if (text.length < 2 || text.length > 48)
+                return !1;
+            if (isDeveloperToggleEnabled("perfTownLabelLetterScan")) {
+                for (let index = 0; index < text.length; index++) {
+                    const code = text.charCodeAt(index);
+                    if (code >= 65 && code <= 90 || code >= 97 && code <= 122)
+                        return !0;
+                }
+                return !1;
+            }
+            return /[A-Za-z]/.test(text);
         }
 
         function extractTownBaseLabel(value, source) {
@@ -5553,6 +5621,12 @@
             const panel = document.createElement("div");
             panel.id = "__tmNaviPanel";
             panel.style.cssText = "position:fixed;left:16px;bottom:16px;z-index:999999;width:min(360px,calc(100vw - 32px));box-sizing:border-box;background:rgba(17,24,31,.94);color:#f5f1e8;border:1px solid rgba(255,255,255,.16);border-radius:10px;box-shadow:0 16px 42px rgba(0,0,0,.35);padding:12px;font:600 13px/1.35 Arial,Helvetica,sans-serif;display:none;backdrop-filter:blur(10px);";
+            let presetHtml = "";
+            if (isDeveloperToggleEnabled("perfNaviPresetHtmlLoop"))
+                for (const preset of NAV_PRESETS)
+                    presetHtml += `<button type="button" data-preset="${preset.type}" style="border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.08);color:#f5f1e8;border-radius:8px;padding:7px 6px;font:inherit;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${preset.label}</button>`;
+            else
+                presetHtml = NAV_PRESETS.map(preset => `<button type="button" data-preset="${preset.type}" style="border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.08);color:#f5f1e8;border-radius:8px;padding:7px 6px;font:inherit;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${preset.label}</button>`).join("");
             panel.innerHTML = `
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;">
                     <div style="letter-spacing:.04em;text-transform:uppercase;color:#d8d0c4;">Navi</div>
@@ -5563,7 +5637,7 @@
                     <button type="button" data-mode="guide" style="border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.08);color:#f5f1e8;border-radius:8px;padding:7px 6px;font:inherit;cursor:pointer;">Weg zeigen</button>
                 </div>
                 <div data-role="presets" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:10px;">
-                    ${NAV_PRESETS.map(preset => `<button type="button" data-preset="${preset.type}" style="border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.08);color:#f5f1e8;border-radius:8px;padding:7px 6px;font:inherit;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${preset.label}</button>`).join("")}
+                    ${presetHtml}
                 </div>
                 <form data-role="addressForm" style="display:flex;gap:6px;margin-bottom:8px;">
                     <input data-role="address" type="search" placeholder="3970 Lauterbach 20" style="flex:1;min-width:0;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.08);color:#fff8eb;border-radius:8px;padding:8px 9px;font:inherit;outline:none;">
@@ -6546,6 +6620,20 @@
         }
 
         function clearRuntimeOverlayItemsByKind(kinds) {
+            if (isDeveloperToggleEnabled("perfOverlayClearKindFastPath") && Array.isArray(kinds) && 1 === kinds.length) {
+                const targetKind = kinds[0];
+                const kept = [];
+                for (const item of runtimeState.overlayItems) {
+                    if (!item || item.kind !== targetKind) {
+                        item && kept.push(item);
+                        continue;
+                    }
+                    item.group && item.group.parent && item.group.parent.remove(item.group);
+                    item.group && disposeObject3D(item.group);
+                }
+                runtimeState.overlayItems = kept;
+                return;
+            }
             const kindSet = new Set(toSafeArray(kinds));
             if (!kindSet.size)
                 return;
@@ -6988,7 +7076,31 @@
         }
 
         function getElementLabelText(element) {
-            return normalizeTownLabel((element && (element.textContent || element.value || element.getAttribute && element.getAttribute("aria-label"))) || "");
+            const raw = (element && (element.textContent || element.value || element.getAttribute && element.getAttribute("aria-label"))) || "";
+            if (isDeveloperToggleEnabled("perfElementLabelTextFastPath")) {
+                const text = String(raw || "");
+                let normalized = !0;
+                let previousSpace = !1;
+                for (let index = 0; index < text.length; index++) {
+                    const code = text.charCodeAt(index);
+                    if (code > 126) {
+                        normalized = !1;
+                        break;
+                    }
+                    const isSpace = 32 === code;
+                    if (code <= 32) {
+                        if (!isSpace || 0 === index || index === text.length - 1 || previousSpace) {
+                            normalized = !1;
+                            break;
+                        }
+                        previousSpace = !0;
+                    } else
+                        previousSpace = !1;
+                }
+                if (normalized)
+                    return text;
+            }
+            return normalizeTownLabel(raw);
         }
 
         function findStartMenuTarget() {
@@ -11385,7 +11497,23 @@
         }
 
         function getBuildingDebugId(chunk, building) {
-            return `${Math.round(Number(chunk && chunk.cx) || 0)}:${Math.round(Number(chunk && chunk.cz) || 0)}/${Number(building && building.index) || 0}`;
+            const cx = Math.round(Number(chunk && chunk.cx) || 0);
+            const cz = Math.round(Number(chunk && chunk.cz) || 0);
+            const index = Number(building && building.index) || 0;
+            if (isDeveloperToggleEnabled("perfBuildingDebugIdCache") && building) {
+                const cached = building.__tmDebugIdCache;
+                if (cached && cached.cx === cx && cached.cz === cz && cached.index === index)
+                    return cached.value;
+                const value = `${cx}:${cz}/${index}`;
+                building.__tmDebugIdCache = {
+                    cx,
+                    cz,
+                    index,
+                    value
+                };
+                return value;
+            }
+            return `${cx}:${cz}/${index}`;
         }
 
         function refreshCustomBuildingDebug(force=!1) {
@@ -11891,10 +12019,35 @@
         function isWorldPositionInsideChunk(position, chunk, padding=0) {
             if (!position || !chunk)
                 return !1;
-            const cx = Number(chunk.cx) || 0;
-            const cz = Number(chunk.cz) || 0;
-            const halfWidth = (Number(chunk.width) || 512) / 2 + Math.max(0, Number(padding) || 0);
-            const halfHeight = (Number(chunk.height) || 512) / 2 + Math.max(0, Number(padding) || 0);
+            let cx;
+            let cz;
+            let halfWidth;
+            let halfHeight;
+            const safePadding = Math.max(0, Number(padding) || 0);
+            if (isDeveloperToggleEnabled("perfChunkBoundsCache")) {
+                const width = Number(chunk.width) || 512;
+                const height = Number(chunk.height) || 512;
+                const key = `${Number(chunk.cx) || 0}:${Number(chunk.cz) || 0}:${width}:${height}:${safePadding}`;
+                let cached = chunk.__tmWorldBoundsCache;
+                if (!cached || cached.key !== key) {
+                    cached = chunk.__tmWorldBoundsCache = {
+                        key,
+                        cx: Number(chunk.cx) || 0,
+                        cz: Number(chunk.cz) || 0,
+                        halfWidth: width / 2 + safePadding,
+                        halfHeight: height / 2 + safePadding
+                    };
+                }
+                cx = cached.cx;
+                cz = cached.cz;
+                halfWidth = cached.halfWidth;
+                halfHeight = cached.halfHeight;
+            } else {
+                cx = Number(chunk.cx) || 0;
+                cz = Number(chunk.cz) || 0;
+                halfWidth = (Number(chunk.width) || 512) / 2 + safePadding;
+                halfHeight = (Number(chunk.height) || 512) / 2 + safePadding;
+            }
             return Math.abs(position.x - cx) <= halfWidth && Math.abs(position.z - cz) <= halfHeight;
         }
 
@@ -11960,6 +12113,33 @@
         }
 
         function getFootprintBounds(points) {
+            if (isDeveloperToggleEnabled("perfFootprintBoundsLoop")) {
+                const list = Array.isArray(points) ? points : [];
+                let minX = 1 / 0;
+                let maxX = -1 / 0;
+                let minZ = 1 / 0;
+                let maxZ = -1 / 0;
+                for (let index = 0; index < list.length; index++) {
+                    const point = list[index];
+                    const x = Number(point && point.x) || 0;
+                    const z = Number(point && point.z) || 0;
+                    x < minX && (minX = x);
+                    x > maxX && (maxX = x);
+                    z < minZ && (minZ = z);
+                    z > maxZ && (maxZ = z);
+                }
+                return Number.isFinite(minX) ? {
+                    minX,
+                    maxX,
+                    minZ,
+                    maxZ
+                } : {
+                    minX: 0,
+                    maxX: 0,
+                    minZ: 0,
+                    maxZ: 0
+                };
+            }
             const bounds = {
                 minX: 1 / 0,
                 maxX: -1 / 0,
@@ -12627,16 +12807,29 @@
             const points = [];
             let sumX = 0;
             let sumZ = 0;
-            for (const point of rawPoints) {
-                const x = Number(Array.isArray(point) ? point[0] : point.x) || 0;
-                const z = Number(Array.isArray(point) ? point[1] : point.z) || 0;
-                points.push({
-                    x,
-                    z
-                });
-                sumX += x;
-                sumZ += z;
-            }
+            if (isDeveloperToggleEnabled("perfBuildingFootprintLoop"))
+                for (let index = 0; index < rawPoints.length; index++) {
+                    const point = rawPoints[index];
+                    const x = Number(Array.isArray(point) ? point[0] : point.x) || 0;
+                    const z = Number(Array.isArray(point) ? point[1] : point.z) || 0;
+                    points.push({
+                        x,
+                        z
+                    });
+                    sumX += x;
+                    sumZ += z;
+                }
+            else
+                for (const point of rawPoints) {
+                    const x = Number(Array.isArray(point) ? point[0] : point.x) || 0;
+                    const z = Number(Array.isArray(point) ? point[1] : point.z) || 0;
+                    points.push({
+                        x,
+                        z
+                    });
+                    sumX += x;
+                    sumZ += z;
+                }
             const inset = Number(spec && spec.base && spec.base.inset) || 0;
             if (Math.abs(inset) < 1e-6)
                 return points;
