@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.2.7.15
+// @version      2.2.7.16
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -200,7 +200,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.2.7.15",
+            version: "2.2.7.16",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -10240,7 +10240,7 @@
                 const rect = opening && (opening.rect || opening);
                 if (!rect)
                     continue;
-                const y1 = clamp((Number(baseY) || 0) + (Number(rect.y1) || 0) - (Number(foundationY) || 0), 0, height);
+                const y1 = 0;
                 const y2 = height;
                 if ((Number(rect.x2) || 0) - (Number(rect.x1) || 0) <= .06 || y2 - y1 <= .06)
                     continue;
@@ -11389,16 +11389,21 @@
                 const leafMaterial = createDetailStandardMaterial(detail, {
                     materialKind: detail.materialKind || "wood"
                 });
+                // Door frames stay wall-deep, but the moving leaf must stay thin so it does not block the passage.
                 group.add(createRuntimeBox([width, frameThickness, depth], frameMaterial, [0, height / 2 - frameThickness / 2, 0]));
-                group.add(createRuntimeBox([frameThickness, height, depth], frameMaterial, [-width / 2 + frameThickness / 2, 0, 0]));
-                group.add(createRuntimeBox([frameThickness, height, depth], frameMaterial, [width / 2 - frameThickness / 2, 0, 0]));
+                const sideFrameHeight = Math.max(.05, height - frameThickness);
+                const sideFrameCenterY = -frameThickness / 2;
+                group.add(createRuntimeBox([frameThickness, sideFrameHeight, depth], frameMaterial, [-width / 2 + frameThickness / 2, sideFrameCenterY, 0]));
+                group.add(createRuntimeBox([frameThickness, sideFrameHeight, depth], frameMaterial, [width / 2 - frameThickness / 2, sideFrameCenterY, 0]));
                 const hingeLeft = String(detail.hingeSide || detail.hinge || "left").toLowerCase() !== "right";
                 const pivot = new THREE.Group;
                 pivot.name = "__tmCustomBuildingDoor";
                 pivot.position.set(hingeLeft ? -width / 2 + frameThickness / 2 : width / 2 - frameThickness / 2, 0, 0);
                 const leafWidth = Math.max(.08, width - frameThickness * 1.5);
-                const leafHeight = Math.max(.08, height - frameThickness);
-                const leaf = createRuntimeBox([leafWidth, leafHeight, Math.max(.03, depth * .82)], leafMaterial, [hingeLeft ? leafWidth / 2 : -leafWidth / 2, -frameThickness / 2, 0]);
+                const leafFloorClearance = clamp(Number(detail.leafFloorClearance) || .035, 0, .09);
+                const leafHeight = Math.max(.08, height - frameThickness - leafFloorClearance);
+                const leafDepth = clamp(Number(detail.leafDepth) || Number(detail.doorDepth) || Math.min(size[2] || .07, .075), .025, Math.min(.12, Math.max(.035, depth * .35)));
+                const leaf = createRuntimeBox([leafWidth, leafHeight, leafDepth], leafMaterial, [hingeLeft ? leafWidth / 2 : -leafWidth / 2, -frameThickness / 2 + leafFloorClearance / 2, 0]);
                 detail.staticDoor || (leaf.userData.tmDynamicDoor = !0);
                 pivot.add(leaf);
                 const modelerOpen = detail.isOpen ? clamp(Number(detail.openAngle) || 90, 0, 180) : 0;
@@ -11443,7 +11448,8 @@
             group.name = "__tmCustomBuildingDoor";
             group.position.copy(pivot);
             group.rotation.set(rx, ry, rz);
-            const mesh = new THREE.Mesh(new THREE.BoxGeometry(size[0], size[1], size[2]), createDetailMaterial(Object.assign({
+            const leafDepth = clamp(Number(detail.leafDepth) || Number(detail.doorDepth) || Math.min(size[2] || .07, .075), .025, Math.min(.12, Math.max(.035, size[2] * .5)));
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(size[0], size[1], leafDepth), createDetailMaterial(Object.assign({
                 color: 0x3a2a1f
             }, detail)));
             mesh.position.set(sideSign * size[0] / 2, 0, 0);
