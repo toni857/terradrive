@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.1.7.13
+// @version      2.2.7.14
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -191,7 +191,7 @@
             CHUNK: 4763,
             TERRAIN: 5367,
             TREE_LIBRARY: 419,
-            BIOM: 495,
+            BIOM: 6081,
             MISSION_MANAGER: 5769,
             GAME_MENU: 9479,
             BUFFER_GEOMETRY_UTILS: 1566,
@@ -200,7 +200,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.1.7.13",
+            version: "2.1.7.14",
             require: null,
             patched: !1,
             patchStarted: !1,
