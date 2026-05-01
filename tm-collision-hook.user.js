@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.2.7.39
+// @version      2.2.7.40
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -200,7 +200,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.2.7.39",
+            version: "2.2.7.40",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -682,6 +682,42 @@
         }, {
             key: "perfBuildingFootprintLoop",
             label: "Building footprint loop",
+            defaultValue: !0
+        }, {
+            key: "perfDistanceSqrtFastPath",
+            label: "Distance sqrt fast path",
+            defaultValue: !0
+        }, {
+            key: "perfOverlayGeometryKeyDirect",
+            label: "Overlay geometry key direct",
+            defaultValue: !0
+        }, {
+            key: "perfAirportOverlayDuplicateScan",
+            label: "Airport duplicate scan",
+            defaultValue: !0
+        }, {
+            key: "perfOverlayVisibilityDistanceMath",
+            label: "Overlay visibility distance math",
+            defaultValue: !0
+        }, {
+            key: "perfFootprintCenterLoop",
+            label: "Footprint center loop",
+            defaultValue: !0
+        }, {
+            key: "perfFootprintAreaLoop",
+            label: "Footprint area loop",
+            defaultValue: !0
+        }, {
+            key: "perfFootprintSampleLoop",
+            label: "Footprint sample loop",
+            defaultValue: !0
+        }, {
+            key: "perfDoorItemRemovalInPlace",
+            label: "Door item removal in-place",
+            defaultValue: !0
+        }, {
+            key: "perfOptimizeQueueRemovalInPlace",
+            label: "Optimize queue removal in-place",
             defaultValue: !0
         }];
         const DEVELOPER_PERFORMANCE_ITEM_BY_KEY = Object.create(null);
@@ -2842,6 +2878,11 @@
         }
 
         function townDistance2D(a, b) {
+            if (isDeveloperToggleEnabled("perfDistanceSqrtFastPath")) {
+                const dx = (Number(a && a.x) || 0) - (Number(b && b.x) || 0);
+                const dz = (Number(a && a.z) || 0) - (Number(b && b.z) || 0);
+                return Math.sqrt(dx * dx + dz * dz);
+            }
             return Math.hypot((Number(a.x) || 0) - (Number(b.x) || 0), (Number(a.z) || 0) - (Number(b.z) || 0));
         }
 
@@ -3919,6 +3960,11 @@
         function getDistance2D(a, b) {
             if (!a || !b)
                 return 1 / 0;
+            if (isDeveloperToggleEnabled("perfDistanceSqrtFastPath")) {
+                const dx = (Number(a.x) || 0) - (Number(b.x) || 0);
+                const dz = (Number(a.z) || 0) - (Number(b.z) || 0);
+                return Math.sqrt(dx * dx + dz * dz);
+            }
             return Math.hypot((Number(a.x) || 0) - (Number(b.x) || 0), (Number(a.z) || 0) - (Number(b.z) || 0));
         }
 
@@ -7460,19 +7506,17 @@
 
         function getSharedOverlayBoxGeometry(size) {
             const THREE = globalState.THREE;
-            const safeSize = [
-                Math.max(.001, Number(size && size[0]) || .001),
-                Math.max(.001, Number(size && size[1]) || .001),
-                Math.max(.001, Number(size && size[2]) || .001)
-            ];
+            const sx = Math.max(.001, Number(size && size[0]) || .001);
+            const sy = Math.max(.001, Number(size && size[1]) || .001);
+            const sz = Math.max(.001, Number(size && size[2]) || .001);
             if (!isDeveloperToggleEnabled("perfSharedGeometryCaches"))
-                return new THREE.BoxGeometry(safeSize[0], safeSize[1], safeSize[2]);
-            const key = `box:${makeRoundedNumberKey(safeSize)}`;
+                return new THREE.BoxGeometry(sx, sy, sz);
+            const key = isDeveloperToggleEnabled("perfOverlayGeometryKeyDirect") ? `box:${roundNumberForCacheKey(sx)}:${roundNumberForCacheKey(sy)}:${roundNumberForCacheKey(sz)}` : `box:${makeRoundedNumberKey([sx, sy, sz])}`;
             const cache = getOverlayGeometryCache();
             const cached = cache.get(key);
             if (cached)
                 return cached;
-            const geometry = new THREE.BoxGeometry(safeSize[0], safeSize[1], safeSize[2]);
+            const geometry = new THREE.BoxGeometry(sx, sy, sz);
             markSharedResource(geometry, "overlay-box-geometry");
             return rememberLimitedCache(cache, key, geometry, CUSTOM_BUILDING_PERF.overlayGeometryCacheSize);
         }
@@ -7485,7 +7529,7 @@
             const safeSegments = Math.max(3, Math.min(32, Math.round(Number(segments) || 16)));
             if (!isDeveloperToggleEnabled("perfSharedGeometryCaches"))
                 return new THREE.CylinderGeometry(top, bottom, safeHeight, safeSegments);
-            const key = `cylinder:${makeRoundedNumberKey([top, bottom, safeHeight])}:${safeSegments}`;
+            const key = isDeveloperToggleEnabled("perfOverlayGeometryKeyDirect") ? `cylinder:${roundNumberForCacheKey(top)}:${roundNumberForCacheKey(bottom)}:${roundNumberForCacheKey(safeHeight)}:${safeSegments}` : `cylinder:${makeRoundedNumberKey([top, bottom, safeHeight])}:${safeSegments}`;
             const cache = getOverlayGeometryCache();
             const cached = cache.get(key);
             if (cached)
@@ -10088,8 +10132,21 @@
 
         function createAirportOverlay(airport, existingKeys) {
             const overlay = ensureRuntimeOverlayGroup();
-            if (!overlay || existingKeys && existingKeys.has(airport.key) || !existingKeys && runtimeState.overlayItems.some(item => item.kind === "airport" && item.key === airport.key))
+            if (!overlay || existingKeys && existingKeys.has(airport.key))
                 return;
+            if (!existingKeys) {
+                let duplicate = !1;
+                if (isDeveloperToggleEnabled("perfAirportOverlayDuplicateScan")) {
+                    for (const item of runtimeState.overlayItems)
+                        if (item && "airport" === item.kind && item.key === airport.key) {
+                            duplicate = !0;
+                            break;
+                        }
+                } else
+                    duplicate = runtimeState.overlayItems.some(item => item.kind === "airport" && item.key === airport.key);
+                if (duplicate)
+                    return;
+            }
             const group = new globalState.THREE.Group;
             group.name = `__tmAirport:${airport.key}`;
             const base = airport.center.clone().addScaledVector(airport.side, airport.width / 2 + 58);
@@ -10515,6 +10572,8 @@
                 return;
             runtimeState.overlayTick += dtSeconds;
             const now = performance.now();
+            const playerX = Number(playerPos.x) || 0;
+            const playerZ = Number(playerPos.z) || 0;
             if (now - (Number(runtimeState.overlayCleanupAt) || 0) > CUSTOM_BUILDING_PERF.overlayCleanupIntervalMs) {
                 runtimeState.overlayCleanupAt = now;
                 let writeIndex = 0;
@@ -10535,7 +10594,13 @@
                     continue;
                 if (refreshVisibility || "boolean" != typeof item.__tmVisibleByDistance) {
                     const limit = item.kind === "airport" || item.kind === "aircraft" ? 6500 : item.kind === "birds" ? 1800 : 900;
-                    item.__tmVisibleByDistance = !featureState.overlays || item.data && item.data.active || getDistanceSq2D(playerPos, item.group.position || item.position) <= limit * limit;
+                    if (isDeveloperToggleEnabled("perfOverlayVisibilityDistanceMath")) {
+                        const target = item.group.position || item.position;
+                        const dx = playerX - (Number(target && target.x) || 0);
+                        const dz = playerZ - (Number(target && target.z) || 0);
+                        item.__tmVisibleByDistance = !featureState.overlays || item.data && item.data.active || dx * dx + dz * dz <= limit * limit;
+                    } else
+                        item.__tmVisibleByDistance = !featureState.overlays || item.data && item.data.active || getDistanceSq2D(playerPos, item.group.position || item.position) <= limit * limit;
                 }
                 item.group.visible !== item.__tmVisibleByDistance && (item.group.visible = item.__tmVisibleByDistance);
                 if (!item.group.visible)
@@ -12073,6 +12138,19 @@
                     x: 0,
                     z: 0
                 };
+            if (isDeveloperToggleEnabled("perfFootprintCenterLoop")) {
+                let sumX = 0;
+                let sumZ = 0;
+                for (let index = 0; index < points.length; index++) {
+                    const point = points[index];
+                    sumX += Number(point && point.x) || 0;
+                    sumZ += Number(point && point.z) || 0;
+                }
+                return {
+                    x: sumX / points.length,
+                    z: sumZ / points.length
+                };
+            }
             const center = {
                 x: 0,
                 z: 0
@@ -12185,11 +12263,20 @@
             const samples = [];
             const source = toSafeArray(points);
             const center = getFootprintCenter(source);
-            for (const point of source)
-                samples.push({
-                    x: Number(point.x) || 0,
-                    z: Number(point.z) || 0
-                });
+            if (isDeveloperToggleEnabled("perfFootprintSampleLoop"))
+                for (let index = 0; index < source.length; index++) {
+                    const point = source[index];
+                    samples.push({
+                        x: Number(point && point.x) || 0,
+                        z: Number(point && point.z) || 0
+                    });
+                }
+            else
+                for (const point of source)
+                    samples.push({
+                        x: Number(point.x) || 0,
+                        z: Number(point.z) || 0
+                    });
             for (let index = 0; index < source.length; index++) {
                 const current = source[index];
                 const next = source[(index + 1) % source.length];
@@ -12581,6 +12668,16 @@
         function getFootprintArea(points) {
             if (!Array.isArray(points) || points.length < 3)
                 return 0;
+            if (isDeveloperToggleEnabled("perfFootprintAreaLoop")) {
+                let area = 0;
+                for (let index = 0, nextIndex = 1; index < points.length; index++,
+                nextIndex = index + 1 === points.length ? 0 : index + 1) {
+                    const current = points[index];
+                    const next = points[nextIndex];
+                    area += (Number(current && current.x) || 0) * (Number(next && next.z) || 0) - (Number(next && next.x) || 0) * (Number(current && current.z) || 0);
+                }
+                return Math.abs(area) / 2;
+            }
             let area = 0;
             for (let index = 0; index < points.length; index++) {
                 const current = points[index];
@@ -15300,6 +15397,15 @@
         }
 
         function removeCustomBuildingDoorItemsForChunk(chunk) {
+            if (isDeveloperToggleEnabled("perfDoorItemRemovalInPlace")) {
+                let writeIndex = 0;
+                for (let index = 0; index < runtimeState.customBuildingDoorItems.length; index++) {
+                    const item = runtimeState.customBuildingDoorItems[index];
+                    item && item.chunk !== chunk && (runtimeState.customBuildingDoorItems[writeIndex++] = item);
+                }
+                runtimeState.customBuildingDoorItems.length = writeIndex;
+                return;
+            }
             const kept = [];
             for (const item of runtimeState.customBuildingDoorItems)
                 item && item.chunk !== chunk && kept.push(item);
@@ -15313,6 +15419,15 @@
         }
 
         function removeCustomBuildingOptimizeQueueOverlay(overlay) {
+            if (isDeveloperToggleEnabled("perfOptimizeQueueRemovalInPlace")) {
+                let writeIndex = 0;
+                for (let index = 0; index < runtimeState.customBuildingOptimizeQueue.length; index++) {
+                    const item = runtimeState.customBuildingOptimizeQueue[index];
+                    item && item.overlay !== overlay && (runtimeState.customBuildingOptimizeQueue[writeIndex++] = item);
+                }
+                runtimeState.customBuildingOptimizeQueue.length = writeIndex;
+                return;
+            }
             const kept = [];
             for (const item of runtimeState.customBuildingOptimizeQueue)
                 item && item.overlay !== overlay && kept.push(item);
