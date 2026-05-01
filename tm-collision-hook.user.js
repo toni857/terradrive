@@ -4,7 +4,7 @@
 // @grant        none
 // @run-at       document-start
 // @description  nothing
-// @version      2.2.7.36
+// @version      2.2.7.37
 // @downloadURL  https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // @updateURL    https://toni857.github.io/terradrive/tm-collision-hook.user.js
 // ==/UserScript==
@@ -200,7 +200,7 @@
         };
         const BUNDLE_FILE_RE = /(?:^|\/)index\.js(?:$|[?#])/i;
         const globalState = globalThis.__tmCollisionHookState || (globalThis.__tmCollisionHookState = {
-            version: "2.2.7.36",
+            version: "2.2.7.37",
             require: null,
             patched: !1,
             patchStarted: !1,
@@ -558,6 +558,42 @@
         }, {
             key: "perfBasicMaterialKey",
             label: "Basic material key",
+            defaultValue: !0
+        }, {
+            key: "perfRouteStepLookupMap",
+            label: "Route-step lookup map",
+            defaultValue: !0
+        }, {
+            key: "perfAutopilotOpenMinScan",
+            label: "Autopilot open min-scan",
+            defaultValue: !0
+        }, {
+            key: "perfAutopilotOutgoingLoops",
+            label: "Autopilot outgoing loops",
+            defaultValue: !0
+        }, {
+            key: "perfChunkPoiKeyCache",
+            label: "Chunk POI key cache",
+            defaultValue: !0
+        }, {
+            key: "perfStartMenuTargetCache",
+            label: "Start-menu target cache",
+            defaultValue: !0
+        }, {
+            key: "perfCullingDistanceMath",
+            label: "Culling distance math",
+            defaultValue: !0
+        }, {
+            key: "perfOptimizeQueuePrune",
+            label: "Optimize queue prune",
+            defaultValue: !0
+        }, {
+            key: "perfDeveloperModuleCache",
+            label: "Developer module cache",
+            defaultValue: !0
+        }, {
+            key: "perfSameEdgeDirectionSelect",
+            label: "Same-edge direction select",
             defaultValue: !0
         }];
         const DEVELOPER_PERFORMANCE_ITEM_BY_KEY = Object.create(null);
@@ -1181,7 +1217,7 @@
             if (!TM_DEVELOPER_MENU_ENABLED || !getDeveloperPerformanceItem(key))
                 return;
             developerState.toggles[key] = !!value;
-            if (/Collision|Culling|Terrain|Auto3d|Window|Geometry|Material|Wall|Overlay|Build|Chunk|Town|Cache|Mission|Airport|Poi|Merge|Detail|Query|Navi|Address|Road|Autopilot|Signature|Traffic/i.test(key)) {
+            if (/Collision|Culling|Terrain|Auto3d|Window|Geometry|Material|Wall|Overlay|Build|Chunk|Town|Cache|Mission|Airport|Poi|Merge|Detail|Query|Navi|Address|Road|Autopilot|Signature|Traffic|Route|Start|Optimize|Queue/i.test(key)) {
                 invalidateWorldCollisionCache();
                 clearCustomBuildingTransientPerfCaches(!0);
             }
@@ -1190,6 +1226,11 @@
         }
 
         function getDeveloperModuleItems() {
+            if (isDeveloperToggleEnabled("perfDeveloperModuleCache") && runtimeState.developerModuleItems && runtimeState.developerModuleItemsKey) {
+                const key = `${Object.keys(runtimeState.moduleDisables || {}).length}:${Object.keys(runtimeState.moduleFaults || {}).length}:${Object.keys(INTERNAL_MODULES).length}`;
+                if (runtimeState.developerModuleItemsKey === key)
+                    return runtimeState.developerModuleItems;
+            }
             const names = new Set(Object.keys(INTERNAL_MODULES));
             for (const name of Object.keys(runtimeState.moduleDisables || {}))
                 names.add(name);
@@ -1205,6 +1246,10 @@
                 });
             }
             items.sort((a, b) => a.label.localeCompare(b.label));
+            if (isDeveloperToggleEnabled("perfDeveloperModuleCache")) {
+                runtimeState.developerModuleItems = items;
+                runtimeState.developerModuleItemsKey = `${Object.keys(runtimeState.moduleDisables || {}).length}:${Object.keys(runtimeState.moduleFaults || {}).length}:${Object.keys(INTERNAL_MODULES).length}`;
+            }
             return items;
         }
 
@@ -1216,6 +1261,7 @@
                 clearInternalModuleFault(name);
             else
                 runtimeState.moduleDisables[name] = !0;
+            runtimeState.developerModuleItemsKey = "";
             saveDeveloperStateToCookies();
             syncDeveloperMenu();
         }
@@ -1295,6 +1341,7 @@
         function clearInternalModuleFault(name) {
             runtimeState.moduleDisables && delete runtimeState.moduleDisables[name];
             runtimeState.moduleFaults && delete runtimeState.moduleFaults[name];
+            runtimeState.developerModuleItemsKey = "";
         }
 
         function clearInternalModuleFaultsForFeature(featureName) {
@@ -1313,6 +1360,7 @@
                 context: context || meta.label,
                 at: Date.now()
             };
+            runtimeState.developerModuleItemsKey = "";
             warn(`Teilfunktion automatisch deaktiviert: ${meta.label}${context ? ` (${context})` : ""}:`, failure);
             printFunctionHealthTable(`module_fault:${name}`);
             notifyRuntime(`${meta.label} wurde wegen einem Fehler deaktiviert.`, "error");
@@ -4878,6 +4926,8 @@
             state.route = [];
             state.routeIndex = 0;
             state.targetRoadMatch = null;
+            state.routeStepByEdge = null;
+            state.routeIndexByKey = null;
         }
 
         function resetAutopilotRoadState(state) {
@@ -5744,13 +5794,37 @@
             return 1;
         }
 
+        function cacheAutopilotRouteLookups(state) {
+            if (!state || !isDeveloperToggleEnabled("perfRouteStepLookupMap") || !Array.isArray(state.route))
+                return;
+            const stepByEdge = new WeakMap;
+            const indexByKey = new Map;
+            for (let index = 0; index < state.route.length; index++) {
+                const step = state.route[index];
+                if (!step || !step.edge)
+                    continue;
+                stepByEdge.has(step.edge) || stepByEdge.set(step.edge, step);
+                indexByKey.set(makeRoadRouteKey(step.edge, step.direction), index);
+            }
+            state.routeStepByEdge = stepByEdge;
+            state.routeIndexByKey = indexByKey;
+        }
+
+        function getAutopilotRouteStepForEdge(state, edge) {
+            if (!state || !edge || !Array.isArray(state.route))
+                return null;
+            if (isDeveloperToggleEnabled("perfRouteStepLookupMap") && state.routeStepByEdge)
+                return state.routeStepByEdge.get(edge) || null;
+            return state.route.find((step => step && step.edge === edge)) || null;
+        }
+
         function setAutopilotRoadMatch(state, match) {
             if (!state || !match)
                 return !1;
             state.edge = match.edge;
             state.segmentIndex = match.segmentIndex;
             state.segmentT = clamp(match.progress, 0, 1);
-            const routeStep = Array.isArray(state.route) && state.route.find((step => step && step.edge === match.edge));
+            const routeStep = getAutopilotRouteStepForEdge(state, match.edge);
             state.direction = routeStep ? routeStep.direction : chooseAutopilotDirection(match, state.targetRoadPosition || state.targetPosition);
             state.snapped = !0;
             state.linking = !1;
@@ -5763,7 +5837,9 @@
             const visitNode = roadNode => {
                 if (!roadNode)
                     return;
-                for (const edge of toSafeArray(roadNode.edges)) {
+                const edges = isDeveloperToggleEnabled("perfAutopilotOutgoingLoops") && Array.isArray(roadNode.edges) ? roadNode.edges : toSafeArray(roadNode.edges);
+                for (let edgeIndex = 0; edgeIndex < edges.length; edgeIndex++) {
+                    const edge = edges[edgeIndex];
                     if (!isRoadEligibleForAutopilot(edge) || edge === previousEdge)
                         continue;
                     if (edge.u === roadNode && canDriveEdgeDirection(edge, 1))
@@ -5779,10 +5855,12 @@
                 }
             };
             visitNode(node);
-            for (const pairedNode of toSafeArray(node && node.pairNodes))
-                visitNode(pairedNode);
-            for (const connectedNode of toSafeArray(node && node.connectNodes))
-                visitNode(connectedNode);
+            const pairNodes = isDeveloperToggleEnabled("perfAutopilotOutgoingLoops") && Array.isArray(node && node.pairNodes) ? node.pairNodes : toSafeArray(node && node.pairNodes);
+            for (let index = 0; index < pairNodes.length; index++)
+                visitNode(pairNodes[index]);
+            const connectNodes = isDeveloperToggleEnabled("perfAutopilotOutgoingLoops") && Array.isArray(node && node.connectNodes) ? node.connectNodes : toSafeArray(node && node.connectNodes);
+            for (let index = 0; index < connectNodes.length; index++)
+                visitNode(connectNodes[index]);
             return candidates;
         }
 
@@ -5848,17 +5926,31 @@
             const targetPoint = targetMatch.point || state.targetRoadPosition;
             const sameEdgeDirections = [1, -1].filter((direction => canDriveEdgeDirection(startMatch.edge, direction)));
             if (startMatch.edge === targetMatch.edge && sameEdgeDirections.length) {
-                const direction = sameEdgeDirections.sort(((a, b) => getTargetDistanceFromEdgeStart(targetMatch, a) - getTargetDistanceFromEdgeStart(targetMatch, b)))[0];
+                let direction;
+                if (isDeveloperToggleEnabled("perfSameEdgeDirectionSelect")) {
+                    const forwardOk = canDriveEdgeDirection(startMatch.edge, 1);
+                    const backwardOk = canDriveEdgeDirection(startMatch.edge, -1);
+                    direction = forwardOk && (!backwardOk || getTargetDistanceFromEdgeStart(targetMatch, 1) <= getTargetDistanceFromEdgeStart(targetMatch, -1)) ? 1 : -1;
+                } else
+                    direction = sameEdgeDirections.sort(((a, b) => getTargetDistanceFromEdgeStart(targetMatch, a) - getTargetDistanceFromEdgeStart(targetMatch, b)))[0];
                 state.route = [{
                     edge: startMatch.edge,
                     direction
                 }];
                 state.routeIndex = 0;
                 state.targetRoadMatch = targetMatch;
+                cacheAutopilotRouteLookups(state);
                 return !0;
             }
             const open = [];
+            const openByKey = isDeveloperToggleEnabled("perfAutopilotOpenMinScan") ? new Map : null;
             const queueState = (entry => {
+                if (openByKey) {
+                    const existing = openByKey.get(entry.key);
+                    existing ? Object.assign(existing, entry) : (openByKey.set(entry.key, entry),
+                    open.push(entry));
+                    return;
+                }
                 const existingIndex = open.findIndex((candidate => candidate.key === entry.key));
                 existingIndex >= 0 ? open[existingIndex] = entry : open.push(entry);
             });
@@ -5887,8 +5979,23 @@
                 });
             }
             for (let guard = 0; open.length && guard < 3200; guard++) {
-                open.sort(((a, b) => a.f - b.f));
-                const current = open.shift();
+                let current;
+                if (isDeveloperToggleEnabled("perfAutopilotOpenMinScan")) {
+                    let bestIndex = 0;
+                    let bestF = Number(open[0] && open[0].f) || 0;
+                    for (let index = 1; index < open.length; index++) {
+                        const f = Number(open[index] && open[index].f) || 0;
+                        if (f < bestF) {
+                            bestF = f;
+                            bestIndex = index;
+                        }
+                    }
+                    current = open.splice(bestIndex, 1)[0];
+                    current && openByKey && openByKey.delete(current.key);
+                } else {
+                    open.sort(((a, b) => a.f - b.f));
+                    current = open.shift();
+                }
                 if (!current)
                     break;
                 if (current.edge === targetMatch.edge) {
@@ -5932,12 +6039,18 @@
             state.route = route;
             state.routeIndex = 0;
             state.targetRoadMatch = targetMatch;
+            cacheAutopilotRouteLookups(state);
             return !!route.length;
         }
 
         function syncAutopilotRouteIndex(state) {
             if (!state || !Array.isArray(state.route) || !state.route.length || !state.edge)
                 return;
+            if (isDeveloperToggleEnabled("perfRouteStepLookupMap") && state.routeIndexByKey) {
+                const routeIndex = state.routeIndexByKey.get(makeRoadRouteKey(state.edge, state.direction));
+                Number.isFinite(routeIndex) && routeIndex >= 0 && (state.routeIndex = routeIndex);
+                return;
+            }
             const routeIndex = state.route.findIndex((step => step && step.edge === state.edge && step.direction === state.direction));
             routeIndex >= 0 && (state.routeIndex = routeIndex);
         }
@@ -6686,14 +6799,31 @@
         }
 
         function findStartMenuTarget() {
+            if (isDeveloperToggleEnabled("perfStartMenuTargetCache")) {
+                const cached = runtimeState.startMenuTargetCache;
+                const now = performance.now();
+                if (cached && cached.target && document.contains(cached.target) && now - (Number(cached.at) || 0) < 900)
+                    return cached.target;
+            }
             const explicitTarget = document.getElementById("start_menu") || document.getElementById("startMenu") || document.querySelector(".start-menu,.startMenu");
-            if (explicitTarget)
+            if (explicitTarget) {
+                isDeveloperToggleEnabled("perfStartMenuTargetCache") && (runtimeState.startMenuTargetCache = {
+                    target: explicitTarget,
+                    at: performance.now()
+                });
                 return explicitTarget;
+            }
             const excludedSelector = "#game_menu,#content_menu,#missionContainer,#menu-container,#special-container,#__tmFeatureMenuSection,#__tmFeatureStartMenuSection,#__tmDeveloperMenuSection";
             const buttons = Array.from(document.querySelectorAll('button,a,[role="button"],input[type="button"],input[type="submit"]'));
             const openMapButton = buttons.find(element => !element.closest(excludedSelector) && /\b(open\s*map|open\s*world|play)\b/i.test(getElementLabelText(element)));
-            if (openMapButton)
-                return openMapButton.closest(".main-buttons,.buttons,.start-menu,.startMenu,.menu,.modal,.dialog,.card,section,main") || openMapButton.parentElement;
+            if (openMapButton) {
+                const target = openMapButton.closest(".main-buttons,.buttons,.start-menu,.startMenu,.menu,.modal,.dialog,.card,section,main") || openMapButton.parentElement;
+                isDeveloperToggleEnabled("perfStartMenuTargetCache") && (runtimeState.startMenuTargetCache = {
+                    target,
+                    at: performance.now()
+                });
+                return target;
+            }
             return null;
         }
 
@@ -8949,7 +9079,21 @@
         }
 
         function chunkPoiKey(chunk) {
-            return `${Math.round(Number(chunk && chunk.cx) || 0)}:${Math.round(Number(chunk && chunk.cz) || 0)}`;
+            const cx = Math.round(Number(chunk && chunk.cx) || 0);
+            const cz = Math.round(Number(chunk && chunk.cz) || 0);
+            if (isDeveloperToggleEnabled("perfChunkPoiKeyCache") && chunk) {
+                const cached = chunk.__tmPoiKeyCache;
+                if (cached && cached.cx === cx && cached.cz === cz)
+                    return cached.key;
+                const key = `${cx}:${cz}`;
+                chunk.__tmPoiKeyCache = {
+                    cx,
+                    cz,
+                    key
+                };
+                return key;
+            }
+            return `${cx}:${cz}`;
         }
 
         function fetchOverpassJson(query) {
@@ -14948,6 +15092,8 @@
                     sphere: new globalState.THREE.Sphere
                 };
             const playerPos = getPlayerPosition();
+            const playerX = Number(playerPos && playerPos.x) || 0;
+            const playerZ = Number(playerPos && playerPos.z) || 0;
             const camera = getRuntimeCamera();
             let frustum = null;
             if (camera && camera.projectionMatrix && camera.matrixWorldInverse) {
@@ -14971,7 +15117,12 @@
                 let visible = !0;
                 if (playerPos) {
                     const limit = CUSTOM_BUILDING_PERF.cullDistance + (overlay.visible ? CUSTOM_BUILDING_PERF.cullDistanceHysteresis : 0) + bounds.radius;
-                    visible = getDistanceSq2D(playerPos, bounds.center) <= limit * limit || isPriorityCustomBuildingChunk(chunk);
+                    if (isDeveloperToggleEnabled("perfCullingDistanceMath")) {
+                        const dx = playerX - (Number(bounds.center && bounds.center.x) || 0);
+                        const dz = playerZ - (Number(bounds.center && bounds.center.z) || 0);
+                        visible = dx * dx + dz * dz <= limit * limit || isPriorityCustomBuildingChunk(chunk);
+                    } else
+                        visible = getDistanceSq2D(playerPos, bounds.center) <= limit * limit || isPriorityCustomBuildingChunk(chunk);
                 }
                 if (visible && frustum) {
                     temp.sphere.set(bounds.center, bounds.radius + 60);
@@ -14991,16 +15142,20 @@
         function queueCustomBuildingOverlayOptimization(chunk, overlay, signature, delayMs=420) {
             if (!chunk || !overlay || !signature || overlay.userData && overlay.userData.tmOptimizedSignature === signature)
                 return;
-            let writeIndex = 0;
-            for (let index = 0; index < runtimeState.customBuildingOptimizeQueue.length; index++) {
-                const item = runtimeState.customBuildingOptimizeQueue[index];
-                const keep = item && item.overlay && item.overlay.parent && item.overlay.userData && item.overlay.userData.tmOptimizedSignature !== item.signature;
-                keep && (runtimeState.customBuildingOptimizeQueue[writeIndex++] = item);
+            if (!(isDeveloperToggleEnabled("perfOptimizeQueuePrune") && !runtimeState.customBuildingOptimizeQueue.length)) {
+                let writeIndex = 0;
+                for (let index = 0; index < runtimeState.customBuildingOptimizeQueue.length; index++) {
+                    const item = runtimeState.customBuildingOptimizeQueue[index];
+                    const keep = item && item.overlay && item.overlay.parent && item.overlay.userData && item.overlay.userData.tmOptimizedSignature !== item.signature;
+                    keep && (runtimeState.customBuildingOptimizeQueue[writeIndex++] = item);
+                }
+                runtimeState.customBuildingOptimizeQueue.length = writeIndex;
+                runtimeState.customBuildingOptimizeQueued = new WeakSet;
+                for (const item of runtimeState.customBuildingOptimizeQueue)
+                    item && item.overlay && runtimeState.customBuildingOptimizeQueued.add(item.overlay);
+            } else {
+                runtimeState.customBuildingOptimizeQueued instanceof WeakSet || (runtimeState.customBuildingOptimizeQueued = new WeakSet);
             }
-            runtimeState.customBuildingOptimizeQueue.length = writeIndex;
-            runtimeState.customBuildingOptimizeQueued = new WeakSet;
-            for (const item of runtimeState.customBuildingOptimizeQueue)
-                item && item.overlay && runtimeState.customBuildingOptimizeQueued.add(item.overlay);
             if (runtimeState.customBuildingOptimizeQueued.has(overlay))
                 return;
             const limit = Math.max(4, CUSTOM_BUILDING_PERF.optimizeQueueLimit);
